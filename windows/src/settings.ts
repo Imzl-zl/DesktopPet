@@ -493,6 +493,34 @@ async function loadBrowseSources(): Promise<RemotePet[]> {
 }
 
 // -------------------------------------------------------------- create ----
+/// Auto-slice preview (mac SpriteSlicer equivalent): show the first row of
+/// detected frames so the user sees how the sheet will animate.
+function showSlicePreview(img: HTMLImageElement) {
+  const wrap = document.getElementById("cr-preview-wrap") as HTMLElement | null;
+  const cv = document.getElementById("cr-preview") as HTMLCanvasElement | null;
+  const info = document.getElementById("cr-preview-info") as HTMLElement | null;
+  if (!wrap || !cv || !info) return;
+  const clips = slice(img);
+  const rows = clips.length;
+  const frames = rows > 0 ? clips[0].length : 0;
+  if (!rows || !frames) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  const ctx = cv.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const pad = 2;
+  const scale = Math.min((cv.height - pad * 2) / clips[0][0].h, 1);
+  clips[0].forEach((r, i) => {
+    const x = pad + i * (r.w * scale + pad * 2);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, r.x, r.y, r.w, r.h, x, pad, r.w * scale, r.h * scale);
+  });
+  info.textContent = `${rows} ${t("rows")} × ${frames} ${t("frames")} — auto-detected`;
+}
+
 function initCreate() {
   const modal = document.getElementById("create-modal") as HTMLElement;
   const name = document.getElementById("cr-name") as HTMLInputElement;
@@ -526,7 +554,13 @@ function initCreate() {
       const reader = new FileReader();
       reader.onload = () => {
         const img = new Image();
-        img.onload = () => { dataUrl = String(reader.result); fileName.textContent = f.name; err.hidden = true; sync(); };
+        img.onload = () => {
+          dataUrl = String(reader.result);
+          fileName.textContent = f.name;
+          err.hidden = true;
+          showSlicePreview(img);
+          sync();
+        };
         img.onerror = () => { err.textContent = t("Could not create this pet. Check that the image is a valid spritesheet."); err.hidden = false; };
         img.src = String(reader.result);
       };

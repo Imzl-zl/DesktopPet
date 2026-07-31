@@ -1457,3 +1457,14 @@ select:focus { border-color: rgba(224,164,88,0.55); }
   box-shadow: 0 0 8px rgba(224,164,88,0.35);
 }
 .care-badge.on { color: #E8B06A; }
+
+/* ---- create-pet slice preview ---- */
+.cr-preview-wrap { margin-top: 10px; }
+.cr-preview-wrap canvas {
+  width: 100%;
+  background: rgba(10, 8, 5, 0.45);
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  image-rendering: pixelated;
+}
+.cr-preview-wrap .cap { margin-top: 4px; }

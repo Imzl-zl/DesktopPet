@@ -2,8 +2,11 @@ import Foundation
 
 /// Minimal in-app event bus, replacing the agent hook socket channel.
 /// Phase 2 producers (DesktopMonitor, ConversationController, ...) publish
-/// `ActivityEvent`s here; the pet layer subscribes. Thread-safe.
-public final class EventBus {
+/// `ActivityEvent`s here; the pet layer subscribes. Thread-safe: all mutable
+/// state is guarded by `lock`, so the class opts out of compiler concurrency
+/// checks via `@unchecked Sendable` (SE-0343: the class itself guarantees
+/// thread safety).
+public final class EventBus: @unchecked Sendable {
     public static let shared = EventBus()
 
     private var subscribers: [UUID: (ActivityEvent) -> Void] = [:]

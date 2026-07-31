@@ -42,6 +42,21 @@ swift build
 swift test
 ```
 
+## Verify the core layer on Windows
+
+No Mac? The pure-logic layer (`DesktopPetCore`: pet care, activity model, mood
+resolution, break clock) is platform-independent and can be compiled and tested
+on Windows. Install the [Swift for Windows toolchain](https://www.swift.org/install/windows/)
+(requires VS 2022 Build Tools + Windows SDK), then in git-bash:
+
+```bash
+./scripts/verify-core-windows.sh
+```
+
+> `swift test` itself currently crashes on Windows (SwiftPM llbuild job bug,
+> see swiftlang/swift-package-manager#6605) — the script builds and runs the
+> 54 core tests with a plain `swiftc` flow instead.
+
 ## Roadmap
 
 - v0.2: Desktop awareness (the pet reacts to which app you're using) + chat with local/cloud multimodal models.

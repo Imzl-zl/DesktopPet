@@ -71,7 +71,6 @@ struct MenuContentView: View {
     @ObservedObject private var imagePets = ImagePetStore.shared
 
     private var careSection: some View {
-        let state = care.current
         let level = care.level
         let idx = min(care.stageIndex, Theme.stageColors.count - 1)
         let color = Theme.stageColors[idx].top

@@ -53,8 +53,9 @@ final class PetWindowController: ObservableObject {
             self?.remeasureAll()
         }
 
-        // On agent rows added/removed, re-measure after SwiftUI relayouts.
-        chatLineCancellable = PetController.shared.$chatLineCount.sink { [weak self] _ in
+        // On chat line changes (bubble text grows/shrinks), re-measure after
+        // SwiftUI relayouts.
+        chatLineCancellable = PetController.shared.$chatLine.sink { [weak self] _ in
             self?.remeasureAll()
         }
 

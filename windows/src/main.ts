@@ -73,10 +73,10 @@ function applyBubble() {
   const r = document.documentElement.style;
   if (theme === "light") {
     r.setProperty("--bubble-bg", `rgba(255,255,255,${op})`);
-    r.setProperty("--bubble-fg", "#1a1d2e");
+    r.setProperty("--bubble-fg", "#3A2C1A");
     r.setProperty("--bubble-border", "rgba(0,0,0,0.08)");
   } else {
-    r.setProperty("--bubble-bg", `rgba(22,24,38,${op})`);
+    r.setProperty("--bubble-bg", `rgba(26,20,13,${op})`);
     r.setProperty("--bubble-fg", "#ffffff");
     r.setProperty("--bubble-border", "rgba(255,255,255,0.10)");
   }

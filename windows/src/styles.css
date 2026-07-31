@@ -276,6 +276,22 @@ body.floating-ball-body { overflow: hidden; }
               filter 0.18s ease;
 }
 
+/* While an OS drag is in flight the window follows the cursor and may leave
+   the screen edge; the hover shadow transition would flash as the cursor
+   exits/enters the orb. Freeze the look during drags. */
+.floating-ball-body #ball.dragging,
+.floating-ball-body #ball.dragging:hover {
+  transition: none;
+  transform: none;
+  box-shadow:
+    0 3px 9px rgba(0, 0, 0, 0.45),
+    0 1px 4px rgba(0, 0, 0, 0.35),
+    inset 0 1.5px 1.5px rgba(255, 255, 255, 0.18),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.12);
+  cursor: grabbing;
+}
+
 /* ball-breathe animation removed: same compositor cost as bob. The ball is a
    small static orb — it doesn't need a breathing animation to look alive. */
 .floating-ball-body #ball:hover {
@@ -1236,6 +1252,29 @@ body.pop {
 ::-webkit-scrollbar-corner { background: transparent; }
 
 /* ---- Care tab (tamagotchi HUD) ---- */
+
+/* Care feed row (manual feeding for the pure-pet edition). */
+.care-feed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 10px;
+}
+.care-feed-row button.prominent {
+  border: none;
+  border-radius: 10px;
+  padding: 7px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #7c5cff, #5a3fd6);
+  box-shadow: 0 4px 14px rgba(124, 92, 255, 0.35);
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.care-feed-row button.prominent:hover { opacity: 0.9; transform: translateY(-1px); }
+.care-feed-row button.prominent:active { transform: translateY(0); }
+.care-feed-row .cap { color: var(--txt-dim, #8a93a6); font-size: 12px; }
 .care-hud { display: flex; flex-direction: column; gap: 14px; padding: 18px; }
 .care-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .care-id { min-width: 0; }

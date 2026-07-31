@@ -234,3 +234,12 @@ export function mutate(petId: string, change: (s: CareState) => void): CareState
 export function allStates(): Store {
   return load();
 }
+
+/// Feed through a care mutation; returns true when the pet leveled up.
+/// The caller decides how to celebrate (bubble flash / chime / notify).
+export function feed(slug: string, change: (s: CareState) => void): boolean {
+  const before = levelForXP(stateFor(slug).xp);
+  mutate(slug, change);
+  const after = levelForXP(stateFor(slug).xp);
+  return after > before;
+}

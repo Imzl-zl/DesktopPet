@@ -64,7 +64,15 @@ function currentPetName(): string {
 }
 function renderCare() {
   const slug = savedSlug();
-  if (!slug) return;
+  const empty = document.getElementById("care-empty");
+  const hud = document.querySelector(".care-hud") as HTMLElement | null;
+  if (!slug) {
+    if (empty) empty.style.display = "";
+    if (hud) hud.style.display = "none";
+    return;
+  }
+  if (empty) empty.style.display = "none";
+  if (hud) hud.style.display = "";
   const s = care.stateFor(slug);
   const internal = care.levelForXP(s.xp);
   const setTxt = (id: string, v: string) => { const el = document.getElementById(id); if (el) el.textContent = v; };
@@ -128,6 +136,19 @@ function setupRename() {
   });
 }
 setupRename();
+
+// Manual feeding (pure-pet interaction: the pet eats a snack on demand).
+const feedBtn = document.getElementById("care-feed-btn") as HTMLButtonElement | null;
+if (feedBtn) {
+  feedBtn.onclick = () => {
+    const slug = savedSlug();
+    if (!slug) return;
+    const leveled = care.feed(slug, (st) => care.recordMeal(st));
+    emit("care-updated", null);
+    if (leveled) emit("quick-bubble", { text: `${t("Level up")}! ${t("Lv")} ${care.displayLevel(care.stateFor(slug).xp)}`, target: "main" });
+    renderCare();
+  };
+}
 
 // Refresh when the pet window feeds the pet, and periodically for the hunger clock.
 listen("care-updated", () => { if (document.querySelector('.page[data-page="care"].sel')) renderCare(); });

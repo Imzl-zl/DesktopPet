@@ -15,8 +15,7 @@ let package = Package(
         .executableTarget(
             name: "desktoppet",
             dependencies: ["DesktopPetCore", .product(name: "Sparkle", package: "Sparkle")],
-            path: "Sources/App",
-
+            path: "Sources/App"
         ),
         .testTarget(
             name: "DesktopPetCoreTests",

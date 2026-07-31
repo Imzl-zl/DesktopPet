@@ -1,0 +1,801 @@
+pub mod sys_windows;
+
+use std::sync::Mutex;
+use std::time::Duration;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+
+/// Tray menu items kept around so the language switcher can re-label them live.
+#[allow(dead_code)] // `tray` is held so the icon stays alive for the app's lifetime
+struct TrayItems {
+    show_pet: tauri::menu::CheckMenuItem<tauri::Wry>,
+    settings: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+    tray: tauri::tray::TrayIcon<tauri::Wry>,
+}
+
+/// The pet's opaque region in physical pixels, relative to the window's top-left.
+/// The frontend reports this (canvas + visible bubble) so the background thread
+/// can make the transparent rest of the window click-through.
+#[derive(Default, Clone)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct HitRect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+/// Per-window hit rects: each pet window (pet, pet-*, pet-extra-*) reports its
+/// own opaque rect so the click-through loop can handle them independently.
+/// Keyed by Tauri window label.
+type HitRectMap = std::collections::HashMap<String, HitRect>;
+
+/// True for labels that are pet overlay windows (need click-through handling).
+/// Covers `pet`, `pet-<projectId>`, `pet-extra-<slug>-<n>`. Excludes
+/// `settings` and `popover`.
+fn is_pet_window(label: &str) -> bool {
+    label == "pet" || label.starts_with("pet-")
+}
+
+/// Append a line to %APPDATA%/DesktopPet/debug.log , lightweight field
+/// diagnostics for the Windows build (no console there).
+fn dlog(msg: &str) {
+    if let Some(p) = dirs::config_dir().map(|d| d.join("DesktopPet").join("debug.log")) {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+            use std::io::Write;
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let _ = writeln!(f, "[{ts}] {msg}");
+        }
+    }
+}
+
+#[tauri::command]
+fn log_debug(msg: String) {
+    dlog(&msg);
+}
+
+fn pos_file() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("DesktopPet").join("pos"))
+}
+
+fn read_pos() -> Option<(i32, i32)> {
+    let s = std::fs::read_to_string(pos_file()?).ok()?;
+    let (a, b) = s.trim().split_once(',')?;
+    Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+}
+
+fn write_pos(x: i32, y: i32) {
+    if let Some(p) = pos_file() {
+        if let Some(d) = p.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        let _ = std::fs::write(p, format!("{x},{y}"));
+    }
+}
+
+/// Report a pet window's opaque rectangle (physical px, window-relative) so
+/// empty transparent areas of that overlay let clicks pass through to apps
+/// below. Each pet window registers under its own label so multi-pet mode
+/// doesn't have one window overwrite another's click-through rect.
+#[tauri::command]
+fn set_hit_rect(app: tauri::AppHandle, label: String, x: f64, y: f64, w: f64, h: f64) {
+    if let Some(state) = app.try_state::<Mutex<HitRectMap>>() {
+        if let Ok(mut m) = state.lock() {
+            m.insert(label, HitRect { x, y, w, h });
+        }
+    }
+}
+
+fn lang_file() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("DesktopPet").join("lang"))
+}
+
+fn read_lang() -> String {
+    lang_file()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "en".into())
+}
+
+fn write_lang(code: &str) {
+    if let Some(p) = lang_file() {
+        if let Some(d) = p.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        let _ = std::fs::write(p, code);
+    }
+}
+
+/// Localised tray labels (the only app text on the Rust side).
+fn tray_labels(code: &str) -> (&'static str, &'static str, &'static str) {
+    match code {
+        "vi" => ("Hiện pet", "Cài đặt", "Thoát DesktopPet"),
+        "zh" => ("显示宠物", "设置", "退出 DesktopPet"),
+        _ => ("Show pet", "Settings", "Quit DesktopPet"),
+    }
+}
+
+/// Window creation MUST NOT run inside a sync command / menu callback on
+/// Windows (the webview build deadlocks against the blocked event loop), so
+/// every caller goes through this thread-spawning wrapper.
+fn open_settings_impl(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        dlog("open_settings: worker thread");
+        if let Some(w) = app.get_webview_window("settings") {
+            dlog("open_settings: existing window, showing");
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+            return;
+        }
+        match WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("settings.html".into()))
+            .title("DesktopPet")
+            .inner_size(1000.0, 680.0)
+            .min_inner_size(760.0, 560.0)
+            .resizable(true)
+            .build()
+        {
+            Ok(_) => dlog("open_settings: window created"),
+            Err(e) => dlog(&format!("open_settings: BUILD FAILED: {e}")),
+        }
+    });
+}
+
+#[tauri::command]
+async fn open_settings(app: tauri::AppHandle) {
+    dlog("open_settings called");
+    open_settings_impl(app);
+}
+
+/// Logical size of the primary monitor's work area (DPI-divided). Returns a
+/// safe fallback (1920×1080) if the monitor can't be read , spawns must never
+/// land off-screen on display hotplug / headless CI.
+fn primary_work_area(app: &tauri::AppHandle) -> (f64, f64) {
+    app.primary_monitor()
+        .ok()
+        .flatten()
+        .and_then(|m| {
+            let s = m.size();
+            let sf = m.scale_factor();
+            if s.width > 0 && s.height > 0 {
+                Some((s.width as f64 / sf, s.height as f64 / sf))
+            } else {
+                None
+            }
+        })
+        .unwrap_or((1920.0, 1080.0))
+}
+
+/// Open an external link in the default browser (About tab buttons).
+#[tauri::command]
+fn open_url(url: String) {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return;
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("cmd").args(["/c", "start", "", &url]).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&url).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+    }
+}
+
+/// Split-pet: ensure exactly one extra pet window `pet-<projectId>` exists per
+/// configured project, cloning the main pet's chrome. Each loads `index.html`
+/// with a `?project=<id>` query so its script shows only that project. Closing
+/// happens for any `pet-*` window no longer in the list (merge back). With split
+/// off, the frontend calls this with an empty list, so all extras close.
+#[tauri::command]
+fn sync_project_windows(app: tauri::AppHandle, projects: Vec<String>) {
+    use std::collections::HashSet;
+    let want: HashSet<String> = projects.iter().map(|id| format!("pet-{id}")).collect();
+    for (label, win) in app.webview_windows() {
+        if label.starts_with("pet-") && !label.starts_with("pet-extra-") && !want.contains(&label) {
+            let _ = win.close();
+        }
+    }
+    for (i, id) in projects.iter().enumerate() {
+        let label = format!("pet-{id}");
+        if app.get_webview_window(&label).is_some() {
+            continue;
+        }
+        let url = format!("index.html?project={id}");
+        // Cascade project windows near the right edge of the primary screen,
+        // clamped so they never spawn off-screen on small displays.
+        let (sw, sh) = primary_work_area(&app);
+        let x = (sw - 280.0 - (i as f64 + 1.0) * 60.0).max(20.0);
+        let y = (sh - 380.0).max(20.0);
+        let _ = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+            .title("DesktopPet")
+            .inner_size(260.0, 320.0)
+            .position(x, y)
+            .transparent(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .shadow(false)
+            .focused(false)
+            .build();
+    }
+}
+
+/// Label prefix for pure-decoration pet windows (no care/tray logic).
+const EXTRA_PREFIX: &str = "pet-extra-";
+
+/// The floating ball window label. A single instance lives on the desktop as a
+/// stable click target (left = bubble menu, right = Settings) so the user
+/// doesn't have to chase a roaming pet.
+const FLOATING_BALL_LABEL: &str = "floating-ball";
+// The visible orb is 56×56, but the window is 80×80 so shadows and hover
+// scale are not clipped by the square window edges.
+const BALL_W: f64 = 80.0;
+const BALL_H: f64 = 80.0;
+const SNAP_MARGIN: f64 = 4.0; // gap from the screen edge after snapping
+
+fn ball_pos_file() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("DesktopPet").join("ball-pos"))
+}
+fn read_ball_pos() -> Option<(f64, f64)> {
+    let s = std::fs::read_to_string(ball_pos_file()?).ok()?;
+    let (a, b) = s.trim().split_once(',')?;
+    Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+}
+fn write_ball_pos(x: f64, y: f64) {
+    if let Some(p) = ball_pos_file() {
+        if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+        let _ = std::fs::write(p, format!("{x},{y}"));
+    }
+}
+fn ball_visible_file() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("DesktopPet").join("ball-visible"))
+}
+fn read_ball_visible() -> bool {
+    ball_visible_file()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.trim() != "0")
+        .unwrap_or(true)
+}
+fn write_ball_visible(on: bool) {
+    if let Some(p) = ball_visible_file() {
+        if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+        let _ = std::fs::write(p, if on { "1" } else { "0" });
+    }
+}
+
+/// Spawn the floating ball window if it doesn't exist yet. Position is restored
+/// from disk (clamped onto a monitor) or defaulted to the bottom-right corner.
+/// Must be called from a worker thread, like open_settings_impl.
+fn spawn_floating_ball_impl(app: tauri::AppHandle) {
+    if app.get_webview_window(FLOATING_BALL_LABEL).is_some() {
+        return;
+    }
+    let (sw, sh) = primary_work_area(&app);
+    let (x, y) = read_ball_pos()
+        .filter(|&(x, y)| x >= 0.0 && x <= sw && y >= 0.0 && y <= sh)
+        .unwrap_or_else(|| (sw - BALL_W - 24.0, sh - BALL_H - 80.0));
+    let _ = WebviewWindowBuilder::new(
+        &app,
+        FLOATING_BALL_LABEL,
+        WebviewUrl::App("floating-ball.html".into()),
+    )
+    .title("DesktopPet")
+    .inner_size(BALL_W, BALL_H)
+    .position(x.max(0.0), y.max(0.0))
+    .transparent(true)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .shadow(false)
+    .focused(false)
+    .build();
+}
+
+/// Snap the floating ball to the nearest screen edge and persist the position.
+/// Called by the frontend right after the OS-level drag ends. The ball stays
+/// where the user dropped it vertically (when snapping left/right) or
+/// horizontally (when snapping top/bottom), so it doesn't jump wildly.
+#[tauri::command]
+fn snap_floating_ball(app: tauri::AppHandle) {
+    let Some(win) = app.get_webview_window(FLOATING_BALL_LABEL) else { return };
+    let Ok(pos) = win.outer_position() else { return };
+    let Ok(Some(mon)) = win.current_monitor() else { return };
+    let sf = mon.scale_factor();
+    let mp = mon.position();
+    let ms = mon.size();
+    // Logical coordinates: physical px / scale_factor.
+    let wx = pos.x as f64 / sf;
+    let wy = pos.y as f64 / sf;
+    let mon_left = mp.x as f64 / sf;
+    let mon_top = mp.y as f64 / sf;
+    let mon_w = ms.width as f64 / sf;
+    let mon_h = ms.height as f64 / sf;
+    let mon_right = mon_left + mon_w;
+    let mon_bottom = mon_top + mon_h;
+
+    // Distance to each edge (negative = past the edge).
+    let d_left = wx - mon_left;
+    let d_right = mon_right - (wx + BALL_W);
+    let d_top = wy - mon_top;
+    let d_bottom = mon_bottom - (wy + BALL_H);
+
+    let (nx, ny) = if d_left <= d_right && d_left <= d_top && d_left <= d_bottom {
+        // Snap left, keep y (clamped).
+        (mon_left + SNAP_MARGIN, wy.max(mon_top).min(mon_bottom - BALL_H))
+    } else if d_right <= d_top && d_right <= d_bottom {
+        // Snap right, keep y.
+        (mon_right - BALL_W - SNAP_MARGIN, wy.max(mon_top).min(mon_bottom - BALL_H))
+    } else if d_top <= d_bottom {
+        // Snap top, keep x.
+        (wx.max(mon_left).min(mon_right - BALL_W), mon_top + SNAP_MARGIN)
+    } else {
+        // Snap bottom, keep x.
+        (wx.max(mon_left).min(mon_right - BALL_W), mon_bottom - BALL_H - SNAP_MARGIN)
+    };
+
+    let _ = win.set_position(PhysicalPosition::new((nx * sf) as i32, (ny * sf) as i32));
+    write_ball_pos(nx, ny);
+}
+
+#[tauri::command]
+fn set_floating_ball_visible(app: tauri::AppHandle, visible: bool) {
+    write_ball_visible(visible);
+    if visible {
+        // Spawn lazily if missing (e.g. re-enabled after startup with it off).
+        if app.get_webview_window(FLOATING_BALL_LABEL).is_none() {
+            spawn_floating_ball_impl(app);
+        } else if let Some(w) = app.get_webview_window(FLOATING_BALL_LABEL) {
+            let _ = w.show();
+        }
+    } else if let Some(w) = app.get_webview_window(FLOATING_BALL_LABEL) {
+        let _ = w.hide();
+    }
+}
+
+#[tauri::command]
+fn get_floating_ball_visible() -> bool {
+    read_ball_visible()
+}
+
+/// Spawn a pure-decoration pet window that only roams. The frontend loads
+/// `index.html?extra=<slug>` and short-circuits all care/tray wiring.
+/// Same slug may be spawned multiple times (each call opens a new window).
+#[tauri::command]
+async fn spawn_extra_pet(app: tauri::AppHandle, slug: String) -> Result<String, String> {
+    if slug.is_empty() {
+        return Err("empty slug".into());
+    }
+    let (label, n) = next_extra_label(&app, &slug);
+    let url = format!("index.html?extra={slug}");
+    // Cascade extra pets from top-left, clamped to the primary screen so they
+    // never land off-screen on small / HiDPI displays.
+    let (sw, sh) = primary_work_area(&app);
+    let x = (120.0 + (n as f64) * 40.0).min(sw - 280.0).max(20.0);
+    let y = (120.0 + (n as f64) * 40.0).min(sh - 360.0).max(20.0);
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+        .title("DesktopPet")
+        .inner_size(260.0, 320.0)
+        .position(x, y)
+        .transparent(true)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .focused(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(label)
+}
+
+/// Pick the next free label for an extra pet window. Returns (label, index n)
+/// so the caller can offset the spawn position by n*40px to avoid stacking.
+fn next_extra_label(app: &tauri::AppHandle, slug: &str) -> (String, usize) {
+    let mut n = 0;
+    loop {
+        let candidate = format!("{EXTRA_PREFIX}{slug}-{n}");
+        if app.get_webview_window(&candidate).is_none() {
+            return (candidate, n);
+        }
+        n += 1;
+    }
+}
+
+#[tauri::command]
+fn close_extra_pet(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    if !label.starts_with(EXTRA_PREFIX) {
+        return Err("not an extra pet window".into());
+    }
+    if let Some(w) = app.get_webview_window(&label) {
+        w.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Labels of all currently-open extra pet windows, for the Settings list.
+#[tauri::command]
+fn list_extra_pets(app: tauri::AppHandle) -> Vec<String> {
+    app.webview_windows()
+        .keys()
+        .filter(|l| l.starts_with(EXTRA_PREFIX))
+        .cloned()
+        .collect()
+}
+
+/// Persist the chosen language (for the tray on next launch) and re-label the
+/// tray menu items now. Called by the Settings language switcher.
+#[tauri::command]
+fn set_lang(app: tauri::AppHandle, code: String) {
+    write_lang(&code);
+    let (p, s, q) = tray_labels(&code);
+    if let Some(items) = app.try_state::<Mutex<TrayItems>>() {
+        if let Ok(it) = items.lock() {
+            let _ = it.show_pet.set_text(p);
+            let _ = it.settings.set_text(s);
+            let _ = it.quit.set_text(q);
+        }
+    }
+}
+
+#[tauri::command]
+fn get_pet_visible(app: tauri::AppHandle) -> bool {
+    app.get_webview_window("pet")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(true)
+}
+
+/// Show the popover (the macOS menu-bar popover equivalent) near the cursor.
+fn show_popover(app: &tauri::AppHandle) {
+    let win = match app.get_webview_window("popover") {
+        Some(w) => w,
+        None => {
+            match WebviewWindowBuilder::new(app, "popover", WebviewUrl::App("popover.html".into()))
+                .title("DesktopPet")
+                .inner_size(300.0, 430.0)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .resizable(false)
+                .focused(true)
+                .visible(false)
+                .build()
+            {
+                Ok(w) => {
+                    dlog("popover: window created");
+                    // Transient popover: losing focus hides it (Rust-side net,
+                    // independent of the webview's own blur listener).
+                    let wh = w.clone();
+                    w.on_window_event(move |ev| {
+                        if let tauri::WindowEvent::Focused(false) = ev {
+                            let _ = wh.hide();
+                        }
+                    });
+                    w
+                }
+                Err(e) => {
+                    dlog(&format!("popover: BUILD FAILED: {e}"));
+                    return;
+                }
+            }
+        }
+    };
+    // Place near the cursor, clamped onto the monitor under it.
+    if let Ok(cur) = app.cursor_position() {
+        let sf = win.scale_factor().unwrap_or(1.0);
+        let (w, h) = (300.0 * sf, 430.0 * sf);
+        let mut x = cur.x - w / 2.0;
+        let mut y = cur.y - h - 12.0; // prefer above the cursor (tray at bottom)
+        if let Ok(Some(mon)) = app.monitor_from_point(cur.x, cur.y) {
+            let mp = mon.position();
+            let ms = mon.size();
+            if y < mp.y as f64 {
+                y = cur.y + 12.0; // no room above , drop below
+            }
+            x = x.max(mp.x as f64).min(mp.x as f64 + ms.width as f64 - w);
+            y = y.max(mp.y as f64).min(mp.y as f64 + ms.height as f64 - h);
+        }
+        let _ = win.set_position(PhysicalPosition::new(x, y));
+    }
+    let _ = win.show();
+    let _ = win.set_focus();
+    let _ = win.emit("popover-shown", ());
+}
+
+#[tauri::command]
+async fn open_popover(app: tauri::AppHandle) {
+    dlog("open_popover called");
+    std::thread::spawn(move || show_popover(&app));
+}
+
+/// Show/hide the pet overlay (tray toggle , the macOS "Show pet" switch).
+#[tauri::command]
+fn set_pet_visible(app: tauri::AppHandle, visible: bool) {
+    if let Some(win) = app.get_webview_window("pet") {
+        if visible {
+            let _ = win.show();
+        } else {
+            let _ = win.hide();
+        }
+    }
+    if let Some(p) = dirs::config_dir().map(|d| d.join("DesktopPet").join("petvisible")) {
+        let _ = std::fs::write(p, if visible { "1" } else { "0" });
+    }
+    if let Some(items) = app.try_state::<Mutex<TrayItems>>() {
+        if let Ok(it) = items.lock() {
+            let _ = it.show_pet.set_checked(visible);
+        }
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        // Must be the first plugin: a second launch (double-clicking the
+        // shortcut while the app runs) exits immediately and the running
+        // instance opens Settings instead , no duplicate pets.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            open_settings_impl(app.clone());
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .invoke_handler(tauri::generate_handler![
+            open_settings,
+            open_url,
+            sync_project_windows,
+            spawn_extra_pet,
+            close_extra_pet,
+            list_extra_pets,
+            set_lang,
+            set_pet_visible,
+            get_pet_visible,
+            open_popover,
+            log_debug,
+            set_hit_rect,
+            snap_floating_ball,
+            set_floating_ball_visible,
+            get_floating_ball_visible,
+            sys_windows::list_system_windows
+        ])
+        .setup(|app| {
+            app.manage(Mutex::new(HitRectMap::new()));
+
+            // Restore where the user last dragged the pet. First run (no saved
+            // position) parks it near the bottom-right of the primary screen;
+            // the LogicalPosition keeps it on-screen on smaller/HiDPI displays.
+            if let Some(win) = app.get_webview_window("pet") {
+                // Only restore a saved position that still lands on a monitor
+                // (displays may have been unplugged/rearranged since last run).
+                let on_screen = |x: i32, y: i32| {
+                    win.available_monitors().map_or(false, |mons| {
+                        mons.iter().any(|m| {
+                            let p = m.position();
+                            let s = m.size();
+                            x >= p.x
+                                && x < p.x + s.width as i32
+                                && y >= p.y
+                                && y < p.y + s.height as i32
+                        })
+                    })
+                };
+                if let Some((px, py)) = read_pos().filter(|&(x, y)| on_screen(x, y)) {
+                    let _ = win.set_position(PhysicalPosition::new(px, py));
+                } else if let Ok(Some(mon)) = win.primary_monitor() {
+                    let s = mon.scale_factor();
+                    let sz = mon.size();
+                    let x = (sz.width as f64 / s) - 260.0 - 40.0;
+                    let y = (sz.height as f64 / s) - 320.0 - 70.0;
+                    let _ = win.set_position(tauri::LogicalPosition::new(x.max(0.0), y.max(0.0)));
+                }
+            }
+
+            // Background loop: (1) make transparent areas of EACH pet overlay
+            // click-through by toggling cursor-event capture based on whether the
+            // cursor is over that window's opaque rect, and (2) persist the main
+            // pet's position so it survives a restart. Iterates all pet windows
+            // (pet, pet-<project>, pet-extra-<slug>-<n>) so multi-pet mode
+            // doesn't leave dead click-blocking zones around extra pets.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut last_ignore: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+                let mut flip_logs: u32 = 0;
+                let mut last_saved = read_pos();
+                let mut tick: u32 = 0;
+                loop {
+                    // 60ms (≈16Hz): click-through detection doesn't need 33Hz
+                    // polling. The cursor rarely traverses a pet's opaque rect
+                    // in <60ms, and halving the tick rate halves the Win32
+                    // GetCursorPos + GetWindowRect calls per second.
+                    std::thread::sleep(Duration::from_millis(60));
+
+                    // Single cursor read per tick (shared across all pet windows).
+                    let cur = handle.cursor_position();
+
+                    // Snapshot all pet windows once per tick so spawns/closes
+                    // during the loop don't corrupt the iterator.
+                    let wins: Vec<(String, tauri::WebviewWindow)> = handle
+                        .webview_windows()
+                        .into_iter()
+                        .filter(|(label, _)| is_pet_window(label))
+                        .collect();
+
+                    // Snapshot all hit rects in ONE lock acquisition (instead of
+                    // N locks per tick). The clone is ~12 entries × 32 bytes.
+                    let rects: HitRectMap = handle
+                        .try_state::<Mutex<HitRectMap>>()
+                        .and_then(|s| s.lock().ok().map(|m| m.clone()))
+                        .unwrap_or_default();
+
+                    for (label, win) in &wins {
+                        let Ok(wp) = win.outer_position() else { continue };
+                        // Fail-safe: no rect yet (webview still booting) or
+                        // cursor unreadable → keep INTERACTIVE.
+                        let inside = match &cur {
+                            Ok(cur) => match rects.get(label) {
+                                Some(r) if r.w > 0.0 => {
+                                    let rx = cur.x - wp.x as f64;
+                                    let ry = cur.y - wp.y as f64;
+                                    rx >= r.x && rx <= r.x + r.w && ry >= r.y && ry <= r.y + r.h
+                                }
+                                _ => true, // no rect yet → stay interactive
+                            },
+                            Err(_) => true,
+                        };
+                        // ignore_cursor_events = true → clicks pass through.
+                        let ignore = !inside;
+                        if last_ignore.get(label) != Some(&ignore) {
+                            let _ = win.set_ignore_cursor_events(ignore);
+                            last_ignore.insert(label.clone(), ignore);
+                            if flip_logs < 60 {
+                                flip_logs += 1;
+                                let cur_str = cur.as_ref().map_or("err".to_string(), |c| format!("({:.0},{:.0})", c.x, c.y));
+                                dlog(&format!(
+                                    "hit flip: label={label} ignore={ignore} cur={cur_str} win=({},{})",
+                                    wp.x, wp.y
+                                ));
+                            }
+                        }
+                    }
+
+                    // Prune orphan entries for closed windows + save main pet
+                    // position, both throttled to ~1/sec to reduce overhead.
+                    tick = tick.wrapping_add(1);
+                    if tick % 17 == 0 {
+                        let active: std::collections::HashSet<&String> =
+                            wins.iter().map(|(l, _)| l).collect();
+                        if let Some(state) = handle.try_state::<Mutex<HitRectMap>>() {
+                            if let Ok(mut m) = state.lock() {
+                                m.retain(|k, _| active.contains(k));
+                            }
+                        }
+                        last_ignore.retain(|k, _| active.contains(k));
+
+                        // Position saving: main pet only (extra pets are ephemeral).
+                        if let Some(win) = handle.get_webview_window("pet") {
+                            if let Ok(p) = win.outer_position() {
+                                if last_saved != Some((p.x, p.y)) {
+                                    write_pos(p.x, p.y);
+                                    last_saved = Some((p.x, p.y));
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Tray menu , the pet window is frameless, so this is how you reach
+            // Settings or quit the app. Labels start in the saved language; the
+            // Settings switcher re-labels them live via the `set_lang` command.
+            let (p_lbl, s_lbl, q_lbl) = tray_labels(&read_lang());
+            let pet_visible = dirs::config_dir()
+                .map(|d| d.join("DesktopPet").join("petvisible"))
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .map(|s| s.trim() != "0")
+                .unwrap_or(true);
+            // Respect the last hidden state on startup so users who turned off
+            // the main pet don't see it reappear after a relaunch.
+            if !pet_visible {
+                if let Some(win) = app.get_webview_window("pet") {
+                    let _ = win.hide();
+                }
+            }
+            let show_pet_i = tauri::menu::CheckMenuItem::with_id(
+                app, "show_pet", p_lbl, true, pet_visible, None::<&str>)?;
+            let settings_i = MenuItem::with_id(app, "settings", s_lbl, true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", q_lbl, true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_pet_i, &settings_i, &quit_i])?;
+            let mut tray = TrayIconBuilder::new()
+                .tooltip("DesktopPet")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    // Left-click on the tray icon opens Settings; the pet's
+                    // right-click popover covers the quick controls.
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        open_settings_impl(tray.app_handle().clone());
+                    }
+                })
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show_pet" => {
+                        let now_visible = app
+                            .get_webview_window("pet")
+                            .and_then(|w| w.is_visible().ok())
+                            .unwrap_or(true);
+                        set_pet_visible(app.clone(), !now_visible);
+                    }
+                    "settings" => open_settings_impl(app.clone()),
+                    "quit" => app.exit(0),
+                    _ => {}
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            let tray = tray.build(app)?;
+            app.manage(Mutex::new(TrayItems {
+                show_pet: show_pet_i.clone(),
+                settings: settings_i.clone(),
+                quit: quit_i.clone(),
+                tray,
+            }));
+            if !pet_visible {
+                if let Some(win) = app.get_webview_window("pet") {
+                    let _ = win.hide();
+                }
+            }
+
+            dlog("setup complete, tray + loop running");
+            // First run: open Settings so the user knows to pick a pet
+            // (otherwise the pet just sits there silently).
+            let marker = dirs::config_dir().map(|d| d.join("DesktopPet").join(".onboarded"));
+            if let Some(m) = marker {
+                if !m.exists() {
+                    // Call the sync impl directly: open_settings is an async fn
+                    // (Tauri command), so calling it without .await would create
+                    // a Future that's never polled and do nothing.
+                    open_settings_impl(app.handle().clone());
+                    if let Some(parent) = m.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(&m, "1");
+                }
+            }
+
+            // Floating ball: a stable click target that doesn't run away with
+            // the pet. Hidden by config (applies on next launch); spawned in a
+            // worker thread because window creation must not run on the event
+            // loop on Windows (same reason as open_settings_impl).
+            if read_ball_visible() {
+                let app2 = app.handle().clone();
+                std::thread::spawn(move || spawn_floating_ball_impl(app2));
+            }
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running DesktopPet");
+}

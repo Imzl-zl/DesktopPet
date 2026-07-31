@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>DesktopPet</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body class="settings">
+    <div class="shell">
+      <!-- Left sidebar navigation (was a top tabbar) -->
+      <aside class="tabbar">
+        <div class="brand">
+          <span class="ui-ic" data-icon="pet"></span>
+          <span class="brand-text">DesktopPet</span>
+        </div>
+        <button class="tab sel" data-tab="pet">
+          <span class="ui-ic" data-icon="pet"></span>
+          <span id="tab-pet">Pet</span>
+        </button>
+        <button class="tab" data-tab="bubble">
+          <span class="ui-ic" data-icon="chat"></span>
+          <span id="tab-bubble">Bubble</span>
+        </button>
+        <button class="tab" data-tab="care">
+          <span class="ui-ic" data-icon="heart"></span>
+          <span id="tab-care">Care</span>
+        </button>
+        <button class="tab" data-tab="general">
+          <span class="ui-ic" data-icon="settings"></span>
+          <span id="tab-general">General</span>
+        </button>
+        
+      </aside>
+
+      <div class="main-col">
+        <main class="pages">
+          <!-- ================================ PET ================================ -->
+          <div class="page sel" data-page="pet">
+            <header class="page-header">
+              <h1 id="t-pet-title">Your companion</h1>
+              <p id="t-pet-subtitle">Choose, dress up, and animate your desktop pet.</p>
+            </header>
+
+            <div class="group wide">
+              <div class="ghead"><span id="t-ball">Floating ball</span></div>
+              <div class="gcard">
+                <label class="row"><span class="rt"><span id="t-ball-on">Show floating ball</span>
+                  <span class="cap" id="t-ball-on-sub">A draggable ball on your desktop. Left-click for a bubble, right-click for settings. Snaps to screen edges.</span></span>
+                  <input type="checkbox" id="ball-on" /></label>
+              </div>
+            </div>
+
+            <div class="group wide">
+              <div class="gcard hero">
+                <canvas id="hero-thumb" width="84" height="84"></canvas>
+                <div class="hero-meta">
+                  <div class="hero-name" id="pet-current">…</div>
+                  <div class="cap" id="hero-desc"><span id="t-pet-sub">Pick the companion that floats on your desktop.</span></div>
+                  <button class="linklike" id="pet-deselect" style="display:none;align-self:flex-start">Use default pet</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="group wide">
+              <div class="gcard">
+                <label class="row"><span class="rt"><span id="t-show-main">Show main pet</span>
+                  <span class="cap" id="t-show-main-sub">The main pet that earns XP. Uncheck to hide it and use only extra decoration pets.</span></span>
+                  <input type="checkbox" id="show-main-pet" checked /></label>
+              </div>
+            </div>
+
+            <div class="group wide">
+              <div class="ghead" id="t-choose">Choose pet</div>
+              <div class="gcard pad">
+                <div class="search-wrap" id="pet-search-wrap" style="display:none"><span class="mag ui-ic" data-icon="search"></span><input id="pet-search" type="text" placeholder="Search your pets" autocomplete="off" /></div>
+                <div id="lib-empty" class="cap" style="padding: 6px 0" hidden><span id="t-lib-empty">No pets yet. Tap Browse to add one.</span></div>
+                <div id="pet-results" class="pet-results"></div>
+                <div class="pager-nav" id="pet-pager">
+                  <button id="pg-prev">‹</button>
+                  <span id="pg-ind" class="pg-ind"></span>
+                  <button id="pg-next">›</button>
+                </div>
+                <div class="two-btns">
+                  <button class="small-btn" id="open-browse"><span class="ui-ic" data-icon="grid"></span><span id="t-browse">Browse pets…</span></button>
+                  <button class="small-btn" id="open-create"><span class="ui-ic" data-icon="edit"></span><span id="t-create">Create pet…</span></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="ghead"><span id="t-extra">Extra pets on desktop</span></div>
+              <div class="gcard pad">
+                <div class="cap" id="t-extra-sub" style="padding: 6px 0">Pure decoration pets that just float and roam. They don't track tasks or earn XP.</div>
+                <div class="extra-label" id="t-extra-pick">Tap a pet to spawn it on desktop</div>
+                <div id="extra-grid" class="pet-results"></div>
+                <div id="extra-empty" class="cap" style="padding: 8px 0" hidden><span id="t-extra-no">No pets in library yet. Use Browse or Create first.</span></div>
+                <div id="extra-cap-msg" class="cap" style="padding: 8px 0; color: var(--orange)" hidden><span id="t-extra-cap">Desktop limit reached. Close one to spawn more.</span></div>
+                <div id="extra-desktop-wrap" hidden>
+                  <div class="extra-desktop-head">
+                    <span><span id="t-extra-running">On desktop</span> <span id="extra-count" class="dim"></span></span>
+                    <button class="mini" id="extra-close-all"><span id="t-extra-closeall">Close all</span></button>
+                  </div>
+                  <div id="extra-running" class="pet-results"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="ghead" id="t-anims">Animations</div>
+              <div class="gcard pad">
+                <span class="seg" id="anim-mood">
+                  <button data-v="idle" id="am-idle">Idle</button>
+                  <button data-v="working" class="sel" id="am-working">Working</button>
+                  <button data-v="waiting" id="am-waiting">Waiting</button>
+                  <button data-v="done" id="am-done">Done</button>
+                  <button data-v="celebrate" id="am-celebrate">Celebrate</button>
+                </span>
+                <div class="cap" id="t-anim-hint" style="margin: 8px 0 6px">Hover a clip to preview it.</div>
+                <div id="anim-grid" class="anim-grid"></div>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="ghead" id="t-size">Size on screen</div>
+              <div class="gcard">
+                <div class="row"><span class="slider-wrap wide"><input type="range" id="pet-size" min="70" max="130" /><span class="val dim" id="pet-size-val"></span>
+                  <span class="size-presets"><button data-size="80">S</button><button data-size="100">M</button><button data-size="125">L</button></span></span></div>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="ghead" id="t-roam">Roam</div>
+              <div class="gcard">
+                <div class="row"><span id="t-roam-mode">Mode</span>
+                  <select id="roam-mode" class="roam-mode">
+                    <option value="stay" id="t-roam-stay">Stay</option>
+                    <option value="wander" id="t-roam-wander">Wander</option>
+                    <option value="cursor" id="t-roam-cursor">Follow cursor</option>
+                    <option value="climb" id="t-roam-climb">Climb windows</option>
+                  </select></div>
+                <div class="row"><span id="t-roam-speed">Speed</span>
+                  <span class="slider-wrap"><input type="range" id="roam-speed" min="1" max="10" /><span class="val dim" id="roam-speed-val"></span></span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- =============================== BUBBLE ============================== -->
+          <div class="page" data-page="bubble">
+            <header class="page-header">
+              <h1 id="t-bubble-title">Bubble</h1>
+              <p id="t-bubble-subtitle">Appearance, style, and quick messages.</p>
+            </header>
+
+            <div class="group">
+              <div class="ghead" id="t-appearance">Appearance</div>
+              <div class="gcard">
+                <div class="row"><span id="t-theme">Theme</span>
+                  <span class="seg" id="theme" data-key="ap_theme" data-default="dark">
+                    <button data-v="light" id="o-light">Light</button>
+                    <button data-v="dark" id="o-dark">Dark</button>
+                    <button data-v="system" id="o-theme-system">System</button>
+                  </span></div>
+                <div class="row"><span id="t-fontsize">Font size</span>
+                  <span class="seg" id="font-size-seg" data-key="ap_font_size" data-default="12">
+                    <button data-v="10">S</button>
+                    <button data-v="12">M</button>
+                    <button data-v="14">L</button>
+                  </span></div>
+                <div class="row"><span id="t-opacity">Opacity</span>
+                  <span class="slider-wrap"><input type="range" id="opacity" min="60" max="100" /><span class="val dim" id="opacity-val"></span></span></div>
+                <label class="row"><span class="rt"><span id="t-idle">Show idle message</span>
+                  <span class="cap" id="t-idle-sub">The pet's chatter while nothing is happening.</span></span>
+                  <input type="checkbox" id="idle" /></label>
+              </div>
+            </div>
+
+            <div class="group wide" id="bubble-messages-group">
+              <div class="ghead" id="t-messages">Bubble messages</div>
+              <div class="gcard pad">
+                <div class="row tight"><span id="t-msg-src">Messages</span>
+                  <span class="seg" id="msg-src" data-key="ap_msg_src" data-default="system">
+                    <button data-v="system" id="o-ms-system">System</button>
+                    <button data-v="custom" id="o-ms-custom">Custom</button>
+                  </span></div>
+                <div id="msg-custom-wrap">
+<div id="msg-editors"></div>
+                  <div class="row tight"><span class="cap" id="t-msg-help">One message per line; a random one is shown.</span>
+                    <button class="mini" id="msg-reset">Reset to defaults</button></div>
+                </div>
+              </div>
+              
+<div class="group">
+              <div class="ghead" id="t-style">Style</div>
+              <div class="gcard">
+                <div class="row"><span id="t-separator">Separator</span>
+                  <span class="seg" id="bub-sep" data-key="ap_bub_sep" data-default="·">
+                    <button data-v="·">·</button>
+                    <button data-v="→">→</button>
+                    <button data-v="|">|</button>
+                    <button data-v=" " id="o-sep-space">space</button>
+                  </span></div>
+                <div class="row"><span id="t-dotstyle">State dot</span>
+                  <span class="seg" id="bub-dot" data-key="ap_bub_dot" data-default="plain">
+                    <button data-v="plain" id="o-dot-plain">Plain dot</button>
+                  </span></div>
+              </div>
+            </div>
+
+            <div class="group wide">
+              <div class="ghead" id="t-click">Left-click pet</div>
+              <div class="gcard">
+                <div class="row"><span id="t-click-action">Action</span>
+                  <span class="seg" id="left-click" data-key="ap_left_click_action" data-default="none">
+                    <button data-v="none" id="o-lc-none">Off</button>
+                    <button data-v="self" id="o-lc-self">This pet</button>
+                    <button data-v="all" id="o-lc-all">All pets</button>
+                  </span></div>
+                <div class="cap" id="t-click-sub" style="padding: 6px 0">What happens when you left-click a pet without dragging. Uses a random line from your quick bubbles below.</div>
+              </div>
+            </div>
+
+            <div class="group wide">
+              <div class="ghead" id="t-quick">Quick bubbles</div>
+              <div class="gcard pad">
+                <div class="cap" id="t-quick-sub" style="padding: 6px 0">One message per line. Left-click a pet or send from the floating ball to show one at random.</div>
+                <textarea id="quick-bubbles" rows="6" placeholder="Hello!&#10;Coding…&#10;Need a break?" spellcheck="false"></textarea>
+                <div class="row tight"><span class="cap" id="t-quick-help">Shift-click a preset on the floating ball to delete it.</span>
+                  <button class="mini" id="quick-reset">Reset</button></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- =============================== CARE ================================ -->
+          <div class="page" data-page="care">
+            <header class="page-header">
+              <h1 id="t-care-title">Care</h1>
+              <p id="t-care-subtitle">Feed, level up, and check in on your companion.</p>
+            </header>
+
+            <div class="group wide">
+              <div class="ghead" id="t-care-head">Your companion</div>
+              <div class="gcard care-hud">
+                <div class="care-top">
+                  <div class="care-id">
+                    <div class="care-name" id="care-name" title="Click to rename">—</div>
+                    <input class="care-rename" id="care-rename" maxlength="40" style="display:none" />
+                    <div class="care-stage"><b id="care-level">Lv 0</b> · <span id="care-stagename">Hatchling</span></div>
+                  </div>
+                  <div class="care-hunger" id="care-hunger">—</div>
+                </div>
+                <div class="care-bar"><div class="care-bar-fill" id="care-xpfill"></div></div>
+                <div class="care-xprow"><span id="care-xp">0 XP</span><span id="care-tonext" class="dim"></span></div>
+                <div class="care-achhead"><span id="t-care-ach">Achievements</span><span id="care-achcount" class="dim"></span></div>
+                <div class="care-badges" id="care-badges"></div>
+                <div class="care-grid">
+                  <div class="care-stat"><div class="cs-label" id="t-care-today">Today</div><div class="cs-val" id="care-today">0</div><div class="cs-sub" id="care-today-sub">0 snacks</div></div>
+                  <div class="care-stat"><div class="cs-label" id="t-care-streak">Streak</div><div class="cs-val" id="care-streak">0</div><div class="cs-sub" id="care-streak-sub">days fed</div></div>
+                  <div class="care-stat"><div class="cs-label" id="t-care-lifetime">Lifetime</div><div class="cs-val" id="care-lifetime">0</div><div class="cs-sub" id="care-lifetime-sub">XP earned</div></div>
+                  <div class="care-stat"><div class="cs-label" id="t-care-sessions">Sessions</div><div class="cs-val" id="care-sessions">0</div><div class="cs-sub" id="care-sessions-sub">completed</div></div>
+                </div>
+</div>
+              <div class="ghelp" id="t-care-help">Feeding earns XP; your pet levels up through five stages. Chat with it, finish tasks and let it summarize your day.</div>
+            </div>
+          </div>
+
+          <!-- ============================== GENERAL ============================== -->
+          <div class="page" data-page="general">
+            <header class="page-header">
+              <h1 id="t-general-title">General</h1>
+              <p id="t-general-subtitle">Language, launch, notifications, and app info.</p>
+            </header>
+
+            <div class="group">
+              <div class="ghead" id="t-lang">Language</div>
+              <div class="gcard">
+                <div class="row"><span id="t-lang2">Language</span>
+                  <select id="lang">
+                    <option value="en">English</option>
+                    <option value="vi">Tiếng Việt</option>
+                    <option value="zh">中文</option>
+                  </select></div>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="ghead" id="t-startup">Launch</div>
+              <div class="gcard">
+                <label class="row"><span class="rt"><span id="t-autostart">Launch at login</span>
+                  <span class="cap" id="t-autostart-sub">DesktopPet starts automatically when you sign in.</span></span>
+                  <input type="checkbox" id="autostart" /></label>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="ghead" id="t-notif">Notifications</div>
+              <div class="gcard">
+                <label class="row"><span class="rt"><span id="t-notify">Notifications on</span>
+                  <span class="cap" id="t-notify-sub">Alerts when something needs your attention.</span></span>
+                  <input type="checkbox" id="notify" /></label>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="ghead" id="t-motion">Motion</div>
+              <div class="gcard">
+                <label class="row"><span class="rt"><span id="t-reduce-motion">Reduce motion</span>
+                  <span class="cap" id="t-reduce-motion-sub">Disable idle animations and visual effects to lower GPU usage.</span></span>
+                  <input type="checkbox" id="reduce-motion" /></label>
+              </div>
+            </div>
+
+            <div class="group wide">
+              <div class="ghead" id="t-sounds">Sounds</div>
+              <div class="gcard">
+                <div class="sound-block">
+                  <label class="row"><span id="t-sound-done">When a task finishes</span><input type="checkbox" id="sound-done" /></label>
+                  <div class="row tight sound-sub" data-ev="done">
+                    <span class="cap sound-name" id="sound-done-name">Default</span>
+                    <span class="sound-btns">
+                      <button class="mini ic-btn" data-act="play" data-ev="done"><span class="ui-ic" data-icon="play"></span></button>
+                      <button class="mini" data-act="upload" data-ev="done" id="t-up-done">Upload…</button>
+                      <button class="mini" data-act="reset" data-ev="done" id="t-df-done" style="display:none">Default</button>
+                    </span>
+                  </div>
+                </div>
+                <div class="sound-block">
+                  <label class="row"><span id="t-sound-waiting">When your pet needs you</span><input type="checkbox" id="sound-waiting" /></label>
+                  <div class="row tight sound-sub" data-ev="waiting">
+                    <span class="cap sound-name" id="sound-waiting-name">Default</span>
+                    <span class="sound-btns">
+                      <button class="mini ic-btn" data-act="play" data-ev="waiting"><span class="ui-ic" data-icon="play"></span></button>
+                      <button class="mini" data-act="upload" data-ev="waiting" id="t-up-waiting">Upload…</button>
+                      <button class="mini" data-act="reset" data-ev="waiting" id="t-df-waiting" style="display:none">Default</button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="group">
+              <div class="ghead" id="t-app">About</div>
+              <div class="gcard">
+                <div class="row"><span id="t-version">Version</span><span class="dim" id="app-version">0.1.0</span></div>
+                <div class="row center"><button class="quit" id="quit-btn">Quit DesktopPet</button></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- =============================== ADVANCED ============================ -->
+          
+        </main>
+      </div><!-- /main-col -->
+</div><!-- /shell -->
+
+    <!-- Browse pets , searchable gallery to download pets (mac BrowsePetsView) -->
+    <div class="modal-backdrop" id="browse-modal" hidden>
+      <div class="modal browse">
+        <div class="modal-head"><b id="t-bw-title">Browse pets</b><button class="linklike" id="browse-done">Done</button></div>
+        <input id="bw-search" type="text" placeholder="Search pets" autocomplete="off" />
+        <span class="seg bw-seg" id="bw-cat">
+          <button data-v="all" class="sel" id="t-bw-all">All</button>
+          <button data-v="character" id="t-bw-char">Characters</button>
+          <button data-v="creature" id="t-bw-crea">Creatures</button>
+          <button data-v="object" id="t-bw-obj">Objects</button>
+        </span>
+        <div id="bw-status" class="cap center" style="padding: 18px 0">Loading pets…</div>
+        <div id="bw-list" class="bw-list"></div>
+      </div>
+    </div>
+
+    <!-- Create pet (mac CreatePetView) -->
+    <div class="modal-backdrop" id="create-modal" hidden>
+      <div class="modal">
+        <div class="modal-head"><b id="t-cr-title">Create pet</b><button class="linklike" id="create-cancel">Cancel</button></div>
+        <div class="cr-field"><label class="cap" id="t-cr-name">Name</label><input id="cr-name" type="text" autocomplete="off" /></div>
+        <div class="cr-field"><label class="cap" id="t-cr-desc">Description</label><input id="cr-desc" type="text" autocomplete="off" /></div>
+        <div class="cr-field">
+          <label class="cap" id="t-cr-sheet">Spritesheet</label>
+          <div class="cr-file"><span class="cap" id="cr-file-name">No image selected</span>
+            <button class="mini" id="cr-choose">Choose image…</button></div>
+          <div class="cap" id="t-cr-hint">Use the same 8×9 transparent spritesheet format as downloaded pets.</div>
+        </div>
+        <div class="cap" id="cr-error" style="color: var(--red)" hidden></div>
+        <button class="prominent" id="cr-create" disabled>Create</button>
+      </div>
+    </div>
+
+    <!-- Icon picker (mac IconPickerPopover): brand logos + symbol set -->
+    <div class="modal-backdrop" id="icon-modal" hidden>
+      <div class="modal">
+        <div class="modal-head"><b id="icon-modal-title">Icon</b><button class="linklike" id="icon-done">Done</button></div>
+        <div class="cap" id="t-ic-brand">Brand logos</div>
+        <div class="icon-grid" id="ic-brands"></div>
+        <div class="cap" id="t-ic-sym" style="margin-top:10px">Symbols</div>
+        <div class="icon-grid" id="ic-symbols"></div>
+        <div class="row center" style="margin-top:8px"><button class="linklike" id="icon-reset">Reset to default</button></div>
+      </div>
+    </div>
+
+</div>
+
+    <script type="module" src="/src/settings.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,435 @@
+/* DesktopPet , Tiếng Việt */
+
+/* Tabs */
+"General" = "Chung";
+"Pet" = "Thú cưng";
+"Bubble" = "Bong bóng";
+"Care" = "Chăm sóc";
+"Advanced" = "Nâng cao";
+"About" = "Giới thiệu";
+
+/* General / common */
+"Launch" = "Khởi động";
+"Launch at login" = "Khởi động khi đăng nhập";
+"DesktopPet starts automatically when you sign in." = "DesktopPet tự chạy khi bạn đăng nhập.";
+"Notifications" = "Thông báo";
+"Show chat bubble" = "Hiện bong bóng chat";
+"Messages" = "Tin nhắn";
+"System" = "Hệ thống";
+"Custom" = "Tùy chỉnh";
+"One message per line; a random one is shown." = "Mỗi dòng một câu; hiển thị ngẫu nhiên một câu.";
+"Reset to defaults" = "Khôi phục mặc định";
+"Reset to default" = "Khôi phục mặc định";
+"Sounds" = "Âm thanh";
+"Coming soon" = "Sắp có";
+"Enable" = "Bật";
+"Open Settings" = "Mở Cài đặt";
+"Quit DesktopPet" = "Thoát DesktopPet";
+"Upload…" = "Tải lên…";
+"Default" = "Mặc định";
+"Working" = "Đang làm";
+"Waiting" = "Đang chờ";
+"Done" = "Xong";
+"Celebrate" = "Ăn mừng";
+"Idle" = "Rảnh";
+
+/* Bubble tab */
+"Bubble mode" = "Chế độ bong bóng";
+"Structured rows with icons, state dots, and activity messages." = "Các dòng có icon, chấm trạng thái và câu hoạt động.";
+"Appearance" = "Giao diện";
+"Theme" = "Chủ đề";
+"Font size" = "Cỡ chữ";
+"Opacity" = "Độ mờ";
+"Show idle message" = "Hiện câu lúc rảnh";
+"The pet's chatter while nothing is running." = "Câu pet nói khi không có gì đang chạy.";
+"Display" = "Hiển thị";
+"Rows" = "Dòng";
+"Filter" = "Bộ lọc";
+"Include states" = "Gồm trạng thái";
+"Row content" = "Nội dung dòng";
+"Preview" = "Xem trước";
+"Presets" = "Mẫu sẵn";
+"Original" = "Gốc";
+"Standard" = "Tiêu chuẩn";
+"Detailed" = "Chi tiết";
+"Style" = "Kiểu";
+"Separator" = "Dấu phân cách";
+"State dot" = "Chấm trạng thái";
+"Brand logos" = "Logo thương hiệu";
+"SF Symbols" = "SF Symbols";
+"Change…" = "Đổi…";
+"Activity messages" = "Câu hoạt động";
+"Vocabulary" = "Bộ từ";
+"Bubble messages" = "Câu trong bong bóng";
+"Simple bubble" = "Bong bóng đơn giản";
+
+/* About & Pet tab */
+"A desktop companion that keeps you company while you work." = "Một ngườI bạn desktop đồng hành cùng bạn khi làm việc.";
+"A desktop pet that keeps you company while you work." = "Một ngườI bạn desktop đồng hành cùng bạn khi làm việc.";
+"Star on GitHub" = "Star trên GitHub";
+"Join the Discord" = "Tham gia Discord";
+"Buy me a coffee" = "Mời tôi ly cà phê";
+"If DesktopPet helps your workflow, a star means a lot. Thank you!" = "Nếu DesktopPet giúp ích cho bạn, một ngôi sao có ý nghĩa rất lớn. Cảm ơn!";
+"Author" = "Tác giả";
+"Version" = "Phiên bản";
+"Choose pet" = "Chọn thú cưng";
+"Animations" = "Hoạt ảnh";
+"Size on screen" = "Kích thước trên màn hình";
+"Browse pets…" = "Duyệt thú cưng…";
+"Create pet…" = "Tạo thú cưng…";
+"No pets yet. Tap Browse to add one." = "Chưa có thú cưng. Bấm Duyệt để thêm.";
+"Hover a clip to preview it." = "Di chuột lên một clip để xem thử.";
+"No pet selected" = "Chưa chọn thú cưng";
+"State" = "Trạng thái";
+"Pick a pet in the Pet tab" = "Chọn thú cưng ở tab Pet";
+
+/* Bubble pickers / tokens */
+"All rows" = "Tất cả dòng";
+"Carousel" = "Băng chuyền";
+"Compact" = "Thu gọn";
+"All states" = "Tất cả trạng thái";
+"Done and above" = "Done trở lên";
+"Working & Waiting" = "Đang làm & Đang chờ";
+"Working only" = "Chỉ đang làm";
+"One row at a time. Auto-cycles every 3 s — swipe or drag to browse." = "Mỗi lần một dòng. Tự xoay mỗi 3 giây, vuốt hoặc kéo để xem.";
+"Show every row at once, up to the max below." = "Hiện tất cả dòng cùng lúc, tối đa theo số dưới.";
+"Summary header, first two rows, then fold the rest." = "Tiêu đề tóm tắt, hai dòng đầu, phần còn lại gập lại.";
+"Plain dot" = "Chấm thường";
+"Claude style" = "Kiểu Claude";
+"Flat color-coded circle" = "Hình tròn màu phẳng";
+"Spinning ✻ asterisk while active" = "Dấu ✻ xoay khi đang hoạt động";
+"Chat title" = "Tiêu đề chat";
+"Project folder" = "Thư mục dự án";
+"Activity message" = "Câu hoạt động";
+"State label" = "Nhãn trạng thái";
+"Elapsed time" = "Thời gian đã trôi";
+"Title" = "Tiêu đề";
+"Project" = "Dự án";
+"Message" = "Câu";
+"Elapsed" = "Thời gian";
+"Icon" = "Icon";
+"Dot" = "Chấm";
+
+/* Theme & activity vocabulary names */
+"Light" = "Sáng";
+"Dark" = "Tối";
+"Chef" = "Đầu bếp";
+"Engineer" = "Kỹ sư";
+"Wizard" = "Phù thủy";
+"Explorer" = "Nhà thám hiểm";
+"Scientist" = "Nhà khoa học";
+
+/* Demo panel, notifications, sounds, footers */
+"Live preview" = "Xem trực tiếp";
+"Hide live preview" = "Ẩn xem trực tiếp";
+"Preview your pet and bubble settings with live samples." = "Xem trước pet và bong bóng bằng các mẫu thực tế.";
+"Add" = "Thêm";
+"Quick scenarios" = "Kịch bản nhanh";
+"Spawn 3 working" = "Tạo 3 đang làm";
+"Finish all" = "Hoàn tất tất cả";
+"Clear all" = "Xóa tất cả";
+"Preview mood" = "Xem thử trạng thái";
+"Shows your Simple-bubble message for each state." = "Hiện câu Simple-bubble của bạn cho từng trạng thái.";
+"Notifications on" = "Thông báo đang bật";
+"Notifications muted" = "Thông báo đang tắt tiếng";
+"Notifications denied" = "Thông báo bị từ chối";
+"Notifications unavailable" = "Thông báo không khả dụng";
+"Enable notifications" = "Bật thông báo";
+"Available once installed as DesktopPet.app" = "Khả dụng sau khi cài dưới dạng DesktopPet.app";
+"Turn on in System Settings to get alerts" = "Bật trong Cài đặt hệ thống để nhận thông báo";
+"Alerts when something needs your attention." = "Báo khi có việc cần bạn chú ý.";
+"Muted, the toggle turns alerts back on" = "Đang tắt tiếng, gạt công tắc để bật lại";
+"When a task finishes" = "Khi một tác vụ xong";
+"When your pet needs you" = "Khi pet cần bạn";
+"Whimsical phrases shown while something is happening, e.g. \"Brewing…\" or \"Compiling…\"." = "Câu vui hiện khi có việc đang xảy ra, ví dụ \"Brewing…\" hoặc \"Compiling…\".";
+
+/* Pet chat & idle messages */
+"Thinking…" = "Đang nghĩ…";
+"Working on it…" = "Đang làm…";
+"On it!" = "Làm ngay!";
+"Crunching code…" = "Đang cày code…";
+"Hmm, let me see…" = "Hmm, để xem nào…";
+"Cooking something up…" = "Đang nấu món gì đó…";
+"Deep in thought…" = "Đang suy nghĩ sâu…";
+"Brain go brrr…" = "Não chạy hết công suất…";
+"Almost there…" = "Sắp xong rồi…";
+"Wiring it up…" = "Đang ráp nối…";
+"I need you!" = "Cần bạn đây!";
+"Your turn 👀" = "Tới lượt bạn 👀";
+"Waiting on you…" = "Đang chờ bạn…";
+"Can you check this?" = "Bạn xem giúp cái này nhé?";
+"Psst, need input!" = "Suỵt, cần ý kiến!";
+"Awaiting orders…" = "Đang chờ lệnh…";
+"Help me out?" = "Giúp mình với?";
+"Stuck, need you!" = "Kẹt rồi, cần bạn!";
+"All done! ✅" = "Xong hết! ✅";
+"Finished!" = "Hoàn tất!";
+"Ta-da!" = "Ta-da!";
+"Done and dusted!" = "Xong xuôi!";
+"Nailed it!" = "Chuẩn luôn!";
+"That's a wrap!" = "Khép lại nhé!";
+"Mission complete!" = "Hoàn thành nhiệm vụ!";
+"🎉 Woohoo!" = "🎉 Hoan hô!";
+"We did it!" = "Làm được rồi!";
+"Victory!" = "Chiến thắng!";
+"Yesss!" = "Tuyệt vời!";
+"High five! 🙌" = "Đập tay nào! 🙌";
+"Champion!" = "Nhà vô địch!";
+"Let's grill some bugs." = "Đi săn bug nào.";
+"I miss you. Open a branch for me." = "Nhớ bạn quá. Mở một nhánh đi.";
+"Tiny commit, tiny dopamine." = "Commit nhỏ, vui nhỏ.";
+"The build is quiet. Too quiet." = "Build đang im. Im đáng ngờ.";
+"Ship something small. Future you is watching." = "Ship cái gì nhỏ thôi. Bạn của tương lai đang nhìn đấy.";
+"Your TODOs are pretending not to see us." = "Đống TODO đang giả vờ không thấy mình.";
+"Nothing running. Time for a little standby drama." = "Không có gì đang chạy. Đến lúc diễn cảnh chờ rồi.";
+"Turn coffee into code. Carefully." = "Biến cà phê thành code. Cẩn thận nhé.";
+"Open one file. Intimidate it professionally." = "Mở một file. Hù nó một cách chuyên nghiệp.";
+"The repo is calm. Suspicious, but calm." = "Repo đang yên. Đáng ngờ, nhưng yên.";
+"Refactor lightly. Leave with dignity." = "Refactor nhẹ thôi. Rút lui trong danh dự.";
+"One clean diff can fix the whole afternoon." = "Một diff sạch cứu cả buổi chiều.";
+"Waiting for your input" = "Đang chờ bạn nhập";
+"Your turn — over to you" = "Tới lượt bạn";
+"Needs your input" = "Cần bạn nhập";
+
+/* App language picker */
+"Language" = "Ngôn ngữ";
+
+/* App: onboarding, create-pet, browser, menu */
+"A desktop companion that keeps you company while you work. Pick a pet to get started." = "Một ngườI bạn desktop đồng hành cùng bạn khi làm việc. Chọn một pet để bắt đầu.";
+"Added" = "Đã thêm";
+"Browse pets" = "Duyệt thú cưng";
+"Cancel" = "Hủy";
+"Category" = "Danh mục";
+"Choose image…" = "Chọn ảnh…";
+"Community" = "Cộng đồng";
+"Create" = "Tạo";
+"Create pet" = "Tạo thú cưng";
+"Get alerted when something needs your attention." = "Được báo khi có việc cần bạn chú ý.";
+"Get started" = "Bắt đầu";
+"Loading pets…" = "Đang tải thú cưng…";
+"Nothing running right now." = "Hiện không có gì đang chạy.";
+"Pet info" = "Thông tin thú cưng";
+"Pet size" = "Kích thước thú cưng";
+"Retry" = "Thử lại";
+"Spritesheet" = "Spritesheet";
+"Use the same 8×9 transparent spritesheet format as downloaded pets." = "Dùng cùng định dạng spritesheet 8×9 trong suốt như pet tải về.";
+"Welcome to DesktopPet" = "Chào mừng đến với DesktopPet";
+"Pick a pet to get started." = "Chọn một pet để bắt đầu.";
+"Pick your pet" = "Chọn pet của bạn";
+
+/* Codex connection help */
+"Connect Codex" = "Kết nối Codex";
+"Open Terminal and run: codex (launches the Codex CLI)" = "Mở Terminal và chạy: codex (mở Codex CLI)";
+"Quit and reopen Codex (both the CLI and the desktop app)." = "Thoát rồi mở lại Codex (cả CLI lẫn app desktop).";
+"Got it" = "Đã hiểu";
+"How to connect Codex" = "Cách kết nối Codex";
+"Installed , needs a one-time trust (tap ?)" = "Đã cài , cần duyệt một lần (bấm ?)";
+
+/* Care (tamagotchi) */
+"Companion" = "Bạn đồng hành";
+"Hunger" = "Cơn đói";
+"Today" = "Hôm nay";
+"Lifetime" = "Trọn đời";
+"Food sources" = "Nguồn thức ăn";
+"Hatchling" = "Mới nở";
+"Scout" = "Trinh sát";
+"Hero" = "Anh hùng";
+"Legend" = "Huyền thoại";
+"Full" = "No căng";
+"Satisfied" = "Hài lòng";
+"Peckish" = "Hơi đói";
+"Hungry" = "Đói";
+"Starving" = "Đói lả";
+"Last fed %@" = "Ăn lần cuối %@";
+"%@ / %@ XP to next level" = "%@ / %@ XP tới cấp tiếp theo";
+"Full! The daily bowl is empty." = "No rồi! Bát hôm nay đã hết.";
+"Streak" = "Chuỗi ngày";
+"%d days" = "%d ngày";
+"Connected: subscription limits below." = "Đã kết nối: hạn mức gói bên dưới.";
+"Active" = "Đang hoạt động";
+"Connected" = "Đã kết nối";
+"Get it" = "Tải về";
+"left" = "còn lại";
+"Level up! Lv %d ⭐" = "Lên cấp! Lv %d ⭐";
+"Getting hungry… do a little work?" = "Đói rồi… làm chút việc nhé?";
+"A little snack? One small task?" = "Ăn nhẹ chút không? Một task nhỏ thôi?";
+"My tummy is rumbling…" = "Bụng mình đang sôi ùng ục…";
+"Starving… nothing to eat for days…" = "Đói lả… mấy ngày chưa có gì ăn…";
+"Remember me? Your pet? The hungry one?" = "Còn nhớ mình không? Pet của bạn? Đứa đang đói ấy?";
+"Careful… your AI budget is almost gone." = "Cẩn thận… ngân sách AI sắp cạn rồi.";
+"Low fuel: a usage limit is nearly reached!" = "Sắp hết nhiên liệu: một hạn mức sắp chạm trần!";
+"1 day" = "1 ngày";
+
+/* Care v2: per-pet + web sync + popover */
+"Your pet" = "Pet của bạn";
+"Every pet levels up on its own: experience belongs to the companion you raise it with." = "Mỗi pet tự lên cấp: kinh nghiệm thuộc về bạn đồng hành mà bạn nuôi cùng.";
+"All companions" = "Tất cả bạn đồng hành";
+"Each companion keeps its own experience. Switch pets in the Pet tab to raise another one." = "Mỗi bạn đồng hành giữ kinh nghiệm riêng. Đổi pet ở tab Thú cưng để nuôi con khác.";
+"Raising" = "Đang nuôi";
+"Web profile" = "Hồ sơ web";
+"Connected to your profile" = "Đã kết nối với hồ sơ của bạn";
+"Last synced %@" = "Đồng bộ lần cuối %@";
+"Your companions appear on your profile page." = "Các bạn đồng hành sẽ hiện trên trang hồ sơ của bạn.";
+"Disconnect" = "Ngắt kết nối";
+"Show your companions on your web profile" = "Hiện các bạn đồng hành trên hồ sơ web của bạn";
+"Sign in on the site, open your profile, and enter the pairing code here." = "Đăng nhập trên trang web, mở hồ sơ, rồi nhập mã ghép nối vào đây.";
+"Pairing code" = "Mã ghép nối";
+"Connecting…" = "Đang kết nối…";
+"Connect" = "Kết nối";
+"Open profile" = "Mở hồ sơ";
+"Restore" = "Khôi phục";
+"Restoring…" = "Đang khôi phục…";
+"Restored %d pet(s) from the cloud." = "Đã khôi phục %d pet từ cloud.";
+"Already up to date." = "Đã là bản mới nhất.";
+"Restore failed, try again." = "Khôi phục thất bại, thử lại.";
+"Code not recognized. Codes expire after 10 minutes." = "Không nhận ra mã. Mã hết hạn sau 10 phút.";
+"Could not reach the server." = "Không kết nối được máy chủ.";
+"Sync failed, will retry." = "Đồng bộ thất bại, sẽ thử lại.";
+
+/* Care v3: GitHub link + stats popover */
+"Connected as %@" = "Đã kết nối với %@";
+"Your browser opens GitHub sign-in; the app links automatically." = "Trình duyệt sẽ mở đăng nhập GitHub; app tự liên kết.";
+"Sign in with GitHub" = "Đăng nhập bằng GitHub";
+"Last fed" = "Ăn lần cuối";
+
+"Limits" = "Hạn mức";
+"days fed" = "ngày được ăn";
+"completed" = "đã hoàn thành";
+"1 meal" = "1 bữa";
+"%d meals" = "%d bữa";
+
+"Subscription limits" = "Hạn mức gói";
+"Read directly from your Claude Code / Codex sign-ins." = "Đọc trực tiếp từ đăng nhập Claude Code / Codex của bạn.";
+"Read directly from your Claude Code / Codex sign-ins. None found yet." = "Đọc trực tiếp từ đăng nhập Claude Code / Codex. Chưa tìm thấy.";
+"Connected: adds limits for every other provider." = "Đã kết nối: bổ sung hạn mức cho mọi nhà cung cấp khác.";
+
+/* Care v6: quota used + reset */
+"%d%% used" = "đã dùng %d%%";
+"resets in %dd" = "làm mới sau %d ngày";
+"resets in %dh" = "làm mới sau %d giờ";
+"resets in %dm" = "làm mới sau %d phút";
+
+/* Coffee / donate */
+"Thanks for using DesktopPet" = "Cảm ơn bạn đã dùng DesktopPet";
+"It's free and open source. If it makes your day a little nicer, a coffee is always appreciated, never expected." = "App miễn phí và mã nguồn mở. Nếu nó giúp ngày của bạn dễ chịu hơn, một ly cà phê luôn được trân trọng, nhưng không bao giờ bắt buộc.";
+"Quét mã bằng app ngân hàng bất kỳ" = "Quét mã bằng app ngân hàng bất kỳ";
+"Sao chép số tài khoản" = "Sao chép số tài khoản";
+"Close" = "Đóng";
+
+/* Privacy clarity */
+"Connecting is optional. Your pet, its level and all stats live on this Mac whether or not you sign in, nothing leaves your machine until you connect." = "Kết nối là tùy chọn. Pet, cấp độ và mọi số liệu đều nằm trên máy Mac này dù bạn có đăng nhập hay không, không gì rời khỏi máy cho đến khi bạn kết nối.";
+
+/* Coffee methods */
+"International" = "Quốc tế";
+"Việt Nam" = "Việt Nam";
+"Opens buymeacoffee.com in your browser." = "Mở buymeacoffee.com trên trình duyệt.";
+"Quét bằng app ngân hàng bất kỳ (VPBank · NGUYEN THANH DAT)" = "Quét bằng app ngân hàng bất kỳ (VPBank · NGUYEN THANH DAT)";
+
+/* Reactive bubbles — settings */
+"Pet reactive bubbles" = "Bong bóng phản ứng";
+
+/* Reactive bubbles — rate limit */
+"Usage is climbing~" = "Lượng dùng đang tăng~";
+"Take it easy, no rush" = "Từ từ thôi, không vội";
+"Keep an eye on quota" = "Để ý quota nhé";
+"Rate limit running low…" = "Rate limit sắp hết…";
+"Use sparingly!" = "Dùng tiết kiệm nhé!";
+"Quota getting thin" = "Quota không còn nhiều";
+"Almost out of quota 😰" = "Gần hết quota rồi 😰";
+"Maybe take a break…" = "Nghỉ một chút đi…";
+"Quota nearly spent" = "Quota gần cạn";
+
+"Big appetite mode!" = "Chế độ ăn khỏe!";
+"Great appetite today~" = "Hôm nay ăn khỏe quá~";
+"Heavy burn today" = "Hôm nay đốt dữ";
+
+"Parallelism is up" = "Chạy song song khá nhiều";
+"Command center mode 😳" = "Chế độ trung tâm chỉ huy 😳";
+"Full throttle" = "Chạy hết công suất";
+
+/* Reactive bubbles — hunger */
+"A little hungry…" = "Hơi đói…";
+"Hmm… want food" = "Hmm… muốn ăn";
+"Tummy rumbling" = "Bụng đang kêu";
+"Haven't been fed in a while 😢" = "Lâu rồi chưa được cho ăn 😢";
+"Hungry…" = "Đói…";
+"Want food…" = "Muốn ăn…";
+"Where did you go… 😭" = "Bạn đi đâu rồi… 😭";
+"About to faint from hunger" = "Sắp ngất vì đói";
+"So hungry" = "Đói quá";
+
+/* Reactive bubbles — streak */
+"Days in a row! Keep going" = "Mấy ngày liên tục! Cố lên";
+"Going strong~" = "Đang rất tốt~";
+"Keeping it up" = "Giữ vững nhé";
+"A whole week straight!" = "Cả tuần liên tục!";
+"Such persistence~" = "Kiên trì quá~";
+"So consistent" = "Ổn định ghê";
+"Legendary streak!" = "Chuỗi ngày huyền thoại!";
+"Incredible!" = "Quá đỉnh!";
+"Unstoppable" = "Không ai cản nổi";
+
+"Good productivity" = "Năng suất tốt";
+"Got quite a bit done" = "Làm được kha khá";
+"50+!" = "50+!";
+"Super productive" = "Siêu năng suất";
+"Over 100! Not sleeping today?" = "Hơn 100! Hôm nay không ngủ à?";
+"Superhuman" = "Siêu nhân";
+
+/* HUD footer */
+"Settings" = "Cài đặt";
+"Updates" = "Cập nhật";
+"Quit" = "Thoát";
+"Checking…" = "Đang kiểm tra…";
+
+
+/* Achievements + per-project pets + break reminder (PR #27/#28) */
+"First Meal" = "Bữa đầu tiên";
+"Level 5" = "Cấp 5";
+"Level 10" = "Cấp 10";
+"Level 20" = "Cấp 20";
+"Level 35" = "Cấp 35";
+"7-Day Streak" = "Chuỗi 7 ngày";
+"14-Day Streak" = "Chuỗi 14 ngày";
+"30-Day Streak" = "Chuỗi 30 ngày";
+"Night Owl" = "Cú đêm";
+"Reach Level 5" = "Đạt cấp 5";
+"Reach Level 10" = "Đạt cấp 10";
+"Reach Level 20" = "Đạt cấp 20";
+"Reach Level 35 (Legend)" = "Đạt cấp 35 (Huyền thoại)";
+"Feed your pet 7 days in a row" = "Cho pet ăn 7 ngày liên tiếp";
+"Feed your pet 14 days in a row" = "Cho pet ăn 14 ngày liên tiếp";
+"Feed your pet 30 days in a row" = "Cho pet ăn 30 ngày liên tiếp";
+"%d achievements unlocked! 🏆" = "Mở khóa %d thành tựu! 🏆";
+"Achievement unlocked: %@ 🏆" = "Mở khóa thành tựu: %@ 🏆";
+"Achievements" = "Thành tựu";
+"Hover a badge to see how to unlock it" = "Rê chuột vào huy hiệu để xem cách mở khóa";
+"Add a project folder to give it its own pet." = "Thêm thư mục dự án để gán pet riêng.";
+"Add project…" = "Thêm dự án…";
+"Animate pets" = "Hoạt ảnh pet";
+"Animation speed" = "Tốc độ hoạt ảnh";
+"Default pet" = "Pet mặc định";
+"Hide idle project pets" = "Ẩn pet dự án khi rảnh";
+"Level up" = "Lên cấp";
+"Sleepy" = "Buồn ngủ";
+"Model" = "Model";
+"No pets installed" = "Chưa cài pet nào";
+"No project pets yet." = "Chưa có pet dự án nào.";
+"Project pets" = "Pet theo dự án";
+"Remind me to take breaks" = "Nhắc tôi nghỉ giải lao";
+"Show a configured project's pet only while it's working; hide it when idle." = "Chỉ hiện pet của dự án đã cấu hình khi đang chạy; ẩn khi rảnh.";
+"Spawn one pet per active project instead of one shared pet." = "Tạo một pet cho mỗi dự án đang chạy thay vì dùng chung một pet.";
+"Split pet" = "Tách pet";
+"Sprite frame rate. Idle is always capped at 2 fps." = "Tốc độ khung hình sprite. Khi rảnh luôn giới hạn 2 fps.";
+"Sync failed repeatedly. Re-link to retry." = "Đồng bộ thất bại nhiều lần. Liên kết lại để thử lại.";
+"The home pet nudges you to rest after a work stretch." = "Pet chính sẽ nhắc bạn nghỉ sau một quãng làm việc.";
+"Turn off to freeze pet/bubble animation (lower CPU)." = "Tắt để dừng hoạt ảnh pet/bong bóng (giảm CPU).";
+"missing" = "thiếu";
+"Est. cost (Claude)" = "Ước tính chi phí (Claude)";
+"Today %@ · Month %@" = "Hôm nay %@ · Tháng %@";
+"Allow" = "Cho phép";
+"Deny" = "Từ chối";
+"Click to open this terminal" = "Bấm để mở terminal này";
+"Bash approval gate" = "Cổng duyệt Bash";
+"Approve Bash from the bubble" = "Duyệt Bash từ bong bóng";
+"Claude Code Bash requests show Allow/Deny in the bubble instead of the terminal." = "Yêu cầu Bash của Claude Code hiện Cho phép/Từ chối trong bong bóng thay vì ở terminal.";

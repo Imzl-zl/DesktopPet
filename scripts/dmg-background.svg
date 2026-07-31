@@ -1,0 +1,30 @@
+<svg width="660" height="420" viewBox="0 0 660 420" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#241c47"/>
+      <stop offset="1" stop-color="#120e26"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7c6cff" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#7c6cff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="660" height="420" fill="url(#bg)"/>
+  <ellipse cx="330" cy="40" rx="430" ry="240" fill="url(#glow)"/>
+  <circle cx="180" cy="206" r="84" fill="url(#glow)"/>
+  <circle cx="480" cy="206" r="84" fill="url(#glow)"/>
+
+  <!-- wordmark + instruction -->
+  <text x="330" y="84" text-anchor="middle" font-family="-apple-system, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="34" font-weight="700" fill="#ffffff" letter-spacing="0.3">DesktopPet</text>
+  <text x="330" y="116" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="500" fill="#c3bcec">Drag DesktopPet into your Applications folder</text>
+
+  <!-- chevron centered between the two icons (centers x=180 and x=480 -> mid 330) -->
+  <path d="M318 191 L342 206 L318 221" fill="none" stroke="#a99bff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- light name-tag plates so Finder's (always-dark) icon labels read clearly -->
+  <g>
+    <rect x="112" y="271" width="136" height="28" rx="14" fill="#f3f1fb" opacity="0.95"/>
+    <rect x="410" y="271" width="140" height="28" rx="14" fill="#f3f1fb" opacity="0.95"/>
+  </g>
+</svg>

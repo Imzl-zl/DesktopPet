@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+*.moved-aside
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Brainstorm scratch
+.superpowers/
+
+# Cloudflare Pages local dev state
+landing/.wrangler/
+landing/node_modules/
+.wrangler/
+
+# Local AI memory notes (not committed)
+.agent-memory/
+
+# Claude Code local tooling
+.claude/
+
+# Zhanggui orchestration state
+.tasks/

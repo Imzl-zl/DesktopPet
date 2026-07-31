@@ -1,0 +1,38 @@
+import SwiftUI
+import AppKit
+
+struct DesktopPetApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
+    var body: some Scene {
+        // The UI lives in a status-item popover and floating windows managed by
+        // AppDelegate; this empty scene just satisfies the App protocol.
+        Settings { EmptyView() }
+    }
+}
+
+/// Runs the app as a menu bar accessory (no Dock icon) and boots the daemon.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    // Held strongly so the Sparkle updater delegate and background timers are
+    // never deallocated for the lifetime of the app.
+    private var updater: UpdaterController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        _ = AppLanguage.shared   // apply the saved language before any UI renders
+        // Load only the selected pet up front so the menu bar + pet appear at
+        // once; the rest of the library slices in on later run-loop ticks.
+        ImagePetStore.shared.loadFast(priorityID: PetController.shared.selectedPetID)
+        if PetController.shared.selectedPetID == nil {
+            PetController.shared.selectedPetID = ImagePetStore.shared.packs.first?.id
+        }
+        PetController.shared.start()
+        PetWindowController.shared.start()
+        BreakReminderController.shared.start()
+        updater = UpdaterController.shared
+        StatusBarController.shared.start()
+        DefaultPetBootstrap.installIfNeeded()
+        SettingsWindowController.shared.showOnFirstLaunch()
+    }
+}

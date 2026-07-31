@@ -1,0 +1,393 @@
+/* DesktopPet localizable strings , English (base). Keys are the English UI text. */
+
+/* Tabs */
+"General" = "General";
+"Pet" = "Pet";
+"Bubble" = "Bubble";
+"Care" = "Care";
+"Advanced" = "Advanced";
+"About" = "About";
+
+/* General / common */
+"Launch" = "Launch";
+"Launch at login" = "Launch at login";
+"DesktopPet starts automatically when you sign in." = "DesktopPet starts automatically when you sign in.";
+"Notifications" = "Notifications";
+"Show chat bubble" = "Show chat bubble";
+"Messages" = "Messages";
+"System" = "System";
+"Custom" = "Custom";
+"One message per line; a random one is shown." = "One message per line; a random one is shown.";
+"Reset to defaults" = "Reset to defaults";
+"Reset to default" = "Reset to default";
+"Sounds" = "Sounds";
+"Coming soon" = "Coming soon";
+"Enable" = "Enable";
+"Open Settings" = "Open Settings";
+"Quit DesktopPet" = "Quit DesktopPet";
+"Upload…" = "Upload…";
+"Default" = "Default";
+"Working" = "Working";
+"Waiting" = "Waiting";
+"Done" = "Done";
+"Celebrate" = "Celebrate";
+"Idle" = "Idle";
+
+/* Bubble tab */
+"Bubble mode" = "Bubble mode";
+"Structured rows with icons, state dots, and activity messages." = "Structured rows with icons, state dots, and activity messages.";
+"Appearance" = "Appearance";
+"Theme" = "Theme";
+"Font size" = "Font size";
+"Opacity" = "Opacity";
+"Show idle message" = "Show idle message";
+"The pet's chatter while nothing is running." = "The pet's chatter while nothing is running.";
+"Display" = "Display";
+"Rows" = "Rows";
+"Filter" = "Filter";
+"Include states" = "Include states";
+"Row content" = "Row content";
+"Preview" = "Preview";
+"Presets" = "Presets";
+"Original" = "Original";
+"Standard" = "Standard";
+"Detailed" = "Detailed";
+"Style" = "Style";
+"Separator" = "Separator";
+"State dot" = "State dot";
+"Brand logos" = "Brand logos";
+"SF Symbols" = "SF Symbols";
+"Change…" = "Change…";
+"Activity messages" = "Activity messages";
+"Vocabulary" = "Vocabulary";
+"Bubble messages" = "Bubble messages";
+"Simple bubble" = "Simple bubble";
+
+/* About & Pet tab */
+"A desktop companion that keeps you company while you work." = "A desktop companion that keeps you company while you work.";
+"A desktop pet that keeps you company while you work." = "A desktop companion that keeps you company while you work.";
+"Star on GitHub" = "Star on GitHub";
+"Join the Discord" = "Join the Discord";
+"Buy me a coffee" = "Buy me a coffee";
+"If DesktopPet helps your workflow, a star means a lot. Thank you!" = "If DesktopPet helps your workflow, a star means a lot. Thank you!";
+"Author" = "Author";
+"Version" = "Version";
+"Choose pet" = "Choose pet";
+"Animations" = "Animations";
+"Size on screen" = "Size on screen";
+"Browse pets…" = "Browse pets…";
+"Create pet…" = "Create pet…";
+"No pets yet. Tap Browse to add one." = "No pets yet. Tap Browse to add one.";
+"Hover a clip to preview it." = "Hover a clip to preview it.";
+"No pet selected" = "No pet selected";
+"State" = "State";
+"Pick a pet in the Pet tab" = "Pick a pet in the Pet tab";
+
+/* Bubble pickers / tokens */
+"All rows" = "All rows";
+"Carousel" = "Carousel";
+"Compact" = "Compact";
+"All states" = "All states";
+"Done and above" = "Done and above";
+"Working & Waiting" = "Working & Waiting";
+"Working only" = "Working only";
+"One row at a time. Auto-cycles every 3 s — swipe or drag to browse." = "One row at a time. Auto-cycles every 3 s — swipe or drag to browse.";
+"Show every row at once, up to the max below." = "Show every row at once, up to the max below.";
+"Summary header, first two rows, then fold the rest." = "Summary header, first two rows, then fold the rest.";
+"Plain dot" = "Plain dot";
+"Claude style" = "Claude style";
+"Flat color-coded circle" = "Flat color-coded circle";
+"Spinning ✻ asterisk while active" = "Spinning ✻ asterisk while active";
+"Chat title" = "Chat title";
+"Project folder" = "Project folder";
+"Activity message" = "Activity message";
+"State label" = "State label";
+"Elapsed time" = "Elapsed time";
+"Title" = "Title";
+"Project" = "Project";
+"Message" = "Message";
+"Elapsed" = "Elapsed";
+"Icon" = "Icon";
+"Dot" = "Dot";
+
+/* Theme & activity vocabulary names */
+"Light" = "Light";
+"Dark" = "Dark";
+"Chef" = "Chef";
+"Engineer" = "Engineer";
+"Wizard" = "Wizard";
+"Explorer" = "Explorer";
+"Scientist" = "Scientist";
+
+/* Demo panel, notifications, sounds, footers */
+"Live preview" = "Live preview";
+"Hide live preview" = "Hide live preview";
+"Add" = "Add";
+"Quick scenarios" = "Quick scenarios";
+"Spawn 3 working" = "Spawn 3 working";
+"Finish all" = "Finish all";
+"Clear all" = "Clear all";
+"Preview mood" = "Preview mood";
+"Shows your Simple-bubble message for each state." = "Shows your Simple-bubble message for each state.";
+"Notifications on" = "Notifications on";
+"Notifications muted" = "Notifications muted";
+"Notifications denied" = "Notifications denied";
+"Notifications unavailable" = "Notifications unavailable";
+"Enable notifications" = "Enable notifications";
+"Available once installed as DesktopPet.app" = "Available once installed as DesktopPet.app";
+"Turn on in System Settings to get alerts" = "Turn on in System Settings to get alerts";
+"Alerts when something needs your attention." = "Alerts when something needs your attention.";
+"Muted, the toggle turns alerts back on" = "Muted, the toggle turns alerts back on";
+"When a task finishes" = "When a task finishes";
+"When your pet needs you" = "When your pet needs you";
+"Whimsical phrases shown while something is happening, e.g. \"Brewing…\" or \"Compiling…\"." = "Whimsical phrases shown while something is happening, e.g. \"Brewing…\" or \"Compiling…\".";
+
+/* Pet chat & idle messages */
+"Thinking…" = "Thinking…";
+"Working on it…" = "Working on it…";
+"On it!" = "On it!";
+"Crunching code…" = "Crunching code…";
+"Hmm, let me see…" = "Hmm, let me see…";
+"Cooking something up…" = "Cooking something up…";
+"Deep in thought…" = "Deep in thought…";
+"Brain go brrr…" = "Brain go brrr…";
+"Almost there…" = "Almost there…";
+"Wiring it up…" = "Wiring it up…";
+"I need you!" = "I need you!";
+"Your turn 👀" = "Your turn 👀";
+"Waiting on you…" = "Waiting on you…";
+"Can you check this?" = "Can you check this?";
+"Psst, need input!" = "Psst, need input!";
+"Awaiting orders…" = "Awaiting orders…";
+"Help me out?" = "Help me out?";
+"Stuck, need you!" = "Stuck, need you!";
+"All done! ✅" = "All done! ✅";
+"Finished!" = "Finished!";
+"Ta-da!" = "Ta-da!";
+"Done and dusted!" = "Done and dusted!";
+"Nailed it!" = "Nailed it!";
+"That's a wrap!" = "That's a wrap!";
+"Mission complete!" = "Mission complete!";
+"🎉 Woohoo!" = "🎉 Woohoo!";
+"We did it!" = "We did it!";
+"Victory!" = "Victory!";
+"Yesss!" = "Yesss!";
+"High five! 🙌" = "High five! 🙌";
+"Champion!" = "Champion!";
+"Let's grill some bugs." = "Let's grill some bugs.";
+"I miss you. Open a branch for me." = "I miss you. Open a branch for me.";
+"Tiny commit, tiny dopamine." = "Tiny commit, tiny dopamine.";
+"The build is quiet. Too quiet." = "The build is quiet. Too quiet.";
+"Ship something small. Future you is watching." = "Ship something small. Future you is watching.";
+"Your TODOs are pretending not to see us." = "Your TODOs are pretending not to see us.";
+"Nothing running. Time for a little standby drama." = "Nothing running. Time for a little standby drama.";
+"Turn coffee into code. Carefully." = "Turn coffee into code. Carefully.";
+"Open one file. Intimidate it professionally." = "Open one file. Intimidate it professionally.";
+"The repo is calm. Suspicious, but calm." = "The repo is calm. Suspicious, but calm.";
+"Refactor lightly. Leave with dignity." = "Refactor lightly. Leave with dignity.";
+"One clean diff can fix the whole afternoon." = "One clean diff can fix the whole afternoon.";
+"Waiting for your input" = "Waiting for your input";
+"Your turn — over to you" = "Your turn — over to you";
+"Needs your input" = "Needs your input";
+
+/* App language picker */
+"Language" = "Language";
+
+/* App: onboarding, create-pet, browser, menu */
+"A desktop companion that keeps you company while you work. Pick a pet to get started." = "A desktop companion that keeps you company while you work. Pick a pet to get started.";
+"Added" = "Added";
+"Browse pets" = "Browse pets";
+"Cancel" = "Cancel";
+"Category" = "Category";
+"Choose image…" = "Choose image…";
+"Community" = "Community";
+"Create" = "Create";
+"Create pet" = "Create pet";
+"Get alerted when something needs your attention." = "Get alerted when something needs your attention.";
+"Get started" = "Get started";
+"Loading pets…" = "Loading pets…";
+"Nothing running right now." = "Nothing running right now.";
+"Pet info" = "Pet info";
+"Pet size" = "Pet size";
+"Retry" = "Retry";
+"Spritesheet" = "Spritesheet";
+"Use the same 8×9 transparent spritesheet format as downloaded pets." = "Use the same 8×9 transparent spritesheet format as downloaded pets.";
+"Welcome to DesktopPet" = "Welcome to DesktopPet";
+"Pick a pet to get started." = "Pick a pet to get started.";
+"Pick your pet" = "Pick your pet";
+"Preview your pet and bubble settings with live samples." = "Preview your pet and bubble settings with live samples.";
+
+/* Codex connection help */
+"Connect Codex" = "Connect Codex";
+"Open Terminal and run: codex (launches the Codex CLI)" = "Open Terminal and run: codex (launches the Codex CLI)";
+"Quit and reopen Codex (both the CLI and the desktop app)." = "Quit and reopen Codex (both the CLI and the desktop app).";
+"Got it" = "Got it";
+"How to connect Codex" = "How to connect Codex";
+"Installed , needs a one-time trust (tap ?)" = "Installed , needs a one-time trust (tap ?)";
+
+/* Care (tamagotchi) */
+"Companion" = "Companion";
+"Hunger" = "Hunger";
+"Today" = "Today";
+"Lifetime" = "Lifetime";
+"Food sources" = "Food sources";
+"Hatchling" = "Hatchling";
+"Scout" = "Scout";
+"Hero" = "Hero";
+"Legend" = "Legend";
+"Full" = "Full";
+"Satisfied" = "Satisfied";
+"Peckish" = "Peckish";
+"Hungry" = "Hungry";
+"Starving" = "Starving";
+"Last fed %@" = "Last fed %@";
+"%@ / %@ XP to next level" = "%@ / %@ XP to next level";
+"Full! The daily bowl is empty." = "Full! The daily bowl is empty.";
+"Streak" = "Streak";
+"Est. cost (Claude)" = "Est. cost (Claude)";
+"Today %@ · Month %@" = "Today %@ · Month %@";
+"%d days" = "%d days";
+"Connected: subscription limits below." = "Connected: subscription limits below.";
+"Active" = "Active";
+"Connected" = "Connected";
+"Get it" = "Get it";
+"left" = "left";
+"Level up! Lv %d ⭐" = "Level up! Lv %d ⭐";
+"Getting hungry… do a little work?" = "Getting hungry… do a little work?";
+"A little snack? One small task?" = "A little snack? One small task?";
+"My tummy is rumbling…" = "My tummy is rumbling…";
+"Starving… nothing to eat for days…" = "Starving… nothing to eat for days…";
+"Remember me? Your pet? The hungry one?" = "Remember me? Your pet? The hungry one?";
+"Careful… your AI budget is almost gone." = "Careful… your AI budget is almost gone.";
+"Low fuel: a usage limit is nearly reached!" = "Low fuel: a usage limit is nearly reached!";
+"1 day" = "1 day";
+
+/* Care v2: per-pet + web sync + popover */
+"Your pet" = "Your pet";
+"Every pet levels up on its own: experience belongs to the companion you raise it with." = "Every pet levels up on its own: experience belongs to the companion you raise it with.";
+"All companions" = "All companions";
+"Each companion keeps its own experience. Switch pets in the Pet tab to raise another one." = "Each companion keeps its own experience. Switch pets in the Pet tab to raise another one.";
+"Raising" = "Raising";
+"Web profile" = "Web profile";
+"Connected to your profile" = "Connected to your profile";
+"Last synced %@" = "Last synced %@";
+"Your companions appear on your profile page." = "Your companions appear on your profile page.";
+"Disconnect" = "Disconnect";
+"Show your companions on your web profile" = "Show your companions on your web profile";
+"Sign in on the site, open your profile, and enter the pairing code here." = "Sign in on the site, open your profile, and enter the pairing code here.";
+"Pairing code" = "Pairing code";
+"Connecting…" = "Connecting…";
+"Connect" = "Connect";
+"Open profile" = "Open profile";
+"Restore" = "Restore";
+"Restoring…" = "Restoring…";
+"Restored %d pet(s) from the cloud." = "Restored %d pet(s) from the cloud.";
+"Already up to date." = "Already up to date.";
+"Restore failed, try again." = "Restore failed, try again.";
+"Code not recognized. Codes expire after 10 minutes." = "Code not recognized. Codes expire after 10 minutes.";
+"Could not reach the server." = "Could not reach the server.";
+"Sync failed, will retry." = "Sync failed, will retry.";
+
+/* Care v3: GitHub link + stats popover */
+"Connected as %@" = "Connected as %@";
+"Your browser opens GitHub sign-in; the app links automatically." = "Your browser opens GitHub sign-in; the app links automatically.";
+"Sign in with GitHub" = "Sign in with GitHub";
+"Last fed" = "Last fed";
+
+/* Care HUD */
+"Burn, last 7 days" = "Burn, last 7 days";
+"Limits" = "Limits";
+"days fed" = "days fed";
+"completed" = "completed";
+"1 meal" = "1 meal";
+"%d meals" = "%d meals";
+
+"Subscription limits" = "Subscription limits";
+"Read directly from your Claude Code / Codex sign-ins." = "Read directly from your Claude Code / Codex sign-ins.";
+"Read directly from your Claude Code / Codex sign-ins. None found yet." = "Read directly from your Claude Code / Codex sign-ins. None found yet.";
+"Connected: adds limits for every other provider." = "Connected: adds limits for every other provider.";
+
+/* Care v6: quota used + reset */
+"%d%% used" = "%d%% used";
+"resets in %dd" = "resets in %dd";
+"resets in %dh" = "resets in %dh";
+"resets in %dm" = "resets in %dm";
+
+/* Coffee / donate */
+"Thanks for using DesktopPet" = "Thanks for using DesktopPet";
+"It's free and open source. If it makes your day a little nicer, a coffee is always appreciated, never expected." = "It's free and open source. If it makes your day a little nicer, a coffee is always appreciated, never expected.";
+"Quét mã bằng app ngân hàng bất kỳ" = "Scan with any banking app";
+"Sao chép số tài khoản" = "Copy account number";
+"Close" = "Close";
+
+/* Privacy clarity */
+"Connecting is optional. Your pet, its level and all stats live on this Mac whether or not you sign in, nothing leaves your machine until you connect." = "Connecting is optional. Your pet, its level and all stats live on this Mac whether or not you sign in, nothing leaves your machine until you connect.";
+
+/* Coffee methods */
+"International" = "International";
+"Việt Nam" = "Vietnam";
+"Opens buymeacoffee.com in your browser." = "Opens buymeacoffee.com in your browser.";
+"Quét bằng app ngân hàng bất kỳ (VPBank · NGUYEN THANH DAT)" = "Scan with any banking app (VPBank · NGUYEN THANH DAT)";
+
+/* Reactive bubbles — settings */
+"Pet reactive bubbles" = "Pet reactive bubbles";
+
+/* Reactive bubbles — rate limit */
+"Usage is climbing~" = "Usage is climbing~";
+"Take it easy, no rush" = "Take it easy, no rush";
+"Keep an eye on quota" = "Keep an eye on quota";
+"Rate limit running low…" = "Rate limit running low…";
+"Use sparingly!" = "Use sparingly!";
+"Quota getting thin" = "Quota getting thin";
+"Almost out of quota 😰" = "Almost out of quota 😰";
+"Maybe take a break…" = "Maybe take a break…";
+"Quota nearly spent" = "Quota nearly spent";
+
+"Big appetite mode!" = "Big appetite mode!";
+"Great appetite today~" = "Great appetite today~";
+"Heavy burn today" = "Heavy burn today";
+
+"Parallelism is up" = "Parallelism is up";
+"Command center mode 😳" = "Command center mode 😳";
+"Full throttle" = "Full throttle";
+
+/* Reactive bubbles — hunger */
+"A little hungry…" = "A little hungry…";
+"Hmm… want food" = "Hmm… want food";
+"Tummy rumbling" = "Tummy rumbling";
+"Haven't been fed in a while 😢" = "Haven't been fed in a while 😢";
+"Hungry…" = "Hungry…";
+"Want food…" = "Want food…";
+"Where did you go… 😭" = "Where did you go… 😭";
+"About to faint from hunger" = "About to faint from hunger";
+"So hungry" = "So hungry";
+
+/* Reactive bubbles — streak */
+"Days in a row! Keep going" = "Days in a row! Keep going";
+"Going strong~" = "Going strong~";
+"Keeping it up" = "Keeping it up";
+"A whole week straight!" = "A whole week straight!";
+"Such persistence~" = "Such persistence~";
+"So consistent" = "So consistent";
+"Legendary streak!" = "Legendary streak!";
+"Incredible!" = "Incredible!";
+"Unstoppable" = "Unstoppable";
+
+"Good productivity" = "Good productivity";
+"Got quite a bit done" = "Got quite a bit done";
+"50+!" = "50+!";
+"Super productive" = "Super productive";
+"Over 100! Not sleeping today?" = "Over 100! Not sleeping today?";
+"Superhuman" = "Superhuman";
+
+/* HUD footer */
+"Settings" = "Settings";
+"Updates" = "Updates";
+"Quit" = "Quit";
+"Checking…" = "Checking…";
+"Allow" = "Allow";
+"Deny" = "Deny";
+"Click to open this terminal" = "Click to open this terminal";
+"Bash approval gate" = "Bash approval gate";
+"Approve Bash from the bubble" = "Approve Bash from the bubble";
+"Claude Code Bash requests show Allow/Deny in the bubble instead of the terminal." = "Claude Code Bash requests show Allow/Deny in the bubble instead of the terminal.";

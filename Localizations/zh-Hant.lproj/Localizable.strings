@@ -1,0 +1,437 @@
+/* DesktopPet , 正體中文 */
+
+/* Tabs */
+"General" = "通用";
+"Pet" = "寵物";
+"Bubble" = "氣泡";
+"Care" = "養成";
+"Advanced" = "進階";
+"About" = "關於";
+
+/* General / common */
+"Launch" = "啟動";
+"Launch at login" = "登入時啟動";
+"DesktopPet starts automatically when you sign in." = "登入時自動啟動 DesktopPet。";
+"Notifications" = "通知";
+"Show chat bubble" = "顯示聊天氣泡";
+"Messages" = "訊息";
+"System" = "系統";
+"Custom" = "自定義";
+"One message per line; a random one is shown." = "每行一句；隨機顯示其中一句。";
+"Reset to defaults" = "恢復預設";
+"Reset to default" = "恢復預設";
+"Sounds" = "聲音";
+"Coming soon" = "即將推出";
+"Enable" = "啟用";
+"Open Settings" = "開啟設定";
+"Quit DesktopPet" = "退出 DesktopPet";
+"Upload…" = "上傳…";
+"Default" = "預設";
+"Working" = "工作中";
+"Waiting" = "等待中";
+"Done" = "完成";
+"Celebrate" = "慶祝";
+"Idle" = "空閒";
+
+/* Bubble tab */
+"Bubble mode" = "氣泡模式";
+"Structured rows with icons, state dots, and activity messages." = "帶圖示、狀態點和活動訊息的結構化行。";
+"Appearance" = "外觀";
+"Theme" = "主題";
+"Font size" = "字號";
+"Opacity" = "不透明度";
+"Show idle message" = "顯示空閒訊息";
+"The pet's chatter while nothing is running." = "沒有任務執行時寵物的碎碎念。";
+"Display" = "顯示";
+"Rows" = "行";
+"Filter" = "篩選";
+"Include states" = "包含狀態";
+"Row content" = "行內容";
+"Preview" = "預覽";
+"Presets" = "預設";
+"Original" = "原始";
+"Standard" = "標準";
+"Detailed" = "詳細";
+"Style" = "樣式";
+"Separator" = "分隔符";
+"State dot" = "狀態點";
+"Brand logos" = "品牌標誌";
+"SF Symbols" = "SF Symbols";
+"Change…" = "更改…";
+"Activity messages" = "活動訊息";
+"Vocabulary" = "詞彙風格";
+"Bubble messages" = "氣泡訊息";
+"Simple bubble" = "簡單氣泡";
+
+/* About & Pet tab */
+"A desktop companion that keeps you company while you work." = "一個在工作時陪伴你的桌面夥伴。";
+"A desktop pet that keeps you company while you work." = "一個在工作時陪伴你的桌面夥伴。";
+"Star on GitHub" = "在 GitHub 上點亮 Star";
+"Join the Discord" = "加入 Discord";
+"Buy me a coffee" = "請我喝杯咖啡";
+"If DesktopPet helps your workflow, a star means a lot. Thank you!" = "如果 DesktopPet 幫到了你，點個 Star 意義非凡。謝謝！";
+"Author" = "作者";
+"Version" = "版本";
+"Choose pet" = "選擇寵物";
+"Animations" = "動畫";
+"Size on screen" = "螢幕上的大小";
+"Browse pets…" = "瀏覽寵物…";
+"Create pet…" = "建立寵物…";
+"No pets yet. Tap Browse to add one." = "還沒有寵物。點選“瀏覽”來新增。";
+"Hover a clip to preview it." = "將滑鼠懸停在片段上即可預覽。";
+"No pet selected" = "未選擇寵物";
+"State" = "狀態";
+"Pick a pet in the Pet tab" = "在“寵物”標籤中選擇一隻寵物";
+
+/* Bubble pickers / tokens */
+"All rows" = "全部行";
+"Carousel" = "輪播";
+"Compact" = "緊湊";
+"All states" = "所有狀態";
+"Done and above" = "完成及以上";
+"Working & Waiting" = "工作中和等待中";
+"Working only" = "僅工作中";
+"One row at a time. Auto-cycles every 3 s — swipe or drag to browse." = "每次一行，每 3 秒自動輪換，可滑動或拖動瀏覽。";
+"Show every row at once, up to the max below." = "一次顯示所有行，上限見下方。";
+"Summary header, first two rows, then fold the rest." = "摘要標題、前兩行，其餘摺疊。";
+"Plain dot" = "普通圓點";
+"Claude style" = "Claude 風格";
+"Flat color-coded circle" = "扁平彩色圓點";
+"Spinning ✻ asterisk while active" = "活動時旋轉的 ✻ 星號";
+"Chat title" = "聊天標題";
+"Project folder" = "專案資料夾";
+"Activity message" = "活動訊息";
+"State label" = "狀態標籤";
+"Elapsed time" = "已用時間";
+"Title" = "標題";
+"Project" = "專案";
+"Message" = "訊息";
+"Elapsed" = "耗時";
+"Icon" = "圖示";
+"Dot" = "圓點";
+
+/* Theme & activity vocabulary names */
+"Light" = "淺色";
+"Dark" = "深色";
+"Chef" = "廚師";
+"Engineer" = "工程師";
+"Wizard" = "巫師";
+"Explorer" = "探險家";
+"Scientist" = "科學家";
+
+/* Demo panel, notifications, sounds, footers */
+"Live preview" = "實時預覽";
+"Hide live preview" = "隱藏實時預覽";
+"Preview your pet and bubble settings with live samples." = "用實時示例預覽寵物和氣泡設定。";
+"Add" = "新增";
+"Quick scenarios" = "快捷場景";
+"Spawn 3 working" = "生成 3 個工作中";
+"Finish all" = "全部完成";
+"Clear all" = "清除全部";
+"Preview mood" = "預覽狀態";
+"Shows your Simple-bubble message for each state." = "顯示每個狀態下你的簡單氣泡訊息。";
+"Notifications on" = "通知已開啟";
+"Notifications muted" = "通知已靜音";
+"Notifications denied" = "通知被拒絕";
+"Notifications unavailable" = "通知不可用";
+"Enable notifications" = "啟用通知";
+"Available once installed as DesktopPet.app" = "以 DesktopPet.app 安裝後可用";
+"Turn on in System Settings to get alerts" = "在系統設定中開啟以接收提醒";
+"Alerts when something needs your attention." = "有事情需要關注時提醒。";
+"Muted, the toggle turns alerts back on" = "已靜音，撥動開關重新開啟提醒";
+"When a task finishes" = "當任務完成時";
+"When your pet needs you" = "當寵物需要你時";
+"Whimsical phrases shown while something is happening, e.g. \"Brewing…\" or \"Compiling…\"." = "有事情發生時顯示的趣味短語，例如 \"Brewing…\" 或 \"Compiling…\"。";
+
+/* Pet chat & idle messages */
+"Thinking…" = "思考中…";
+"Working on it…" = "處理中…";
+"On it!" = "馬上做！";
+"Crunching code…" = "埋頭敲程式碼…";
+"Hmm, let me see…" = "嗯，讓我看看…";
+"Cooking something up…" = "正在醞釀…";
+"Deep in thought…" = "陷入沉思…";
+"Brain go brrr…" = "大腦高速運轉…";
+"Almost there…" = "快好了…";
+"Wiring it up…" = "正在接線…";
+"I need you!" = "需要你！";
+"Your turn 👀" = "該你了 👀";
+"Waiting on you…" = "在等你…";
+"Can you check this?" = "能幫我看看這個嗎？";
+"Psst, need input!" = "嘿，需要你的輸入！";
+"Awaiting orders…" = "等待指令…";
+"Help me out?" = "幫幫我？";
+"Stuck, need you!" = "卡住了，需要你！";
+"All done! ✅" = "全部完成！✅";
+"Finished!" = "完成！";
+"Ta-da!" = "噠噠！";
+"Done and dusted!" = "大功告成！";
+"Nailed it!" = "搞定！";
+"That's a wrap!" = "收工！";
+"Mission complete!" = "任務完成！";
+"🎉 Woohoo!" = "🎉 哇哦！";
+"We did it!" = "我們做到了！";
+"Victory!" = "勝利！";
+"Yesss!" = "太棒了！";
+"High five! 🙌" = "擊掌！🙌";
+"Champion!" = "冠軍！";
+"Let's grill some bugs." = "來抓幾隻 bug 吧。";
+"I miss you. Open a branch for me." = "想你了，給我開個分支吧。";
+"Tiny commit, tiny dopamine." = "小提交，小確幸。";
+"The build is quiet. Too quiet." = "構建很安靜，安靜得可疑。";
+"Ship something small. Future you is watching." = "釋出點小東西吧，未來的你正看著呢。";
+"Your TODOs are pretending not to see us." = "你的 TODO 正假裝沒看見我們。";
+"Nothing running. Time for a little standby drama." = "沒什麼在跑，鍵盤開始上演待機大戲。";
+"Turn coffee into code. Carefully." = "把咖啡變成程式碼，小心點。";
+"Open one file. Intimidate it professionally." = "開啟一個檔案，專業地震懾它。";
+"The repo is calm. Suspicious, but calm." = "倉庫很平靜。可疑，但平靜。";
+"Refactor lightly. Leave with dignity." = "輕輕重構，體面收場。";
+"One clean diff can fix the whole afternoon." = "一個乾淨的 diff 能救活整個下午。";
+"Waiting for your input" = "等待你的輸入";
+"Your turn — over to you" = "輪到你了";
+"Needs your input" = "需要你的輸入";
+
+/* App language picker */
+"Language" = "語言";
+
+/* App: onboarding, create-pet, browser, menu */
+"A desktop companion that keeps you company while you work. Pick a pet to get started." = "一個在工作時陪伴你的桌面夥伴。選隻寵物即可開始。";
+"Added" = "已新增";
+"Browse pets" = "瀏覽寵物";
+"Cancel" = "取消";
+"Category" = "分類";
+"Choose image…" = "選擇圖片…";
+"Community" = "社群";
+"Create" = "建立";
+"Create pet" = "建立寵物";
+"Get alerted when something needs your attention." = "有事情需要關注時收到提醒。";
+"Get started" = "開始";
+"Loading pets…" = "正在載入寵物…";
+"Nothing running right now." = "當前沒有執行中的內容。";
+"Pet info" = "寵物資訊";
+"Pet size" = "寵物大小";
+"Retry" = "重試";
+"Spritesheet" = "精靈圖";
+"Use the same 8×9 transparent spritesheet format as downloaded pets." = "使用與下載寵物相同的 8×9 透明精靈圖格式。";
+"Welcome to DesktopPet" = "歡迎使用 DesktopPet";
+"Pick a pet to get started." = "選隻寵物開始吧。";
+"Pick your pet" = "挑選你的寵物";
+
+/* Codex connection help */
+"Connect Codex" = "連線 Codex";
+"Open Terminal and run: codex (launches the Codex CLI)" = "開啟終端並執行：codex（啟動 Codex CLI）";
+"Quit and reopen Codex (both the CLI and the desktop app)." = "退出並重新開啟 Codex（CLI 和桌面應用都要）。";
+"Got it" = "知道了";
+"How to connect Codex" = "如何連線 Codex";
+"Installed , needs a one-time trust (tap ?)" = "已安裝 , 需要一次性信任（點選 ?）";
+
+/* Care (tamagotchi) */
+"Companion" = "夥伴";
+"Hunger" = "飢餓度";
+"Today" = "今天";
+"Lifetime" = "累計";
+"Food sources" = "食物來源";
+"Hatchling" = "初生";
+"Scout" = "偵察兵";
+"Hero" = "英雄";
+"Legend" = "傳奇";
+"Full" = "吃飽了";
+"Satisfied" = "滿足";
+"Peckish" = "有點餓";
+"Hungry" = "餓了";
+"Starving" = "餓壞了";
+"Last fed %@" = "上次進食 %@";
+"%@ / %@ XP to next level" = "%@ / %@ 經驗升級";
+"Full! The daily bowl is empty." = "吃飽啦！今天的碗空了。";
+"Streak" = "連續天數";
+"%d days" = "%d 天";
+"Connected: subscription limits below." = "已連線：訂閱額度見下方。";
+"Active" = "已啟用";
+"Connected" = "已連線";
+"Get it" = "去安裝";
+"left" = "剩餘";
+"Level up! Lv %d ⭐" = "升級啦！Lv %d ⭐";
+"Getting hungry… do a little work?" = "有點餓了……做點小工作？";
+"A little snack? One small task?" = "來點小零食？一個小任務就行？";
+"My tummy is rumbling…" = "肚子咕咕叫了……";
+"Starving… nothing to eat for days…" = "餓壞了……好幾天沒吃東西了……";
+"Remember me? Your pet? The hungry one?" = "還記得我嗎？你的寵物？那隻餓著的？";
+"Careful… your AI budget is almost gone." = "小心……你的 AI 預算快用完了。";
+"Low fuel: a usage limit is nearly reached!" = "燃料不足：某個用量額度快到上限了！";
+"1 day" = "1 天";
+
+/* Care v2: per-pet + web sync + popover */
+"Your pet" = "你的寵物";
+"Every pet levels up on its own: experience belongs to the companion you raise it with." = "每隻寵物獨立升級：經驗屬於陪你一起成長的那隻夥伴。";
+"All companions" = "所有夥伴";
+"Each companion keeps its own experience. Switch pets in the Pet tab to raise another one." = "每隻夥伴都有自己的經驗。在寵物標籤頁切換，去養另一隻吧。";
+"Raising" = "養成中";
+"Web profile" = "網頁主頁";
+"Connected to your profile" = "已連線到你的主頁";
+"Last synced %@" = "上次同步 %@";
+"Your companions appear on your profile page." = "你的夥伴會顯示在主頁上。";
+"Disconnect" = "斷開連線";
+"Show your companions on your web profile" = "在網頁主頁上展示你的夥伴";
+"Sign in on the site, open your profile, and enter the pairing code here." = "在網站登入，開啟主頁，然後在這裡輸入配對碼。";
+"Pairing code" = "配對碼";
+"Connecting…" = "連線中……";
+"Connect" = "連線";
+"Open profile" = "開啟主頁";
+"Restore" = "復原";
+"Restoring…" = "正在復原…";
+"Restored %d pet(s) from the cloud." = "已從雲端復原 %d 個寵物。";
+"Already up to date." = "已是最新。";
+"Restore failed, try again." = "復原失敗，請重試。";
+"Code not recognized. Codes expire after 10 minutes." = "無法識別該配對碼。配對碼 10 分鐘後過期。";
+"Could not reach the server." = "無法連線伺服器。";
+"Sync failed, will retry." = "同步失敗，稍後重試。";
+
+/* Care v3: GitHub link + stats popover */
+"Connected as %@" = "已連線為 %@";
+"Your browser opens GitHub sign-in; the app links automatically." = "瀏覽器會開啟 GitHub 登入；應用自動完成關聯。";
+"Sign in with GitHub" = "用 GitHub 登入";
+"Last fed" = "上次進食";
+
+/* Care HUD */
+"Burn, last 7 days" = "近 7 天消耗";
+"Limits" = "額度";
+"days fed" = "天有進食";
+"completed" = "已完成";
+"1 meal" = "1 餐";
+"%d meals" = "%d 餐";
+
+"Subscription limits" = "訂閱額度";
+"Read directly from your Claude Code / Codex sign-ins." = "直接從你的 Claude Code / Codex 登入讀取。";
+"Read directly from your Claude Code / Codex sign-ins. None found yet." = "直接從你的 Claude Code / Codex 登入讀取。暫未找到。";
+"Connected: adds limits for every other provider." = "已連線：補充其他所有服務商的額度。";
+
+/* Care v6: quota used + reset */
+"%d%% used" = "已用 %d%%";
+"resets in %dd" = "%d 天后重置";
+"resets in %dh" = "%d 小時後重置";
+"resets in %dm" = "%d 分鐘後重置";
+
+/* Coffee / donate */
+"Thanks for using DesktopPet" = "感謝使用 DesktopPet";
+"It's free and open source. If it makes your day a little nicer, a coffee is always appreciated, never expected." = "本應用免費開源。如果它讓你的一天更愉快，一杯咖啡總是受歡迎的，但絕不強求。";
+"Quét mã bằng app ngân hàng bất kỳ" = "用任意銀行 App 掃碼";
+"Sao chép số tài khoản" = "複製賬號";
+"Close" = "關閉";
+
+/* Privacy clarity */
+"Connecting is optional. Your pet, its level and all stats live on this Mac whether or not you sign in, nothing leaves your machine until you connect." = "連線是可選的。無論是否登入，寵物、等級和所有資料都儲存在這臺 Mac 上；在你連線之前，任何資料都不會離開本機。";
+
+/* Coffee methods */
+"International" = "國際";
+"Việt Nam" = "越南";
+"Opens buymeacoffee.com in your browser." = "在瀏覽器開啟 buymeacoffee.com。";
+"Quét bằng app ngân hàng bất kỳ (VPBank · NGUYEN THANH DAT)" = "用任意銀行 App 掃碼（VPBank · NGUYEN THANH DAT）";
+
+/* Reactive bubbles — settings */
+"Pet reactive bubbles" = "寵物反應氣泡";
+
+/* Reactive bubbles — rate limit */
+"Usage is climbing~" = "用量開始升喇～";
+"Take it easy, no rush" = "慢慢嚟，唔急";
+"Keep an eye on quota" = "留意下 quota";
+"Rate limit running low…" = "Rate limit 快見底…";
+"Use sparingly!" = "要慳住用喇！";
+"Quota getting thin" = "Quota 唔多喇";
+"Almost out of quota 😰" = "差唔多冇 quota 喇 😰";
+"Maybe take a break…" = "停一停吖…";
+"Quota nearly spent" = "Quota 幾乎用完";
+
+"Big appetite mode!" = "大胃王模式！";
+"Great appetite today~" = "今日胃口好好～";
+"Heavy burn today" = "今日 burn 好勁";
+
+"Parallelism is up" = "並行度唔低";
+"Command center mode 😳" = "指揮中心模式 😳";
+"Full throttle" = "全力運作中";
+
+/* Reactive bubbles — hunger */
+"A little hungry…" = "有少少肚餓…";
+"Hmm… want food" = "嗯…想食嘢";
+"Tummy rumbling" = "肚子打鼓";
+"Haven't been fed in a while 😢" = "好耐冇餵我喇 😢";
+"Hungry…" = "肚餓…";
+"Want food…" = "想食嘢…";
+"Where did you go… 😭" = "你去咗邊… 😭";
+"About to faint from hunger" = "快要餓暈喇";
+"So hungry" = "好肚餓啊";
+
+/* Reactive bubbles — streak */
+"Days in a row! Keep going" = "連續幾日！繼續加油";
+"Going strong~" = "連續好幾日～";
+"Keeping it up" = "堅持緊";
+"A whole week straight!" = "成個禮拜冇斷過！";
+"Such persistence~" = "好有毅力～";
+"So consistent" = "太穩定喇";
+"Legendary streak!" = "傳說級連續！";
+"Incredible!" = "太強喇！";
+"Unstoppable" = "無人能擋";
+
+"Good productivity" = "效率唔錯";
+"Got quite a bit done" = "做咗唔少嘢";
+"50+!" = "50+！";
+"Super productive" = "超高產";
+"Over 100! Not sleeping today?" = "破百！你今日唔駛瞓？";
+"Superhuman" = "超人嚟嘅";
+
+/* HUD footer */
+"Settings" = "設定";
+"Updates" = "更新";
+"Quit" = "退出";
+"Checking…" = "檢查中…";
+
+
+/* Achievements + per-project pets + break reminder (PR #27/#28) */
+"First Meal" = "首次進食";
+"Level 5" = "5 級";
+"Level 10" = "10 級";
+"Level 20" = "20 級";
+"Level 35" = "35 級";
+"7-Day Streak" = "7 天連續";
+"14-Day Streak" = "14 天連續";
+"30-Day Streak" = "30 天連續";
+"Night Owl" = "夜貓子";
+"Reach Level 5" = "達到 5 級";
+"Reach Level 10" = "達到 10 級";
+"Reach Level 20" = "達到 20 級";
+"Reach Level 35 (Legend)" = "達到 35 級（傳奇）";
+"Feed your pet 7 days in a row" = "連續 7 天餵養寵物";
+"Feed your pet 14 days in a row" = "連續 14 天餵養寵物";
+"Feed your pet 30 days in a row" = "連續 30 天餵養寵物";
+"%d achievements unlocked! 🏆" = "解鎖 %d 個成就！🏆";
+"Achievement unlocked: %@ 🏆" = "成就解鎖：%@ 🏆";
+"Achievements" = "成就";
+"Hover a badge to see how to unlock it" = "將滑鼠停在徽章上查看解鎖方式";
+"Add a project folder to give it its own pet." = "新增專案資料夾來指派專屬寵物。";
+"Add project…" = "新增專案…";
+"Animate pets" = "寵物動畫";
+"Animation speed" = "動畫速度";
+"Default pet" = "預設寵物";
+"Hide idle project pets" = "閒置時隱藏專案寵物";
+"Level up" = "升級";
+"Sleepy" = "想睡";
+"Model" = "模型";
+"No pets installed" = "未安裝寵物";
+"No project pets yet." = "還沒有專案寵物。";
+"Project pets" = "專案寵物";
+"Remind me to take breaks" = "提醒我休息";
+"Show a configured project's pet only while it's working; hide it when idle." = "僅在已設定的專案執行時顯示其寵物；閒置時隱藏。";
+"Spawn one pet per active project instead of one shared pet." = "為每個進行中的專案產生一個寵物，而非共用一個。";
+"Split pet" = "分割寵物";
+"Sprite frame rate. Idle is always capped at 2 fps." = "精靈影格率。閒置時一律限制為 2 fps。";
+"Sync failed repeatedly. Re-link to retry." = "多次同步失敗。請重新連結後重試。";
+"The home pet nudges you to rest after a work stretch." = "主寵物會在你工作一段時間後提醒休息。";
+"Turn off to freeze pet/bubble animation (lower CPU)." = "關閉以凍結寵物/氣泡動畫（降低 CPU）。";
+"missing" = "缺失";
+"Est. cost (Claude)" = "預估費用（Claude）";
+"Today %@ · Month %@" = "今天 %@ · 本月 %@";
+"Allow" = "允許";
+"Deny" = "拒絕";
+"Click to open this terminal" = "點擊開啟此終端";
+"Bash approval gate" = "Bash 審批開關";
+"Approve Bash from the bubble" = "在氣泡中審批 Bash";
+"Claude Code Bash requests show Allow/Deny in the bubble instead of the terminal." = "Claude Code 的 Bash 請求會在氣泡中顯示允許/拒絕，而不必回到終端。";

@@ -1,0 +1,92 @@
+import Foundation
+import AppKit
+import DesktopPetCore
+
+/// Per-window pet state. One instance backs each pet window (single window for
+/// now; the registry in later tasks owns one per active project). Holds only
+/// the fields that vary per window — global toggles (showChat, petPoint…) still
+/// live on `PetController.shared`.
+@MainActor
+final class PetWindowModel: ObservableObject {
+    /// Stable grouping key: a project path or `"default"` for the home pet.
+    let key: String
+
+    @Published var petID: String?
+    @Published var mood: PetMood
+    @Published var projectName: String?
+    @Published var activities: [ActivitySession]
+    @Published var count: Int
+    @Published var chatLine: String
+
+    init(
+        key: String,
+        petID: String? = nil,
+        mood: PetMood = .idle,
+        projectName: String? = nil,
+        activities: [ActivitySession] = [],
+        count: Int = 0,
+        chatLine: String = ""
+    ) {
+        self.key = key
+        self.petID = petID
+        self.mood = mood
+        self.projectName = projectName
+        self.activities = activities
+        self.count = count
+        self.chatLine = chatLine
+    }
+
+    // MARK: - Pet tap interaction (per window)
+    // Lives here, not on the shared controller, so tapping one pet in split
+    // mode only bounces THAT pet (a shared state flickered every window).
+
+    @Published private(set) var isPetted = false
+    @Published private(set) var petReactionLine: String = ""
+    @Published private(set) var petTapCount: Int = 0
+
+    private var petBounceTimer: Timer?
+    private var petLineTimer: Timer?
+    private var petCooldown = false
+    private var consecutivePets = 0
+    private var lastPetTime: Date?
+
+    private static let petReactions: [[String]] = [
+        ["Hehe~", "That tickles!", "Hi there!", "Oh! Hello~", "*purrs*", "Nyaa~"],
+        ["I love you!", "More pets please!", "Best human ever!", "So happy~"],
+        ["MAXIMUM LOVE!", "Can't stop smiling!", "I'm gonna melt~"],
+    ]
+
+    func petTap() {
+        guard !petCooldown else { return }
+        petCooldown = true
+
+        let now = Date()
+        if let last = lastPetTime, now.timeIntervalSince(last) < 3.0 {
+            consecutivePets += 1
+        } else {
+            consecutivePets = 1
+        }
+        lastPetTime = now
+
+        let tier = consecutivePets >= 6 ? 2 : consecutivePets >= 3 ? 1 : 0
+        petReactionLine = Self.petReactions[tier].randomElement() ?? "Hehe~"
+        petTapCount += 1
+
+        isPetted = true
+        petBounceTimer?.invalidate()
+        petBounceTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
+            Task { @MainActor [weak self] in self?.isPetted = false }
+        }
+
+        petLineTimer?.invalidate()
+        petLineTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+            Task { @MainActor [weak self] in self?.petReactionLine = "" }
+        }
+
+        NSSound(named: "Pop")?.play()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.petCooldown = false
+        }
+    }
+}

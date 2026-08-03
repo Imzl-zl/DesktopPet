@@ -1,0 +1,4 @@
+[-11716500ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://hm.baidu.com/hm.js?cef2294df677fad201eb46bedeec0dee:0
+[-11716500ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://assets.giocdn.com/2.1/gio.js:0
+[-11714471ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[-11716835ms] [LOG] %c[Nova Platform] image: registry.sensetime.com/sensecore-higgs/nova-platform-web-console:1.1.0-20260727-3e8b250 color:#1177e4;font-weight:bold @ https://platform.sensenova.cn/docs:28

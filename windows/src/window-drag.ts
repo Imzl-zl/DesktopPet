@@ -110,9 +110,24 @@ export class WindowDragController {
     drag.isDragging = true;
     try {
       drag.startTask = Promise.resolve(this.host.startDrag()).then(
-        () => true,
+        () => {
+          // System drag finished (mouse released, window positioned by the OS).
+          // While the system drag was active the webview received no pointerup,
+          // so we finish explicitly instead of waiting for one.
+          drag.isFinishing = true;
+          this.finishAfterFinalMove(drag)
+            .catch((error) => {
+              if (drag.firstMoveError === null) drag.firstMoveError = error;
+              console.error("Unable to finish drag", error);
+            })
+            .finally(() => {
+              if (this.active === drag) this.active = null;
+            });
+          return true;
+        },
         (error) => {
-          if (drag.firstMoveError === null) drag.firstMoveError = error;
+          // System drag unavailable → fall back to manual pointer-driven
+          // moves. This is not a drag failure, so no error is recorded.
           return false;
         },
       );
@@ -135,7 +150,9 @@ export class WindowDragController {
   }
 
   private async moveToLatestCursorPosition(drag: ActiveDrag): Promise<void> {
-    if (!await drag.startTask) return;
+    // true → the OS already positioned the window during the system drag;
+    // nothing to move manually. false → fallback to manual moves.
+    if (await drag.startTask) return;
     while (drag.needsMove) {
       drag.needsMove = false;
       try {

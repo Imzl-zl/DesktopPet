@@ -1,0 +1,114 @@
+- generic [ref=f7e2]:
+  - complementary [ref=f7e3]:
+    - generic [ref=f7e4]: DesktopPet
+    - generic [ref=f7e15]:
+      - generic "Click to rename" [ref=f7e16]: zeztz booster
+      - generic [ref=f7e17]:
+        - generic [ref=f7e18]: 等级 0
+        - generic [ref=f7e20]: 幼崽
+    - generic [ref=f7e21]: 微饿
+    - generic [ref=f7e23]:
+      - generic [ref=f7e24]: 0 XP
+      - generic [ref=f7e25]: ≈ 120 升级所需 XP
+    - generic [ref=f7e26]:
+      - button "喂食" [ref=f7e27] [cursor=pointer]
+      - generic [ref=f7e28]: 给伙伴一份小零食,喂食可获得 XP。
+    - generic [ref=f7e29]: v0.1.0
+  - generic [ref=f7e31]:
+    - navigation [ref=f7e32]:
+      - button "宠物" [ref=f7e33] [cursor=pointer]
+      - button "气泡" [ref=f7e42] [cursor=pointer]
+      - button "养护" [ref=f7e48] [cursor=pointer]
+      - button "通用" [ref=f7e53] [cursor=pointer]
+      - button "Image" [ref=f7e59] [cursor=pointer]
+    - main [ref=f7e65]:
+      - generic [ref=f7e66]:
+        - generic [ref=f7e67]:
+          - heading "你的伙伴" [level=1] [ref=f7e68]
+          - paragraph [ref=f7e69]: 选择、装扮并设置桌面宠物的动画。
+        - generic [ref=f7e70]:
+          - generic [ref=f7e71]: 显示
+          - generic [ref=f7e72]:
+            - generic [ref=f7e73] [cursor=pointer]:
+              - generic [ref=f7e74]:
+                - generic [ref=f7e75]: 显示悬浮球
+                - generic [ref=f7e76]: 桌面上的可拖动小球。左键发气泡，右键开设置，靠近屏幕边缘自动吸边。
+              - checkbox "显示悬浮球 桌面上的可拖动小球。左键发气泡，右键开设置，靠近屏幕边缘自动吸边。" [checked] [ref=f7e77]
+            - generic [ref=f7e78] [cursor=pointer]:
+              - generic [ref=f7e79]:
+                - generic [ref=f7e80]: 显示桌面宠物
+                - generic [ref=f7e81]: 暂时隐藏或显示所有宠物，而不从桌面移除它们。
+              - checkbox "显示桌面宠物 暂时隐藏或显示所有宠物，而不从桌面移除它们。" [checked] [ref=f7e82]
+        - generic [ref=f7e83]:
+          - generic [ref=f7e84]: 宠物素材库
+          - generic [ref=f7e85]:
+            - paragraph [ref=f7e86]: 从素材库添加新的桌面宠物。
+            - article [ref=f7e88]:
+              - button "移除" [ref=f7e89] [cursor=pointer]
+              - generic [ref=f7e94]: zeztz booster
+              - button "添加到桌面" [ref=f7e96] [cursor=pointer]
+            - generic [ref=f7e99]:
+              - button "浏览宠物…" [ref=f7e100] [cursor=pointer]
+              - button "创建宠物…" [ref=f7e108] [cursor=pointer]
+        - generic [ref=f7e114]:
+          - generic [ref=f7e115]:
+            - generic [ref=f7e116]:
+              - generic [ref=f7e117]: 桌面宠物 (1/12)
+              - paragraph [ref=f7e118]: 每只宠物都会独立保存自己的名称、养成、尺寸和漫游设置。
+            - button "全部移除" [ref=f7e119] [cursor=pointer]
+          - generic [ref=f7e120]:
+            - generic [ref=f7e121]: "正在编辑: zeztz booster"
+            - article [ref=f7e123]:
+              - button "zeztz booster" [ref=f7e124] [cursor=pointer]
+              - button "移除" [ref=f7e127] [cursor=pointer]
+        - generic [ref=f7e131]:
+          - generic [ref=f7e132]: 动画
+          - generic [ref=f7e133]:
+            - generic [ref=f7e134]:
+              - button "空闲" [ref=f7e135] [cursor=pointer]
+              - button "工作中" [ref=f7e136] [cursor=pointer]
+              - button "等待中" [ref=f7e137] [cursor=pointer]
+              - button "完成" [ref=f7e138] [cursor=pointer]
+              - button "庆祝" [ref=f7e139] [cursor=pointer]
+            - generic [ref=f7e140]: 悬停在剪辑上即可预览。
+            - generic [ref=f7e141]:
+              - button "剪辑 1" [ref=f7e142] [cursor=pointer]
+              - button "剪辑 2" [ref=f7e145] [cursor=pointer]
+              - button "剪辑 3" [ref=f7e148] [cursor=pointer]
+              - button "剪辑 4" [ref=f7e151] [cursor=pointer]
+              - button "剪辑 5" [ref=f7e154] [cursor=pointer]
+              - button "剪辑 6" [ref=f7e157] [cursor=pointer]
+              - button "剪辑 7" [ref=f7e160] [cursor=pointer]
+              - button "剪辑 8" [ref=f7e163] [cursor=pointer]
+              - button "剪辑 9" [ref=f7e166] [cursor=pointer]
+        - generic [ref=f7e169]:
+          - generic [ref=f7e170]: 屏幕上的大小
+          - generic [ref=f7e173]:
+            - slider [ref=f7e174] [cursor=pointer]: "100"
+            - generic [ref=f7e175]: "100"
+            - generic [ref=f7e176]:
+              - button "S" [ref=f7e177] [cursor=pointer]
+              - button "M" [ref=f7e178] [cursor=pointer]
+              - button "L" [ref=f7e179] [cursor=pointer]
+        - generic [ref=f7e180]:
+          - generic [ref=f7e181]: 漫游
+          - generic [ref=f7e182]:
+            - generic [ref=f7e183]:
+              - generic [ref=f7e184]: 模式
+              - combobox [ref=f7e185] [cursor=pointer]:
+                - option "停留"
+                - option "随机游走" [selected]
+                - option "跟随鼠标"
+                - option "攀爬窗口"
+            - generic [ref=f7e186]:
+              - generic [ref=f7e187]: 速度
+              - generic [ref=f7e188]:
+                - slider [ref=f7e189] [cursor=pointer]: "5"
+                - generic [ref=f7e190]: "5"
+            - generic [ref=f7e191]:
+              - generic [ref=f7e192]: 漫游停顿
+              - generic [ref=f7e193]:
+                - spinbutton [ref=f7e194]: "1.2"
+                - generic [ref=f7e195]: –
+                - spinbutton [ref=f7e196]: "3.5"
+                - generic [ref=f7e197]: 秒

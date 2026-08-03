@@ -1,0 +1,55 @@
+[    2298ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:5201/settings.html:0
+[    2309ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at http://localhost:5201/src/settings.ts:211:1
+[    2311ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at initPetControls (http://localhost:5201/src/settings.ts:831:8)
+    at http://localhost:5201/src/settings.ts:1781:1
+[    2312ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at initPetControls (http://localhost:5201/src/settings.ts:832:8)
+    at http://localhost:5201/src/settings.ts:1781:1
+[    2314ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at initAnimations (http://localhost:5201/src/settings.ts:1037:8)
+    at http://localhost:5201/src/settings.ts:1783:1
+[    2316ms] TypeError: Cannot read properties of undefined (reading 'invoke')
+    at invoke (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:109:37)
+    at emit (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:51:9)
+    at writeQuickList (http://localhost:5201/src/settings.ts:1424:3)
+    at initQuickBubbles (http://localhost:5201/src/settings.ts:1444:25)
+    at http://localhost:5201/src/settings.ts:1793:1
+[    3919ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5201/favicon.ico:0
+[    4845ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[  122751ms] TypeError: Cannot read properties of undefined (reading 'invoke')
+    at invoke (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:109:37)
+    at emit (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:51:9)
+    at persistDesktopPets (http://localhost:5201/src/settings.ts:51:10)
+    at initPet (http://localhost:5201/src/settings.ts:428:16)
+[  122905ms] [LOG] Immersive Translate INFO: sync remote rules success, latest: 2026/8/1 23:45:36 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4873
+[  286655ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:5201/settings.html:0
+[  286670ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at http://localhost:5201/src/settings.ts?t=1785746773467:211:1
+[  286671ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at initPetControls (http://localhost:5201/src/settings.ts?t=1785746773467:831:8)
+    at http://localhost:5201/src/settings.ts?t=1785746773467:1781:1
+[  286672ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at initPetControls (http://localhost:5201/src/settings.ts?t=1785746773467:832:8)
+    at http://localhost:5201/src/settings.ts?t=1785746773467:1781:1
+[  286673ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at initAnimations (http://localhost:5201/src/settings.ts?t=1785746773467:1037:8)
+    at http://localhost:5201/src/settings.ts?t=1785746773467:1783:1
+[  288693ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893

@@ -35,7 +35,36 @@ function deferred<T>() {
 }
 
 describe("window pointer drag controller", () => {
-  it("keeps drag state active until the queued final window move completes", async () => {
+  it("lets the system drag position the window and finishes without a pointerup", async () => {
+    const systemDrag = deferred<void>();
+    const host: DragHost = {
+      cursorPosition: vi.fn().mockResolvedValue({ x: 120, y: 130 }),
+      setPosition: vi.fn().mockResolvedValue(undefined),
+      startDrag: vi.fn(() => systemDrag.promise),
+      finishDrag: vi.fn().mockResolvedValue(undefined),
+    };
+    const drag = await createController(host);
+
+    expect(drag.begin(7, { x: 10, y: 20 }, { x: 20, y: 30 }, 0)).toBe(true);
+    expect(drag.move(7, { x: 20, y: 20 })).toBe(true);
+    expect(host.startDrag).toHaveBeenCalledTimes(1);
+
+    // While the system drag is active no manual moves happen.
+    await vi.waitFor(() => expect(host.setPosition).not.toHaveBeenCalled());
+    expect(host.finishDrag).not.toHaveBeenCalled();
+    expect(drag.begin(8, { x: 40, y: 20 }, { x: 20, y: 30 }, 90)).toBe(false);
+
+    // Mouse released: the system drag resolves and the controller finishes
+    // on its own — no pointerup arrives in the webview.
+    systemDrag.resolve();
+    await vi.waitFor(() => expect(host.finishDrag).toHaveBeenCalledTimes(1));
+    expect(host.setPosition).not.toHaveBeenCalled();
+
+    // State was cleaned up: a new drag can begin.
+    expect(drag.begin(8, { x: 40, y: 20 }, { x: 20, y: 30 }, 90)).toBe(true);
+  });
+
+  it("falls back to manual pointer-driven moves when the system drag is unavailable", async () => {
     const firstMove = deferred<void>();
     const finalMove = deferred<void>();
     const host: DragHost = {
@@ -45,7 +74,7 @@ describe("window pointer drag controller", () => {
       setPosition: vi.fn()
         .mockImplementationOnce(() => firstMove.promise)
         .mockImplementationOnce(() => finalMove.promise),
-      startDrag: vi.fn(),
+      startDrag: vi.fn(() => Promise.reject(new Error("system drag unavailable"))),
       finishDrag: vi.fn().mockResolvedValue(undefined),
     };
     const drag = await createController(host);
@@ -70,7 +99,7 @@ describe("window pointer drag controller", () => {
     expect(drag.begin(8, { x: 40, y: 20 }, { x: 20, y: 30 }, 90)).toBe(true);
   });
 
-  it("does not move the window before asynchronous drag setup completes", async () => {
+  it("does not move the window while the system drag is still active", async () => {
     const setup = deferred<void>();
     const host: DragHost = {
       cursorPosition: vi.fn().mockResolvedValue({ x: 120, y: 130 }),
@@ -86,8 +115,7 @@ describe("window pointer drag controller", () => {
     expect(host.setPosition).not.toHaveBeenCalled();
 
     setup.resolve();
-    await vi.waitFor(() => expect(host.setPosition).toHaveBeenCalledWith({ x: 100, y: 100 }));
-    const result = drag.finish(1, { x: 8, y: 0 }, true, 50);
-    await result?.completion;
+    await vi.waitFor(() => expect(host.finishDrag).toHaveBeenCalledTimes(1));
+    expect(host.setPosition).not.toHaveBeenCalled();
   });
 });

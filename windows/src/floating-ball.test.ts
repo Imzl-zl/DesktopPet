@@ -7,8 +7,8 @@ const nativeWindowCode = readFileSync(new URL("../src-tauri/src/lib.rs", import.
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 describe("floating ball drag rendering", () => {
-  it("uses pointer capture and physical window coordinates instead of Tauri's native drag loop", () => {
-    expect(floatingBallScript).not.toContain(".startDragging()");
+  it("uses pointer capture for click detection and the native drag loop for moving", () => {
+    expect(floatingBallScript).toContain("win.startDragging()");
     expect(floatingBallScript).toContain("attachFloatingBallPointerDrag(ball");
     expect(floatingBallScript).toContain("new PhysicalPosition(position.x, position.y)");
     expect(pointerBinding).toContain("ball.setPointerCapture(e.pointerId)");

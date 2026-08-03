@@ -1,0 +1,21 @@
+[     161ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:5201/settings.html:0
+[     241ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at http://localhost:5201/src/settings.ts?t=1785746773467:211:1
+[     242ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at initPetControls (http://localhost:5201/src/settings.ts?t=1785746773467:831:8)
+    at http://localhost:5201/src/settings.ts?t=1785746773467:1781:1
+[     242ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at initPetControls (http://localhost:5201/src/settings.ts?t=1785746773467:832:8)
+    at http://localhost:5201/src/settings.ts?t=1785746773467:1781:1
+[     243ms] TypeError: Cannot read properties of undefined (reading 'transformCallback')
+    at transformCallback (http://localhost:5201/node_modules/.vite/deps/chunk-G7S6KQDI.js?v=4ca342c4:22:37)
+    at listen (http://localhost:5201/node_modules/.vite/deps/chunk-7FCLUC5I.js?v=4ca342c4:39:14)
+    at initAnimations (http://localhost:5201/src/settings.ts?t=1785746773467:1037:8)
+    at http://localhost:5201/src/settings.ts?t=1785746773467:1783:1
+[    1098ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893

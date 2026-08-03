@@ -1,6 +1,9 @@
 pub mod sys_windows;
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use serde::Deserialize;
+use std::io::Read;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
@@ -305,6 +308,205 @@ fn open_url(url: String) {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AI image generation (OpenAI-compatible /v1/images/generations).
+// The Rust side does the HTTP calls because the WebView2 frontend cannot
+// bypass CORS for third-party APIs. Base URL and API key are provided by the
+// user from the Settings UI; nothing is hardcoded here.
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImageGenArgs {
+    base_url: String,
+    api_key: String,
+    prompt: String,
+    model: String,
+    size: String,
+    ratio: Option<String>,
+    image_refs: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ImageGenOutcome {
+    mime: String,
+    base64: String,
+}
+
+/// POST {base}/v1/images/generations and return the image as base64.
+/// Follows the Agnes docs: `response_format` and `image` go inside
+/// `extra_body`, never at the top level.
+#[tauri::command]
+async fn generate_image(args: ImageGenArgs) -> Result<ImageGenOutcome, String> {
+    if args.api_key.trim().is_empty() {
+        return Err("API key is empty".into());
+    }
+    let endpoint = {
+        let mut base = args.base_url.trim().trim_end_matches('/').to_string();
+        if !base.ends_with("/v1") {
+            base.push_str("/v1");
+        }
+        format!("{}/images/generations", base)
+    };
+    let url = tauri::Url::parse(&endpoint).map_err(|e| format!("invalid base URL: {}", e))?;
+
+    let mut body = serde_json::json!({
+        "model": args.model,
+        "prompt": args.prompt,
+        "size": args.size,
+    });
+    if let Some(ratio) = args.ratio.as_deref() {
+        if !ratio.is_empty() {
+            body["ratio"] = serde_json::json!(ratio);
+        }
+    }
+    let mut extra_body = serde_json::json!({"response_format": "url"});
+    if !args.image_refs.is_empty() {
+        extra_body["image"] = serde_json::json!(args.image_refs);
+    }
+    body["extra_body"] = extra_body;
+
+    let agent = build_agent(Duration::from_secs(300))?;
+
+    // First request: create the image.
+    let json: serde_json::Value = agent
+        .post(url.as_str())
+        .set("Content-Type", "application/json")
+        .set("Authorization", &format!("Bearer {}", args.api_key.trim()))
+        .send_json(&body)
+        .map_err(|e| http_error_text(e))?
+        .into_json()
+        .map_err(|e| format!("invalid JSON response: {}", e))?;
+
+    let item = json
+        .get("data")
+        .and_then(|d| d.as_array())
+        .and_then(|a| a.first())
+        .ok_or_else(|| "response has no data[0]".to_string())?;
+
+    // Second request only when the API returned a URL; otherwise use b64_json.
+    if let Some(url_str) = item.get("url").and_then(|u| u.as_str()) {
+        let mut buf: Vec<u8> = Vec::new();
+        agent
+            .get(url_str)
+            .call()
+            .map_err(|e| http_error_text(e))?
+            .into_reader()
+            .take(50 * 1024 * 1024)
+            .read_to_end(&mut buf)
+            .map_err(|e| format!("download failed: {}", e))?;
+        let mime = sniff_mime(&buf, url_str);
+        let base64 = STANDARD.encode(&buf);
+        Ok(ImageGenOutcome { mime, base64 })
+    } else if let Some(b64) = item.get("b64_json").and_then(|b| b.as_str()) {
+        let mime = sniff_mime(&base64::engine::general_purpose::STANDARD.decode(b64).unwrap_or_default(), "");
+        Ok(ImageGenOutcome { mime, base64: b64.to_string() })
+    } else {
+        Err("response has neither url nor b64_json".into())
+    }
+}
+
+/// Decode a base64 image and write it into the user's Downloads folder.
+/// Returns the absolute path that was written.
+#[tauri::command]
+fn save_image_file(base64: String, file_name: String) -> Result<String, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64.as_bytes())
+        .map_err(|e| format!("invalid base64: {}", e))?;
+    let mut name: String = file_name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
+        .collect();
+    if name.is_empty() {
+        name = "desktoppet-image.png".into();
+    }
+    let dir = dirs::download_dir()
+        .or_else(dirs::home_dir)
+        .ok_or_else(|| "cannot find Downloads folder".to_string())?;
+    let path = dir.join(name);
+    std::fs::write(&path, &bytes).map_err(|e| format!("write failed: {}", e))?;
+    Ok(path.display().to_string())
+}
+
+/// Build the HTTP agent. ureq 2.x only auto-configures TLS when the `tls`
+/// (rustls) feature is on; with `native-tls` we must wire the connector
+/// explicitly or every HTTPS request fails with "no TLS backend".
+fn build_agent(timeout: Duration) -> Result<ureq::Agent, String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout(timeout)
+        .tls_connector(std::sync::Arc::new(
+            ureq::native_tls::TlsConnector::new()
+                .map_err(|e| format!("TLS init failed: {}", e))?,
+        ))
+        .build();
+    Ok(agent)
+}
+
+/// GET {base}/v1/models — the full model list the gateway exposes, so the UI
+/// never hardcodes model names. The frontend filters for image-capable ones.
+#[tauri::command]
+async fn list_image_models(base_url: String, api_key: String) -> Result<Vec<String>, String> {
+    let endpoint = {
+        let mut base = base_url.trim().trim_end_matches('/').to_string();
+        if !base.ends_with("/v1") {
+            base.push_str("/v1");
+        }
+        format!("{}/models", base)
+    };
+    let url = tauri::Url::parse(&endpoint).map_err(|e| format!("invalid base URL: {}", e))?;
+    let agent = build_agent(Duration::from_secs(60))?;
+    let json: serde_json::Value = agent
+        .get(url.as_str())
+        .set("Authorization", &format!("Bearer {}", api_key.trim()))
+        .call()
+        .map_err(http_error_text)?
+        .into_json()
+        .map_err(|e| format!("invalid JSON response: {}", e))?;
+    let ids: Vec<String> = json["data"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|m| m["id"].as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    if ids.is_empty() {
+        Err("GET /v1/models returned no data — this gateway may not expose a model list. Use \"Custom model\" instead.".into())
+    } else {
+        Ok(ids)
+    }
+}
+
+fn http_error_text(e: ureq::Error) -> String {
+    match e {
+        ureq::Error::Status(code, resp) => {
+            let body = resp.into_string().unwrap_or_default();
+            // Prefer the OpenAI-style {"error":{"message":"..."}} body.
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                if let Some(msg) = v.pointer("/error/message").and_then(|m| m.as_str()) {
+                    return format!("HTTP {}: {}", code, msg);
+                }
+            }
+            let snippet: String = body.chars().take(400).collect();
+            format!("HTTP {}{}", code, if snippet.is_empty() { String::new() } else { format!(": {}", snippet) })
+        }
+        ureq::Error::Transport(t) => t.to_string(),
+    }
+}
+
+/// Guess the image MIME from magic bytes (fallback: URL extension).
+fn sniff_mime(bytes: &[u8], url: &str) -> String {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        "image/png".into()
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg".into()
+    } else if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        "image/webp".into()
+    } else if bytes.starts_with(b"GIF8") {
+        "image/gif".into()
+    } else if url.ends_with(".webp") {
+        "image/webp".into()
+    } else {
+        "image/png".into()
     }
 }
 
@@ -663,7 +865,10 @@ pub fn run() {
             persist_floating_ball_position,
             set_floating_ball_visible,
             get_floating_ball_visible,
-            sys_windows::list_system_windows
+            sys_windows::list_system_windows,
+            generate_image,
+            save_image_file,
+            list_image_models
         ])
         .setup(|app| {
             app.manage(Mutex::new(HitRectMap::new()));

@@ -220,6 +220,11 @@ struct MenuContentView: View {
 
     private var footer: some View {
         HStack(spacing: Theme.space3) {
+            FooterButton(icon: "sparkles", label: "Generate") {
+                StatusBarController.shared.closeAndThen {
+                    ImageGenWindowController.shared.show()
+                }
+            }
             FooterButton(icon: "gearshape", label: "Settings") {
                 StatusBarController.shared.closeAndThen {
                     SettingsWindowController.shared.show()

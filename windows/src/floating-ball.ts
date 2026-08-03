@@ -31,6 +31,7 @@ const cancelBtn = document.getElementById("bm-cancel") as HTMLButtonElement;
 const win = getCurrentWindow();
 const floatingBallDrag = new FloatingBallDragController({
   cursorPosition,
+  startDrag: () => win.startDragging(),
   setPosition: (position) => win.setPosition(new PhysicalPosition(position.x, position.y)),
   persistPosition: () => invoke<void>("persist_floating_ball_position"),
 });

@@ -1,0 +1,4 @@
+[-17639071ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496:0
+[-17638128ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[-17623687ms] [INFO] Autofocus processing was blocked because a document already has a focused element. @ https://1panel.linuxdo.gv.uy/hosts/files:0
+[-17637702ms] [LOG] Immersive Translate INFO: sync remote rules success, latest: 2026/8/1 23:45:36 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4873

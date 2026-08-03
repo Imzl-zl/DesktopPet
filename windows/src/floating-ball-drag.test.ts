@@ -4,6 +4,7 @@ type Point = { x: number; y: number };
 type DragHost = {
   cursorPosition(): Promise<Point>;
   setPosition(position: Point): Promise<void>;
+  startDrag(): void | Promise<void>;
   persistPosition(): Promise<void>;
 };
 type DragOutcome = {
@@ -39,6 +40,7 @@ describe("floating ball pointer drag", () => {
     const host: DragHost = {
       cursorPosition: vi.fn(),
       setPosition: vi.fn(),
+      startDrag: vi.fn(() => Promise.reject(new Error("system drag unavailable"))),
       persistPosition: vi.fn(),
     };
     const drag = await createController(host);
@@ -62,6 +64,7 @@ describe("floating ball pointer drag", () => {
       setPosition: vi.fn()
         .mockImplementationOnce(() => firstMove.promise)
         .mockImplementationOnce(() => finalMove.promise),
+      startDrag: vi.fn(() => Promise.reject(new Error("system drag unavailable"))),
       persistPosition: vi.fn().mockResolvedValue(undefined),
     };
     const drag = await createController(host);
@@ -92,6 +95,7 @@ describe("floating ball pointer drag", () => {
       setPosition: vi.fn()
         .mockImplementationOnce(() => { throw moveFailure; })
         .mockResolvedValueOnce(undefined),
+      startDrag: vi.fn(() => Promise.reject(new Error("system drag unavailable"))),
       persistPosition: vi.fn().mockResolvedValue(undefined),
     };
     const drag = await createController(host);
@@ -111,6 +115,7 @@ describe("floating ball pointer drag", () => {
     const host: DragHost = {
       cursorPosition: vi.fn().mockResolvedValue({ x: 240, y: 360 }),
       setPosition: vi.fn().mockResolvedValue(undefined),
+      startDrag: vi.fn(() => Promise.reject(new Error("system drag unavailable"))),
       persistPosition: vi.fn().mockResolvedValue(undefined),
     };
     const drag = await createController(host);
@@ -124,5 +129,24 @@ describe("floating ball pointer drag", () => {
     expect(drag.isDragging).toBe(false);
     expect(host.setPosition).toHaveBeenLastCalledWith({ x: 230, y: 350 });
     expect(host.persistPosition).toHaveBeenCalledTimes(1);
+  });
+  it("persists via the system drag without manual moves", async () => {
+    const systemDrag = deferred<void>();
+    const host: DragHost = {
+      cursorPosition: vi.fn().mockResolvedValue({ x: 120, y: 130 }),
+      setPosition: vi.fn().mockResolvedValue(undefined),
+      startDrag: vi.fn(() => systemDrag.promise),
+      persistPosition: vi.fn().mockResolvedValue(undefined),
+    };
+    const drag = await createController(host);
+
+    drag.begin(4, { x: 0, y: 0 }, { x: 10, y: 10 }, 0);
+    expect(drag.move(4, { x: 8, y: 0 })).toBe(true);
+    expect(host.setPosition).not.toHaveBeenCalled();
+
+    systemDrag.resolve();
+    await vi.waitFor(() => expect(host.persistPosition).toHaveBeenCalledTimes(1));
+    expect(host.setPosition).not.toHaveBeenCalled();
+    expect(drag.isDragging).toBe(false);
   });
 });

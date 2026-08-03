@@ -69,6 +69,10 @@
             <span class="ui-ic" data-icon="settings"></span>
             <span id="tab-general">General</span>
           </button>
+          <button class="tab" data-tab="image">
+            <span class="ui-ic" data-icon="sparkles"></span>
+            <span id="tab-image">Image</span>
+          </button>
         </nav>
 
         <main class="pages">
@@ -371,6 +375,148 @@
                 <div class="row"><span id="t-version">Version</span><span class="dim" id="app-version2">0.1.0</span></div>
                 <div class="row center"><button class="quit" id="quit-btn">Quit DesktopPet</button></div>
               </div>
+            </div>
+          </div>
+
+          <!-- ============================== IMAGE ============================== -->
+          <div class="page page-image" data-page="image">
+            <header class="ig-studio-header">
+              <div class="ig-title-block">
+                <span class="ig-kicker"><span class="ui-ic" data-icon="sparkles"></span><span id="t-ig-kicker">Create</span></span>
+                <h1 id="t-ig-title">Image studio</h1>
+                <p id="t-ig-subtitle">OpenAI-compatible workspace</p>
+              </div>
+
+              <details class="ig-service-panel" id="ig-service-panel">
+                <summary>
+                  <span class="ui-ic" data-icon="settings"></span>
+                  <span id="t-ig-config">Connection</span>
+                  <span class="ig-connection-status" id="ig-connection-status">Setup required</span>
+                </summary>
+                <div class="ig-service-fields">
+                  <label class="ig-field" for="ig-base">
+                    <span id="t-ig-base">Base URL</span>
+                    <input id="ig-base" type="text" placeholder="https://…" autocomplete="off" spellcheck="false" />
+                  </label>
+                  <label class="ig-field" for="ig-key">
+                    <span id="t-ig-key">API Key</span>
+                    <input id="ig-key" type="password" autocomplete="off" spellcheck="false" />
+                  </label>
+                </div>
+              </details>
+            </header>
+
+            <div class="ig-workspace">
+              <section class="ig-controls" aria-labelledby="t-ig-prompt">
+                <div class="ig-controls-scroll">
+                  <div class="ig-control-section ig-prompt-section">
+                    <div class="ig-section-head">
+                      <label id="t-ig-prompt" for="ig-prompt">Prompt</label>
+                      <span class="ig-required" id="t-ig-required">Required</span>
+                    </div>
+                    <textarea id="ig-prompt" rows="5" placeholder="Describe the image you want…" spellcheck="false"></textarea>
+                    <div class="ig-samples">
+                      <span class="cap" id="t-ig-samples">Try:</span>
+                      <button type="button" data-p="a cute pixel-art cat, transparent background, game sprite style" data-i18n="Pixel cat">Pixel cat</button>
+                      <button type="button" data-p="a luminous floating city above a misty canyon at sunrise, cinematic realism, wide shot" data-i18n="Floating city">Floating city</button>
+                      <button type="button" data-p="cyberpunk street at night, neon signs, wet pavement reflections, high detail" data-i18n="Cyberpunk street">Cyberpunk street</button>
+                    </div>
+                  </div>
+
+                  <div class="ig-control-section">
+                    <div class="ig-section-head">
+                      <span id="t-ig-refs">Reference images</span>
+                      <span class="ig-count" id="ig-ref-count">0</span>
+                    </div>
+                    <button class="ig-ref-upload" id="ig-ref-add-file" type="button">
+                      <span class="ui-ic" data-icon="plus"></span>
+                      <span>
+                        <b id="t-ig-ref-choose">Choose images</b>
+                        <small id="t-ig-ref-choose-sub">PNG, JPG, WebP or GIF</small>
+                      </span>
+                    </button>
+                    <input type="file" id="ig-ref-file" accept="image/*" multiple hidden />
+                    <div id="ig-ref-grid" class="ig-ref-grid"></div>
+                    <details class="ig-ref-url-panel">
+                      <summary><span class="ui-ic" data-icon="link"></span><span id="t-ig-ref-url">Add image URL</span></summary>
+                      <div class="ig-ref-url-row">
+                        <input id="ig-ref-url" type="text" placeholder="https://…" autocomplete="off" spellcheck="false" />
+                        <button type="button" id="ig-ref-add-url"><span class="ui-ic" data-icon="plus"></span><span id="ig-ref-add-url-label">Add</span></button>
+                      </div>
+                    </details>
+                  </div>
+
+                  <div class="ig-control-section ig-generation-settings">
+                    <div class="ig-field">
+                      <div class="ig-field-label-row">
+                        <label id="t-ig-model" for="ig-model">Model</label>
+                        <button type="button" class="ig-icon-button" id="ig-model-refresh" title="Refresh" aria-label="Refresh">
+                          <span class="ui-ic" data-icon="refresh"></span>
+                        </button>
+                      </div>
+                      <select id="ig-model"></select>
+                      <div class="ig-inline-field" id="ig-custom-model-row" hidden>
+                        <label id="t-ig-custom-model" for="ig-custom-model">Custom model</label>
+                        <input id="ig-custom-model" type="text" placeholder="model-name" autocomplete="off" spellcheck="false" />
+                      </div>
+                      <div class="ig-field-status" id="ig-model-status" role="status" aria-live="polite" hidden></div>
+                    </div>
+
+                    <div class="ig-field">
+                      <label id="t-ig-size" for="ig-size">Canvas</label>
+                      <select id="ig-size"></select>
+                      <div class="ig-inline-field" id="ig-custom-size-row" hidden>
+                        <label id="t-ig-custom-size" for="ig-custom-size">Custom size</label>
+                        <input id="ig-custom-size" type="text" placeholder="1024x768" autocomplete="off" spellcheck="false" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <footer class="ig-generate-bar">
+                  <button class="ig-generate" id="ig-generate" type="button">
+                    <span class="ui-ic" data-icon="sparkles"></span>
+                    <span id="ig-generate-label">Generate</span>
+                  </button>
+                </footer>
+              </section>
+
+              <section class="ig-canvas" aria-labelledby="t-ig-preview">
+                <header class="ig-canvas-header">
+                  <div>
+                    <span id="t-ig-preview">Preview</span>
+                    <span class="ig-meta" id="ig-meta"></span>
+                  </div>
+                  <button class="ig-save" id="ig-save" type="button" hidden>
+                    <span class="ui-ic" data-icon="download"></span>
+                    <span id="ig-save-label">Save image</span>
+                  </button>
+                </header>
+
+                <div class="ig-canvas-stage">
+                  <div class="ig-empty-state" id="ig-empty">
+                    <span class="ig-empty-icon"><span class="ui-ic" data-icon="image"></span></span>
+                    <strong id="t-ig-empty-title">Ready when you are</strong>
+                    <span id="t-ig-empty-sub">No image yet</span>
+                  </div>
+
+                  <div class="ig-progress-state" id="ig-progress" role="status" aria-live="polite" hidden>
+                    <div class="ig-progress-frame"><span class="ig-progress-shimmer"></span></div>
+                    <div class="ig-progress-copy">
+                      <span class="ig-spinner"></span>
+                      <span id="ig-status">Generating… this can take seconds to a minute.</span>
+                    </div>
+                  </div>
+
+                  <div class="ig-error-state" id="ig-error" role="alert" hidden></div>
+
+                  <div class="ig-result" id="ig-result" hidden>
+                    <img id="ig-preview" alt="generated" />
+                  </div>
+                </div>
+
+                <div class="ig-saved-message" id="ig-saved-msg" role="status" aria-live="polite" hidden></div>
+              </section>
             </div>
           </div>
         </main>

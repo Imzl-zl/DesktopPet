@@ -8,7 +8,7 @@ const capabilityConfig = readFileSync(new URL("../src-tauri/capabilities/default
 
 describe("pet manual drag integration", () => {
   it("uses pointer capture, an interaction lease, and explicit final persistence", () => {
-    expect(petWindowScript).not.toContain(".startDragging()");
+    expect(petWindowScript).toContain(".startDragging()");
     expect(petWindowScript).toContain('from "./window-drag"');
     expect(petWindowScript).toContain('from "./pet-pointer-drag"');
     expect(petWindowScript).toContain("new WindowDragController(");
@@ -27,6 +27,6 @@ describe("pet manual drag integration", () => {
     expect(nativeWindowCode).toContain("fn persist_pet_position");
     expect(nativeWindowCode).toContain("should_ignore_cursor_events(active_drags.contains(label), inside)");
     expect(engineScript).toContain("await persistPetPosition();");
-    expect(capabilityConfig).not.toContain("core:window:allow-start-dragging");
+    expect(capabilityConfig).toContain("core:window:allow-start-dragging");
   });
 });

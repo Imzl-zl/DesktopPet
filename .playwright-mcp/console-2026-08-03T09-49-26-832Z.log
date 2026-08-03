@@ -1,0 +1,21 @@
+[    1128ms] TypeError: Cannot read properties of undefined (reading 'metadata')
+    at getCurrentWindow (http://localhost:5201/node_modules/.vite/deps/@tauri-apps_api_window.js?v=4ca342c4:51:48)
+    at http://localhost:5201/src/floating-ball.ts:22:13
+[    6032ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[    7507ms] [LOG] Immersive Translate INFO: sync remote rules success, latest: 2026/8/3 17:17:35 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4873
+[  543209ms] TypeError: Cannot read properties of undefined (reading 'metadata')
+    at getCurrentWindow (http://localhost:5201/node_modules/.vite/deps/@tauri-apps_api_window.js?v=4ca342c4:51:48)
+    at http://localhost:5201/src/floating-ball.ts?t=1785751107247:22:13
+[  550148ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[  554067ms] TypeError: Cannot read properties of undefined (reading 'metadata')
+    at getCurrentWindow (http://localhost:5201/node_modules/.vite/deps/@tauri-apps_api_window.js?v=4ca342c4:51:48)
+    at http://localhost:5201/src/floating-ball.ts?t=1785751119094:22:13
+[  560062ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[  563962ms] TypeError: Cannot read properties of undefined (reading 'metadata')
+    at getCurrentWindow (http://localhost:5201/node_modules/.vite/deps/@tauri-apps_api_window.js?v=4ca342c4:51:48)
+    at http://localhost:5201/src/floating-ball.ts?t=1785751129603:22:13
+[  570068ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[  631251ms] TypeError: Cannot read properties of undefined (reading 'metadata')
+    at getCurrentWindow (http://localhost:5201/node_modules/.vite/deps/@tauri-apps_api_window.js?v=4ca342c4:51:48)
+    at http://localhost:5201/src/floating-ball.ts?t=1785751197778:22:13
+[  636023ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893

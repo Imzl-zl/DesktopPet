@@ -1,0 +1,13 @@
+[-6798755ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496:0
+[-6793132ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[-1764385ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ https://platform-backend.agnes-ai.com/api/user/notification/unread:0
+[-1705040ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ https://platform-backend.agnes-ai.com/api/user/notification/unread:0
+[-6793069ms] [LOG] Immersive Translate INFO: sync remote rules success, latest: 2026/8/1 23:45:36 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4873
+[     135ms] TypeError: Failed to fetch
+    at d (https://platform.agnes-ai.com/_next/static/chunks/7726-9e43911b603fefa5.js:1:1180)
+    at a (https://platform.agnes-ai.com/_next/static/chunks/app/(common)/layout-a7c62dbd9416c823.js:1:22323)
+    at e (https://platform.agnes-ai.com/_next/static/chunks/app/(common)/layout-a7c62dbd9416c823.js:1:4945)
+[     135ms] TypeError: Failed to fetch
+    at d (https://platform.agnes-ai.com/_next/static/chunks/7726-9e43911b603fefa5.js:1:1180)
+    at a (https://platform.agnes-ai.com/_next/static/chunks/app/(common)/layout-a7c62dbd9416c823.js:1:22323)
+    at e (https://platform.agnes-ai.com/_next/static/chunks/app/(common)/layout-a7c62dbd9416c823.js:1:4945)

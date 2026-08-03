@@ -82,7 +82,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             window = nil
         }
         // Back to a menu bar accessory (no Dock icon) when no window is open.
-        if window == nil && onboardingWindow == nil {
+        if window == nil && onboardingWindow == nil && !ImageGenWindowController.shared.hasOpenWindow {
             NSApp.setActivationPolicy(.accessory)
             NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
         }

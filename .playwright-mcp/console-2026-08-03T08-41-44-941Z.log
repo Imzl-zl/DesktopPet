@@ -1,0 +1,101 @@
+[ -404679ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[ -406543ms] [ERROR] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13 @ https://opencode.ai/_build/assets/entry-client-Dye2AfyD.js:800
+[ -386280ms] [ERROR] Immersive Translate ERROR: sync rules error:  fetchError: Failed to fetch
+    at GC (chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4894:12015)
+    at e.sendFrom (chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4894:2977)
+    at async $4.sendWithHealth (chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4894:16516)
+    at async MH (chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4894:22033)
+    at async be (chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4894:20203)
+    at async V0 (chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:5386:5688) @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4873
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[     134ms] DrizzleQueryError: Failed query: update `user` set `time_seen` = now() where ((`user`.`workspace_id` = ?) and (`user`.`id` = ?))
+params: wrk_01KM4JXSM6P4X7NE5QTC2J1PWY,usr_01KM4JXSM6AJ7J9CQF1FKB1G46
+    at PlanetScalePreparedQuery.queryWithCache (placeholder:84638:17)
+    at async PlanetScalePreparedQuery.execute (placeholder:84749:23)
+    at async Object.use (placeholder:85041:28)
+    at async placeholder:6648:13
+[  616149ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://opencode.ai/_build/assets/IBMPlexMono-Medium-Latin1-DBHUbp12.woff2 @ https://opencode.ai/workspace/wrk_01KM4JXSM6P4X7NE5QTC2J1PWY/go:0
+[  616154ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://opencode.ai/_build/assets/IBMPlexMono-Bold-Latin1-K_Zucu9w.woff2 @ https://opencode.ai/workspace/wrk_01KM4JXSM6P4X7NE5QTC2J1PWY/go:0
+[  616156ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://opencode.ai/_build/assets/IBMPlexMono-Medium-B772pXP5.woff2 @ https://opencode.ai/workspace/wrk_01KM4JXSM6P4X7NE5QTC2J1PWY/go:0
+[  616163ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://opencode.ai/_build/assets/IBMPlexMono-Regular-Latin1-BsnL3gsb.woff2 @ https://opencode.ai/workspace/wrk_01KM4JXSM6P4X7NE5QTC2J1PWY/go:0
+[  616163ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://opencode.ai/_build/assets/IBMPlexMono-Regular-C-SBB-bw.woff2 @ https://opencode.ai/workspace/wrk_01KM4JXSM6P4X7NE5QTC2J1PWY/go:0
+[  616203ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://opencode.ai/_build/assets/IBMPlexMono-SemiBold-Latin1-iYs1QkgK.woff2 @ https://opencode.ai/workspace/wrk_01KM4JXSM6P4X7NE5QTC2J1PWY/go:0
+[  616205ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://opencode.ai/_build/assets/IBMPlexMono-SemiBold-DAxHeMPo.woff2 @ https://opencode.ai/workspace/wrk_01KM4JXSM6P4X7NE5QTC2J1PWY/go:0
+[  617282ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[  622120ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://opencode.ai/_build/assets/IBMPlexMono-Bold-DXjtWYQI.woff2 @ https://opencode.ai/workspace/wrk_01KM4JXSM6P4X7NE5QTC2J1PWY/usage:0

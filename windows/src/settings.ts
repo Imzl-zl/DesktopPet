@@ -104,16 +104,21 @@ function initSegs() {
 // ------------------------------------------------------------------ tabs ----
 function initTabs() {
   const tabs = document.querySelectorAll<HTMLButtonElement>(".tabbar .tab");
+  const setWorkspaceMode = (tab: string | undefined) => {
+    document.body.classList.toggle("image-workspace-active", tab === "image");
+  };
   tabs.forEach((b) => {
     b.onclick = () => {
       tabs.forEach((x) => x.classList.toggle("sel", x === b));
       document.querySelectorAll<HTMLElement>(".page").forEach((p) => {
         p.classList.toggle("sel", p.dataset.page === b.dataset.tab);
       });
+      setWorkspaceMode(b.dataset.tab);
       if (b.dataset.tab === "care") renderCare();
       if (b.dataset.tab === "pet") document.dispatchEvent(new CustomEvent("ap-pet-tab-shown"));
     };
   });
+  setWorkspaceMode(document.querySelector<HTMLButtonElement>(".tabbar .tab.sel")?.dataset.tab);
 }
 
 // ------------------------------------------------------------------ care ----
@@ -1224,6 +1229,7 @@ function applyStatic() {
   set("tab-bubble", "Bubble");
   set("tab-care", "Care");
   set("tab-advanced", "Advanced");
+  set("tab-image", "Image");
   // page titles / subtitles
   set("t-pet-title", "Your companion");
   set("t-pet-subtitle", "Choose, dress up, and animate your desktop pet.");
@@ -1234,6 +1240,40 @@ function applyStatic() {
   set("t-general-title", "General");
   set("t-general-subtitle", "Language, launch, notifications, and app info.");
   set("t-advanced-title", "Advanced");
+  set("t-ig-kicker", "Create");
+  set("t-ig-title", "Image studio");
+  set("t-ig-subtitle", "OpenAI-compatible workspace");
+  set("t-ig-config", "Connection");
+  set("t-ig-base", "Base URL");
+  set("t-ig-key", "API Key");
+  set("t-ig-prompt", "Prompt");
+  set("t-ig-required", "Required");
+  set("t-ig-samples", "Try:");
+  set("t-ig-model", "Model");
+  set("t-ig-custom-model", "Custom model");
+  set("t-ig-size", "Canvas");
+  set("t-ig-custom-size", "Custom size");
+  set("t-ig-refs", "Reference images");
+  set("t-ig-ref-choose", "Choose images");
+  set("t-ig-ref-choose-sub", "PNG, JPG, WebP or GIF");
+  set("t-ig-ref-url", "Add image URL");
+  set("ig-ref-add-url-label", "Add");
+  set("ig-generate-label", "Generate");
+  set("t-ig-preview", "Preview");
+  set("ig-save-label", "Save image");
+  set("t-ig-empty-title", "Ready when you are");
+  set("t-ig-empty-sub", "No image yet");
+  const imagePrompt = document.getElementById("ig-prompt") as HTMLTextAreaElement | null;
+  if (imagePrompt) imagePrompt.placeholder = t("Describe the image you want…");
+  const connectionStatus = document.getElementById("ig-connection-status");
+  if (connectionStatus) {
+    connectionStatus.textContent = t(connectionStatus.dataset.ready === "true" ? "Connected" : "Setup required");
+  }
+  const modelRefresh = document.getElementById("ig-model-refresh");
+  if (modelRefresh) {
+    modelRefresh.title = t("Refresh");
+    modelRefresh.setAttribute("aria-label", t("Refresh"));
+  }
   // general
   set("t-lang", "Language");
   set("t-lang2", "Language");
@@ -1503,6 +1543,427 @@ function initQuickBubbles() {
   };
 }
 
+// ------------------------------------------------------------ image gen ----
+// ------------------------------------------------------------ image gen ----
+// AI image generation (Settings → Image tab). All HTTP calls go through Rust
+// commands (CORS-safe). The model list is fetched live from GET /v1/models so
+// new models never require a code change; a "Custom model" fallback covers
+// gateways without a models endpoint. Base URL + API key are user-provided
+// and stored in localStorage; nothing is hardcoded.
+const IG_KEY_BASE = "ig_base_url";
+const IG_KEY_API = "ig_api_key";
+const IG_KEY_MODEL = "ig_model";
+const IG_KEY_CUSTOM_MODEL = "ig_custom_model";
+const IG_KEY_SIZE = "ig_size";
+const IG_KEY_CUSTOM_SIZE = "ig_custom_size";
+const IG_KEY_REFS = "ig_refs";
+const IG_CUSTOM = "__custom__";
+
+function resolveImageModelSelection(savedSelection: string, models: string[]): string {
+  if (savedSelection === IG_CUSTOM || models.includes(savedSelection)) return savedSelection;
+  return models[0] ?? IG_CUSTOM;
+}
+
+type ImageModelRequest = {
+  id: number;
+  baseUrl: string;
+  apiKey: string;
+};
+
+function isCurrentImageModelRequest(
+  request: ImageModelRequest,
+  latestRequestId: number,
+  currentBaseUrl: string,
+  currentApiKey: string,
+): boolean {
+  return request.id === latestRequestId
+    && request.baseUrl === currentBaseUrl.trim()
+    && request.apiKey === currentApiKey.trim();
+}
+
+interface ImageGenOutcome { mime: string; base64: string }
+
+/// Fixed output-size choices. Tier + ratio pairs follow the 2.1 docs
+/// (e.g. "2K" + "16:9" → 2624×1472); exact sizes work on both 2.0 and 2.1.
+const IG_SIZE_OPTIONS: { label: string; size: string; ratio: string }[] = [
+  { label: "1024 × 1024", size: "1024x1024", ratio: "" },
+  { label: "1024 × 768", size: "1024x768", ratio: "" },
+  { label: "768 × 1024", size: "768x1024", ratio: "" },
+  { label: "2K · 1:1  → 2048 × 2048", size: "2K", ratio: "1:1" },
+  { label: "2K · 16:9 → 2624 × 1472", size: "2K", ratio: "16:9" },
+  { label: "2K · 3:4  → 1728 × 2304", size: "2K", ratio: "3:4" },
+  { label: "2K · 9:16 → 1472 × 2624", size: "2K", ratio: "9:16" },
+  { label: "2K · 21:9 → 3136 × 1344", size: "2K", ratio: "21:9" },
+  { label: "Custom…", size: IG_CUSTOM, ratio: "" },
+];
+
+function initImageGen() {
+  const base = document.getElementById("ig-base") as HTMLInputElement | null;
+  const key = document.getElementById("ig-key") as HTMLInputElement | null;
+  const prompt = document.getElementById("ig-prompt") as HTMLTextAreaElement | null;
+  const genBtn = document.getElementById("ig-generate") as HTMLButtonElement | null;
+  const status = document.getElementById("ig-status") as HTMLElement | null;
+  const errorEl = document.getElementById("ig-error") as HTMLElement | null;
+  const result = document.getElementById("ig-result") as HTMLElement | null;
+  const emptyState = document.getElementById("ig-empty") as HTMLElement | null;
+  const progressState = document.getElementById("ig-progress") as HTMLElement | null;
+  const canvas = document.querySelector<HTMLElement>(".ig-canvas");
+  const servicePanel = document.getElementById("ig-service-panel") as HTMLDetailsElement | null;
+  const connectionStatus = document.getElementById("ig-connection-status") as HTMLElement | null;
+  const generateLabel = document.getElementById("ig-generate-label") as HTMLElement | null;
+  const preview = document.getElementById("ig-preview") as HTMLImageElement | null;
+  const meta = document.getElementById("ig-meta") as HTMLElement | null;
+  const saveBtn = document.getElementById("ig-save") as HTMLButtonElement | null;
+  const savedMsg = document.getElementById("ig-saved-msg") as HTMLElement | null;
+  const modelSel = document.getElementById("ig-model") as HTMLSelectElement | null;
+  const modelRefresh = document.getElementById("ig-model-refresh") as HTMLButtonElement | null;
+  const modelStatus = document.getElementById("ig-model-status") as HTMLElement | null;
+  const customModelRow = document.getElementById("ig-custom-model-row") as HTMLElement | null;
+  const customModel = document.getElementById("ig-custom-model") as HTMLInputElement | null;
+  const sizeSel = document.getElementById("ig-size") as HTMLSelectElement | null;
+  const customSizeRow = document.getElementById("ig-custom-size-row") as HTMLElement | null;
+  const customSize = document.getElementById("ig-custom-size") as HTMLInputElement | null;
+  const refUrl = document.getElementById("ig-ref-url") as HTMLInputElement | null;
+  const refAddUrl = document.getElementById("ig-ref-add-url") as HTMLButtonElement | null;
+  const refAddFile = document.getElementById("ig-ref-add-file") as HTMLButtonElement | null;
+  const refFile = document.getElementById("ig-ref-file") as HTMLInputElement | null;
+  const refGrid = document.getElementById("ig-ref-grid") as HTMLElement | null;
+  const refCount = document.getElementById("ig-ref-count") as HTMLElement | null;
+  if (!base || !key || !prompt || !genBtn) return;
+
+  const lsGet = (k: string, d = "") => localStorage.getItem(k) ?? d;
+  const lsSet = (k: string, v: string) => localStorage.setItem(k, v);
+  let modelLoadRequest = 0;
+
+  // ---- service config ----
+  base.value = lsGet(IG_KEY_BASE);
+  key.value = lsGet(IG_KEY_API);
+  const updateConnectionState = () => {
+    const configured = Boolean(base.value.trim() && key.value.trim());
+    if (connectionStatus) {
+      connectionStatus.dataset.ready = String(configured);
+      connectionStatus.classList.toggle("ready", configured);
+      connectionStatus.textContent = t(configured ? "Connected" : "Setup required");
+    }
+    if (servicePanel && !configured) servicePanel.open = true;
+  };
+  const persistConnection = () => {
+    lsSet(IG_KEY_BASE, base.value);
+    lsSet(IG_KEY_API, key.value);
+    modelLoadRequest += 1;
+    if (modelRefresh) modelRefresh.disabled = false;
+    updateConnectionState();
+  };
+  base.addEventListener("input", persistConnection);
+  key.addEventListener("input", persistConnection);
+  updateConnectionState();
+
+  // ---- size select (static choices + custom) ----
+  if (sizeSel) {
+    IG_SIZE_OPTIONS.forEach((o) => {
+      const opt = document.createElement("option");
+      opt.value = o.size;
+      opt.textContent = o.label;
+      sizeSel.appendChild(opt);
+    });
+    sizeSel.value = lsGet(IG_KEY_SIZE, "1024x1024");
+    sizeSel.onchange = () => {
+      lsSet(IG_KEY_SIZE, sizeSel.value);
+      if (customSizeRow) customSizeRow.hidden = sizeSel.value !== IG_CUSTOM;
+    };
+    if (customSizeRow) customSizeRow.hidden = sizeSel.value !== IG_CUSTOM;
+    if (customSize) customSize.value = lsGet(IG_KEY_CUSTOM_SIZE, "1024x768");
+    if (customSize) customSize.addEventListener("input", () => lsSet(IG_KEY_CUSTOM_SIZE, customSize.value));
+  }
+
+  // ---- model select: live from GET /v1/models, custom fallback ----
+  const modelOptions = (preferred?: string) => {
+    if (!modelSel) return;
+    const selection = preferred || modelSel.value || lsGet(IG_KEY_MODEL, IG_CUSTOM);
+    modelSel.innerHTML = "";
+    const addOpt = (v: string, label: string) => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = label;
+      modelSel.appendChild(opt);
+    };
+    addOpt(IG_CUSTOM, t("Custom model…"));
+    for (const m of cachedModels) addOpt(m, m);
+    modelSel.value = resolveImageModelSelection(selection, cachedModels);
+    if (customModelRow) customModelRow.hidden = modelSel.value !== IG_CUSTOM;
+  };
+
+  let cachedModels: string[] = [];
+  const loadModels = async (manual = false) => {
+    if (!modelSel) return;
+    const request: ImageModelRequest = {
+      id: modelLoadRequest += 1,
+      baseUrl: base.value.trim(),
+      apiKey: key.value.trim(),
+    };
+    if (!request.baseUrl || !request.apiKey) {
+      if (modelStatus) { modelStatus.hidden = false; modelStatus.textContent = t("Enter Base URL and API key, then refresh the model list."); }
+      if (modelRefresh) modelRefresh.disabled = false;
+      modelOptions();
+      return;
+    }
+    if (modelRefresh) modelRefresh.disabled = true;
+    if (modelStatus) { modelStatus.hidden = false; modelStatus.textContent = t("Loading models…"); }
+    try {
+      const all = await invoke<string[]>("list_image_models", {
+        baseUrl: request.baseUrl,
+        apiKey: request.apiKey,
+      });
+      if (!isCurrentImageModelRequest(
+        request,
+        modelLoadRequest,
+        base.value,
+        key.value,
+      )) return;
+      // 不过滤：中转站模型命名各异（agnes-image-*、diffusiongemma、dall-e…），
+      // 关键词过滤必然漏；全部列出让用户自选，选错由接口报错兜底。
+      cachedModels = all;
+      const prev = lsGet(IG_KEY_MODEL, IG_CUSTOM);
+      const keep = resolveImageModelSelection(prev, all);
+      lsSet(IG_KEY_MODEL, keep);
+      if (modelStatus) { modelStatus.hidden = true; modelStatus.textContent = ""; }
+      modelOptions(keep);
+    } catch (e) {
+      if (!isCurrentImageModelRequest(
+        request,
+        modelLoadRequest,
+        base.value,
+        key.value,
+      )) return;
+      cachedModels = [];
+      if (modelStatus) {
+        modelStatus.hidden = false;
+        modelStatus.textContent = t("Couldn't load models:") + " " + (typeof e === "string" ? e : String(e));
+      }
+      modelOptions();
+    } finally {
+      if (request.id === modelLoadRequest && modelRefresh) modelRefresh.disabled = false;
+    }
+    if (manual) modelSel.focus();
+  };
+  if (modelSel) {
+    modelOptions();
+    modelSel.onchange = () => {
+      lsSet(IG_KEY_MODEL, modelSel.value);
+      const isCustom = modelSel.value === IG_CUSTOM;
+      if (customModelRow) customModelRow.hidden = !isCustom;
+      if (isCustom) customModel?.focus();
+    };
+    if (customModel) {
+      customModel.value = lsGet(IG_KEY_CUSTOM_MODEL);
+      customModel.addEventListener("input", () => lsSet(IG_KEY_CUSTOM_MODEL, customModel.value));
+    }
+    if (modelRefresh) modelRefresh.onclick = () => { void loadModels(true); };
+    // Auto-load once when credentials are already configured.
+    if (base.value.trim() && key.value.trim()) void loadModels();
+  }
+
+  // ---- reference images ----
+  const refs: string[] = (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(IG_KEY_REFS) || "[]");
+      return Array.isArray(v) ? v.filter((x: unknown) => typeof x === "string") : [];
+    } catch { return []; }
+  })();
+  const persistRefs = () => localStorage.setItem(IG_KEY_REFS, JSON.stringify(refs));
+  const renderRefs = () => {
+    if (!refGrid) return;
+    refGrid.innerHTML = "";
+    refs.forEach((r, i) => {
+      const cell = document.createElement("div");
+      cell.className = "ig-ref-cell";
+      if (r.startsWith("data:")) {
+        const img = document.createElement("img");
+        img.alt = t("Local image");
+        img.src = r;
+        cell.appendChild(img);
+      } else {
+        const remote = document.createElement("span");
+        remote.className = "ig-ref-remote";
+        remote.innerHTML = uiIcon("link");
+        remote.title = r;
+        cell.appendChild(remote);
+      }
+      const del = document.createElement("button");
+      del.className = "ig-ref-del";
+      del.type = "button";
+      del.innerHTML = uiIcon("x");
+      del.title = t("Remove");
+      del.setAttribute("aria-label", t("Remove"));
+      del.onclick = () => { refs.splice(i, 1); persistRefs(); renderRefs(); };
+      cell.appendChild(del);
+      refGrid.appendChild(cell);
+    });
+    if (refCount) refCount.textContent = String(refs.length);
+  };
+  if (refAddUrl && refUrl) {
+    refAddUrl.onclick = () => {
+      let url = refUrl.value.trim();
+      if (!url) return;
+      if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+      if (!refs.includes(url)) { refs.push(url); persistRefs(); renderRefs(); }
+      refUrl.value = "";
+    };
+    refUrl.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") refAddUrl.click();
+    });
+  }
+  if (refAddFile && refFile) {
+    refAddFile.onclick = () => refFile.click();
+    refFile.onchange = () => {
+      const files = Array.from(refFile.files || []);
+      let pending = files.length;
+      if (!pending) return;
+      files.forEach((f) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const uri = String(reader.result || "");
+          if (uri && !refs.includes(uri)) { refs.push(uri); persistRefs(); renderRefs(); }
+          if (--pending === 0) refFile.value = "";
+        };
+        reader.readAsDataURL(f);
+      });
+    };
+  }
+  renderRefs();
+
+  // ---- prompt samples ----
+  document.querySelectorAll<HTMLButtonElement>(".ig-samples button").forEach((b) => {
+    const labelKey = b.dataset.i18n;
+    if (labelKey) b.textContent = t(labelKey);
+    b.addEventListener("click", () => {
+      prompt.value = b.dataset.p || "";
+      prompt.focus();
+    });
+  });
+
+  // ---- generate ----
+  let isBusy = false;
+  let hasResult = false;
+  const syncCanvasState = () => {
+    const hasError = Boolean(errorEl && !errorEl.hidden);
+    if (emptyState) emptyState.hidden = isBusy || hasResult || hasError;
+    if (progressState) progressState.hidden = !isBusy;
+    if (result) result.hidden = !hasResult;
+    if (saveBtn) saveBtn.hidden = !hasResult;
+    canvas?.classList.toggle("is-generating", isBusy);
+    canvas?.classList.toggle("has-result", hasResult);
+    canvas?.classList.toggle("has-error", hasError);
+  };
+  const setError = (text: string | null) => {
+    if (errorEl) {
+      errorEl.hidden = !text;
+      errorEl.textContent = text ?? "";
+    }
+    syncCanvasState();
+  };
+  const setBusy = (busy: boolean) => {
+    isBusy = busy;
+    genBtn.disabled = busy;
+    canvas?.setAttribute("aria-busy", String(busy));
+    if (generateLabel) generateLabel.textContent = t(busy ? "Generating…" : "Generate");
+    if (status) status.textContent = t("Generating… this can take seconds to a minute.");
+    syncCanvasState();
+  };
+  syncCanvasState();
+
+  const currentModel = () => {
+    if (modelSel) {
+      if (modelSel.value === IG_CUSTOM) return customModel?.value.trim() || "";
+      return modelSel.value;
+    }
+    return "";
+  };
+  const currentSize = () => {
+    if (!sizeSel) return "1024x1024";
+    const opt = IG_SIZE_OPTIONS.find((o) => o.size === sizeSel!.value);
+    if (opt) {
+      if (opt.size === IG_CUSTOM) return customSize?.value.trim() || "";
+      return { size: opt.size, ratio: opt.ratio };
+    }
+    return { size: sizeSel.value, ratio: "" };
+  };
+
+  genBtn.onclick = () => {
+    const promptText = prompt.value.trim();
+    const baseUrl = base.value.trim();
+    const apiKey = key.value.trim();
+    const model = currentModel();
+    const size = currentSize();
+    setError(null);
+    if (!promptText) { setError(t("Prompt is empty")); prompt.focus(); return; }
+    if (!baseUrl) {
+      setError(t("Base URL is empty"));
+      if (servicePanel) servicePanel.open = true;
+      base.focus();
+      return;
+    }
+    if (!apiKey) {
+      setError(t("API key is empty"));
+      if (servicePanel) servicePanel.open = true;
+      key.focus();
+      return;
+    }
+    if (!model) { setError(t("Select or enter a model")); modelSel?.focus(); return; }
+    if (typeof size === "string") {
+      if (!/^\d+x\d+$/.test(size)) {
+        setError(t("Custom size must look like 1024x768"));
+        customSize?.focus();
+        return;
+      }
+    }
+    if (savedMsg) savedMsg.hidden = true;
+    setBusy(true);
+    invoke<ImageGenOutcome>("generate_image", {
+      args: {
+        baseUrl,
+        apiKey,
+        prompt: promptText,
+        model,
+        size: typeof size === "string" ? size : size.size,
+        ratio: typeof size === "string" ? undefined : size.ratio || undefined,
+        imageRefs: refs,
+      },
+    })
+      .then((outcome) => {
+        if (!preview) return;
+        preview.alt = promptText;
+        preview.src = `data:${outcome.mime};base64,${outcome.base64}`;
+        preview.onload = () => {
+          if (meta) meta.textContent = `${preview.naturalWidth} × ${preview.naturalHeight}`;
+        };
+        hasResult = true;
+        syncCanvasState();
+      })
+      .catch((e: unknown) => {
+        const msg = typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+        setError(msg);
+      })
+      .finally(() => setBusy(false));
+  };
+
+  if (saveBtn) {
+    saveBtn.onclick = () => {
+      if (!preview || !preview.src.startsWith("data:")) return;
+      const [metaPart, b64] = preview.src.split(",", 2);
+      const mime = metaPart.match(/data:([^;]+)/)?.[1] || "image/png";
+      const ext = mime === "image/jpeg" ? "jpg" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "png";
+      invoke<string>("save_image_file", {
+        base64: b64,
+        fileName: `desktoppet-${Date.now()}.${ext}`,
+      })
+        .then((path) => {
+          if (savedMsg) { savedMsg.hidden = false; savedMsg.textContent = `${t("Saved to")} ${path}`; }
+        })
+        .catch((e: unknown) => setError(typeof e === "string" ? e : String(e)));
+    };
+  }
+}
 initTabs();
 initLang();
 initIcons();
@@ -1522,3 +1983,4 @@ initMisc();
 initDesktopPets();
 initFloatingBall();
 initQuickBubbles();
+initImageGen();

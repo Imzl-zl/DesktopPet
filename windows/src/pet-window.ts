@@ -363,6 +363,9 @@ const petWindowDrag = new WindowDragController({
   startDrag: async () => {
     await petInteractionLease.wait();
     await beginManualDrag();
+    // System-level drag (DWM): zero per-frame IPC, buttery follow. Resolves
+    // only when the mouse is released, so no pointerup is needed afterwards.
+    await getCurrentWindow().startDragging();
   },
   finishDrag: async () => {
     finishManualDrag();

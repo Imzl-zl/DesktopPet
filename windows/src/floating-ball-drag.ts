@@ -8,7 +8,7 @@ import {
 
 export type { PhysicalPoint, Point };
 
-export type FloatingBallDragHost = Omit<WindowDragHost, "startDrag" | "finishDrag"> & {
+export type FloatingBallDragHost = Omit<WindowDragHost, "finishDrag"> & {
   persistPosition(): Promise<void>;
 };
 
@@ -19,7 +19,7 @@ export class FloatingBallDragController extends WindowDragController {
     super({
       cursorPosition: () => host.cursorPosition(),
       setPosition: (position) => host.setPosition(position),
-      startDrag: () => {},
+      startDrag: () => host.startDrag(),
       finishDrag: () => host.persistPosition(),
     }, thresholdPx, clickMaxMs);
   }

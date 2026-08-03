@@ -1,0 +1,53 @@
+[-1388358ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/monitoring?o=4508179396558848&p=4508493378158592&r=us:0
+[-1387396ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496:0
+[-1385123ms] [INFO] This page uses Chrome's Built-In AI features (LanguageDetector)! We're always improving our models; please submit your feedback here: https://issues.chromium.org/issues/new?component=1583316 @ chrome-extension://gjkaolmncjlagdhkamocpknlngfbfmnm/content_script.js:4893
+[-1369354ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/monitoring?o=4508179396558848&p=4508493378158592&r=us:0
+[-1211897ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/monitoring?o=4508179396558848&p=4508493378158592&r=us:0
+[-1211897ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/monitoring?o=4508179396558848&p=4508493378158592&r=us:0
+[-1211896ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/monitoring?o=4508179396558848&p=4508493378158592&r=us:0
+[-1211397ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/a/t/?verbose=1&ip=1&_=1785745293022:0
+[-1211116ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/a/t/?verbose=1&ip=1&_=1785745293524:0
+[-1206158ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/a/engage/?verbose=1&ip=1&_=1785745298762:0
+[-1205145ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/a/t/?verbose=1&ip=1&_=1785745299774:0
+[-1204224ms] [ERROR] Blocked script execution in 'about:blank' because the document's frame is sandboxed and the 'allow-scripts' permission is not set. @ https://cdn.cookielaw.org/scripttemplates/202603.1.0/otBannerSdk.js:6
+[-1204224ms] [ERROR] Blocked script execution in 'about:blank' because the document's frame is sandboxed and the 'allow-scripts' permission is not set. @ https://cdn.cookielaw.org/scripttemplates/202603.1.0/otBannerSdk.js:6
+[-1204215ms] [ERROR] Blocked script execution in 'about:blank' because the document's frame is sandboxed and the 'allow-scripts' permission is not set. @ https://cdn.cookielaw.org/scripttemplates/202603.1.0/otBannerSdk.js:6
+[-1204212ms] [ERROR] Blocked script execution in 'about:blank' because the document's frame is sandboxed and the 'allow-scripts' permission is not set. @ https://cdn.cookielaw.org/scripttemplates/202603.1.0/otBannerSdk.js:6
+[-1204212ms] [ERROR] Blocked script execution in 'about:blank' because the document's frame is sandboxed and the 'allow-scripts' permission is not set. @ https://cdn.cookielaw.org/scripttemplates/202603.1.0/otBannerSdk.js:6
+[-1204211ms] [ERROR] Blocked script execution in 'about:blank' because the document's frame is sandboxed and the 'allow-scripts' permission is not set. @ https://cdn.cookielaw.org/scripttemplates/202603.1.0/otBannerSdk.js:6
+[-1202942ms] [ERROR] Permissions policy violation: compute-pressure is not allowed in this document. @ https://cdn.grok.com/_next/static/chunks/05dxkk12zb81u.js:30
+[-1199147ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/a/t/?verbose=1&ip=1&_=1785745305772:0
+[-1199146ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/api/log_metric:0
+[-1185153ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/api/log_metric:0
+[-1211854ms] [WARNING] react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next Object @ https://cdn.grok.com/_next/static/chunks/1bq2nmcncwqbd.js:9
+[-1202942ms] [INFO] 
+█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░▓
+░                                        ░
+░                                        ░
+░                                 ░▒░    ░
+░                ░░▒▒▒▒▒░░░     ░█░      ░
+░            ░▒████████████▓░ ▒██░       ░
+░          ░████▓░         ░▓███░        ░
+░         ░███▒          ░▓█████░        ░
+░         ███░         ░██▒  ▓███░       ░
+░        ░███░       ▒█▒      ███░       ░
+░         ███░     ▒░░       ▒███░       ░
+░         ▒███░             ░███░        ░
+░         ░███▓░         ░▒████░         ░
+░         ▓█░ ░▒▓████████████░           ░
+░       ▒▒░     ░░▒█████▒░░              ░
+░     ▒░                                 ░
+░                                        ░
+░                                        ░
+█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░▓
+
+Curious? Join us at https://x.ai/careers @ https://cdn.grok.com/_next/static/chunks/1bq2nmcncwqbd.js:9
+[  587601ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/a/t/?verbose=1&ip=1&_=1785747092478:0
+[  588281ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/monitoring?o=4508179396558848&p=4508493378158592&r=us:0
+[  588283ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/events:0
+[  588288ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/api/log_metric:0
+[  588289ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/a/t/?verbose=1&ip=1&_=1785747093160:0
+[  590849ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/api/log_metric:0
+[  592865ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/a/t/?verbose=1&ip=1&_=1785747097774:0
+[  629645ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/api/log_metric:0
+[  629660ms] [ERROR] Failed to load resource: net::ERR_BLOCKED_BY_CLIENT @ https://grok.com/_data/v1/a/t/?verbose=1&ip=1&_=1785747134518:0

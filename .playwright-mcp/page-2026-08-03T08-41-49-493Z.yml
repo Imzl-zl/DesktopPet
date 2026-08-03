@@ -1,0 +1,87 @@
+- generic [ref=f1e2]:
+  - complementary [ref=f1e3]:
+    - generic [ref=f1e4]: DesktopPet
+    - generic "Click to rename" [ref=f1e16]: 还没有宠物
+    - generic [ref=f1e20]:
+      - button "喂食" [ref=f1e21] [cursor=pointer]
+      - generic [ref=f1e22]: 给伙伴一份小零食,喂食可获得 XP。
+    - generic [ref=f1e23]: v0.1.0
+  - generic [ref=f1e25]:
+    - navigation [ref=f1e26]:
+      - button "宠物" [ref=f1e27] [cursor=pointer]
+      - button "气泡" [ref=f1e36] [cursor=pointer]
+      - button "养护" [ref=f1e42] [cursor=pointer]
+      - button "通用" [ref=f1e47] [cursor=pointer]
+      - button "Image" [ref=f1e53] [cursor=pointer]
+    - main [ref=f1e59]:
+      - generic [ref=f1e60]:
+        - generic [ref=f1e61]:
+          - heading "你的伙伴" [level=1] [ref=f1e62]
+          - paragraph [ref=f1e63]: 选择、装扮并设置桌面宠物的动画。
+        - generic [ref=f1e64]:
+          - generic [ref=f1e65]: 显示
+          - generic [ref=f1e66]:
+            - generic [ref=f1e67] [cursor=pointer]:
+              - generic [ref=f1e68]:
+                - generic [ref=f1e69]: 显示悬浮球
+                - generic [ref=f1e70]: 桌面上的可拖动小球。左键发气泡，右键开设置，靠近屏幕边缘自动吸边。
+              - checkbox "显示悬浮球 桌面上的可拖动小球。左键发气泡，右键开设置，靠近屏幕边缘自动吸边。" [checked] [ref=f1e71]
+            - generic [ref=f1e72] [cursor=pointer]:
+              - generic [ref=f1e73]:
+                - generic [ref=f1e74]: 显示桌面宠物
+                - generic [ref=f1e75]: 暂时隐藏或显示所有宠物，而不从桌面移除它们。
+              - checkbox "显示桌面宠物 暂时隐藏或显示所有宠物，而不从桌面移除它们。" [checked] [ref=f1e76]
+        - generic [ref=f1e77]:
+          - generic [ref=f1e78]: 宠物素材库
+          - generic [ref=f1e79]:
+            - paragraph [ref=f1e80]: 从素材库添加新的桌面宠物。
+            - generic [ref=f1e81]: 还没有宠物。点击浏览来添加。
+            - generic [ref=f1e82]:
+              - button "浏览宠物…" [ref=f1e83] [cursor=pointer]
+              - button "创建宠物…" [ref=f1e91] [cursor=pointer]
+        - generic [ref=f1e97]:
+          - generic [ref=f1e99]:
+            - generic [ref=f1e100]: 桌面宠物 (0/12)
+            - paragraph [ref=f1e101]: 每只宠物都会独立保存自己的名称、养成、尺寸和漫游设置。
+          - generic [ref=f1e102]: 桌面上还没有宠物。请从素材库添加。
+        - generic [ref=f1e105]:
+          - generic [ref=f1e106]: 动画
+          - generic [ref=f1e107]:
+            - generic [ref=f1e108]:
+              - button "空闲" [ref=f1e109] [cursor=pointer]
+              - button "工作中" [ref=f1e110] [cursor=pointer]
+              - button "等待中" [ref=f1e111] [cursor=pointer]
+              - button "完成" [ref=f1e112] [cursor=pointer]
+              - button "庆祝" [ref=f1e113] [cursor=pointer]
+            - generic [ref=f1e114]: 悬停在剪辑上即可预览。
+        - generic [ref=f1e116]:
+          - generic [ref=f1e117]: 屏幕上的大小
+          - generic [ref=f1e120]:
+            - slider [disabled] [ref=f1e121] [cursor=pointer]: "100"
+            - generic [ref=f1e122]: "100"
+            - generic [ref=f1e123]:
+              - button "S" [ref=f1e124] [cursor=pointer]
+              - button "M" [ref=f1e125] [cursor=pointer]
+              - button "L" [ref=f1e126] [cursor=pointer]
+        - generic [ref=f1e127]:
+          - generic [ref=f1e128]: 漫游
+          - generic [ref=f1e129]:
+            - generic [ref=f1e130]:
+              - generic [ref=f1e131]: 模式
+              - combobox [disabled] [ref=f1e132] [cursor=pointer]:
+                - option "停留"
+                - option "随机游走" [selected]
+                - option "跟随鼠标"
+                - option "攀爬窗口"
+            - generic [ref=f1e133]:
+              - generic [ref=f1e134]: 速度
+              - generic [ref=f1e135]:
+                - slider [disabled] [ref=f1e136] [cursor=pointer]: "5"
+                - generic [ref=f1e137]: "5"
+            - generic [ref=f1e138]:
+              - generic [ref=f1e139]: 漫游停顿
+              - generic [ref=f1e140]:
+                - spinbutton [disabled] [ref=f1e141]: "1.2"
+                - generic [ref=f1e142]: –
+                - spinbutton [disabled] [ref=f1e143]: "3.5"
+                - generic [ref=f1e144]: 秒

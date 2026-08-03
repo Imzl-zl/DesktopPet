@@ -4,24 +4,36 @@
 // directory.
 
 import type { Pet } from "../pet";
-import { destroyEngine, initEngine, setDragging, setMood } from "./engine";
 import {
+  beginManualDrag,
+  destroyEngine,
+  finishManualDrag,
+  initEngine,
+  moveManualDrag,
+  setDragging,
+  setMood,
+} from "./engine";
+import {
+  ConfigSource,
   ROAM_KEY,
   ROAM_MODE_KEY,
   ROAM_SPEED_KEY,
   VALID_MODES,
   loadConfig,
+  setRoamConfigSource,
 } from "./types";
 import type { RoamMode } from "./types";
 
-export { setDragging, setMood };
+export { beginManualDrag, finishManualDrag, moveManualDrag, setDragging, setMood };
 export { ROAM_KEY, ROAM_MODE_KEY, ROAM_SPEED_KEY };
 
-export function initRoam(pet: Pet): void {
+export function initRoam(pet: Pet, configSource?: ConfigSource): void {
+  setRoamConfigSource(configSource ?? null);
   initEngine(pet);
 }
 
 export function destroyRoam(): void {
+  setRoamConfigSource(null);
   destroyEngine();
 }
 

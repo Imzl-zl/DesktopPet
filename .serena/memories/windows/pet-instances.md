@@ -1,0 +1,3 @@
+- Instance state: `windows/src/pets.ts`; integration/UI: `windows/src/settings.ts`.
+- `PetStore.selectedId` is the sole editing target. Every desktop pet keeps an independent name and settings; a `LibPet` only supplies a reusable sprite definition.
+- The Settings Pet page has an editor/preview for one selected instance and separate lists for desktop instances and library materials.

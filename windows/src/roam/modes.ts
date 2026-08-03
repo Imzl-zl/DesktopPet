@@ -5,6 +5,7 @@
 import { cursorPosition } from "@tauri-apps/api/window";
 import type { Pet } from "../pet";
 import type { Environment, Point, Rect, RoamMode } from "./types";
+import { sampleWanderPauseMs, type WanderPauseRange } from "./pause";
 import {
   DT_SEC,
   IDLE_MS_MAX,
@@ -19,6 +20,12 @@ import {
 
 const ROW_RIGHT = 1;
 const ROW_LEFT = 2;
+const ARRIVAL_DISTANCE = 8;
+
+type HorizontalDirection = -1 | 1;
+
+let climbDirection: HorizontalDirection | null = null;
+let activeMode: RoamMode | null = null;
 
 export interface ModeContext {
   env: Environment;
@@ -30,6 +37,12 @@ export interface ModeContext {
 /// unchanged position if the mode didn't move). Each mode handles its own
 /// animation row; if no movement happens, the caller clears the row.
 export async function runMode(mode: RoamMode, ctx: ModeContext): Promise<Point> {
+  if (mode !== activeMode) {
+    if (mode !== "climb") climbDirection = null;
+    wanderTarget = null;
+    restUntil = 0;
+    activeMode = mode;
+  }
   switch (mode) {
     case "stay": return ctx.pos;
     case "cursor": return followCursor(ctx);
@@ -75,9 +88,29 @@ function inBounds(p: Point, bounds: Rect): boolean {
 /// Random walk within the work area. Walks to a target, idles, picks another.
 /// The target persists across ticks so the pet actually reaches it. Idling is
 /// done by setting `restUntil` (no blocking sleep) so the engine stays live.
-async function wander(ctx: ModeContext): Promise<Point> {
+function wander(ctx: ModeContext): Point {
+  const config = loadConfig();
+  if (config.mode !== "wander") {
+    wanderTarget = null;
+    restUntil = 0;
+    return ctx.pos;
+  }
+  return advanceWander(ctx, {
+    minMs: config.wanderPauseMinMs,
+    maxMs: config.wanderPauseMaxMs,
+  });
+}
+
+function fallbackWander(ctx: ModeContext): Point {
+  restUntil = 0;
+  return advanceWander(ctx, {
+    minMs: IDLE_MS_MIN,
+    maxMs: IDLE_MS_MAX,
+  });
+}
+
+function advanceWander(ctx: ModeContext, pauseRange: WanderPauseRange): Point {
   const { env, pos, pet } = ctx;
-  if (loadConfig().mode !== "wander") { wanderTarget = null; restUntil = 0; return pos; }
   if (Date.now() < restUntil) return pos;
   if (!wanderTarget || !inBounds(wanderTarget, env.workArea)) {
     wanderTarget = randomTarget(env.workArea);
@@ -88,9 +121,13 @@ async function wander(ctx: ModeContext): Promise<Point> {
   const dy = target.y - pos.y;
   const dist = Math.hypot(dx, dy);
 
-  if (dist < 6) {
+  // Arrival must match moveToward's stopping threshold (ARRIVAL_DISTANCE).
+  // If this check used a smaller radius (e.g. 6), a target 6–8px away would
+  // make moveToward stop without advanceWander picking a new target, and the
+  // pet would stand still forever.
+  if (dist < ARRIVAL_DISTANCE) {
     wanderTarget = null;
-    restUntil = Date.now() + IDLE_MS_MIN + Math.random() * (IDLE_MS_MAX - IDLE_MS_MIN);
+    restUntil = Date.now() + sampleWanderPauseMs(pauseRange);
     pet?.clearRow();
     return pos;
   }
@@ -98,29 +135,50 @@ async function wander(ctx: ModeContext): Promise<Point> {
 }
 
 /// Climb along the top edges of visible application windows, like Shimeji.
-/// Walks horizontally until reaching the edge of a window, then either drops
-/// to the next surface below or idles before reversing direction.
+/// Moves to the nearest reachable window top before walking its edge, then
+/// pauses and reverses direction at an edge.
 async function climb(ctx: ModeContext): Promise<Point> {
   const { env, pos, pet } = ctx;
-  if (env.windows.length === 0) return wander(ctx);
-  if (Date.now() < restUntil) return pos;
-
-  const surface = findSurfaceBelow(pos, env);
-  if (!surface) return pos;
-
-  const dir = pickClimbDirection(pos, surface, env);
-  const step = pxPerSec(loadConfig().speed) * DT_SEC;
-  const nextX = pos.x + dir * step;
-  const onEdge = nextX < surface.rect.left - 2 || nextX > surface.rect.right + 2;
-
-  if (onEdge) {
-    restUntil = Date.now() + IDLE_MS_MIN + Math.random() * (IDLE_MS_MAX - IDLE_MS_MIN);
-    pet?.clearRow();
+  if (env.windows.length === 0) {
+    climbDirection = null;
+    return fallbackWander(ctx);
+  }
+  if (Date.now() < restUntil) {
     return pos;
   }
 
+  const surface = findSurfaceBelow(pos, env);
+  if (!surface.isWindow || !isStandingOnSurface(pos, surface, env.workArea)) {
+    climbDirection = null;
+    const target = nearestClimbTarget(pos, env);
+    return target ? moveToward(target, pos, env.workArea, pet) : fallbackWander(ctx);
+  }
+
+  const support = surfaceSupportRange(surface.rect, env.workArea);
+  if (!support) {
+    climbDirection = null;
+    return fallbackWander(ctx);
+  }
+  const standY = climbTopY(surface.rect, env.workArea);
+
+  const dir = climbDirection ?? (Math.random() < 0.5 ? -1 : 1);
+  climbDirection = dir;
+  const step = pxPerSec(loadConfig().speed) * DT_SEC;
+  const nextX = pos.x + dir * step;
+  const onEdge = nextX < support.left - 2 || nextX > support.right + 2;
+
+  if (onEdge) {
+    restUntil = Date.now() + IDLE_MS_MIN + Math.random() * (IDLE_MS_MAX - IDLE_MS_MIN);
+    climbDirection = dir === 1 ? -1 : 1;
+    pet?.clearRow();
+    return {
+      x: Math.max(support.left, Math.min(support.right, pos.x)),
+      y: standY,
+    };
+  }
+
   const next = clampToBounds(
-    { x: nextX, y: surface.rect.top - WIN_H },
+    { x: nextX, y: standY },
     env.workArea,
   );
   pet?.setRow(dir > 0 ? ROW_RIGHT : ROW_LEFT);
@@ -131,7 +189,7 @@ function moveToward(target: Point, pos: Point, bounds: Rect, pet: Pet | null): P
   const dx = target.x - pos.x;
   const dy = target.y - pos.y;
   const dist = Math.hypot(dx, dy);
-  if (dist < 8) { pet?.clearRow(); return pos; }
+  if (dist < ARRIVAL_DISTANCE) { pet?.clearRow(); return pos; }
   const speed = pxPerSec(loadConfig().speed);
   const move = Math.min(dist, speed * DT_SEC);
   const next = clampToBounds(
@@ -150,23 +208,59 @@ function randomTarget(bounds: Rect): Point {
 
 interface SurfaceInfo { rect: Rect; isWindow: boolean }
 
-function findSurfaceBelow(pos: Point, env: Environment): SurfaceInfo | null {
-  let best: SurfaceInfo | null = { rect: env.workArea, isWindow: false };
-  let bestTop = env.workArea.bottom;
-  const centerX = pos.x + WIN_W / 2;
-  for (const w of env.windows) {
-    if (centerX < w.rect.left || centerX > w.rect.right) continue;
-    if (w.rect.top >= pos.y + WIN_H && w.rect.top < bestTop) {
-      bestTop = w.rect.top;
-      best = { rect: w.rect, isWindow: true };
-    }
-  }
-  return best;
+type SurfaceSupport = { left: number; right: number };
+
+function surfaceSupportRange(rect: Rect, bounds: Rect): SurfaceSupport | null {
+  const left = Math.max(bounds.left, rect.left - WIN_W / 2);
+  const right = Math.min(bounds.right - WIN_W, rect.right - WIN_W / 2);
+  return left <= right ? { left, right } : null;
 }
 
-function pickClimbDirection(pos: Point, surface: SurfaceInfo, _env: Environment): number {
-  const center = pos.x + WIN_W / 2;
-  const surfaceCenter = (surface.rect.left + surface.rect.right) / 2;
-  if (Math.abs(center - surfaceCenter) < 10) return Math.random() < 0.5 ? -1 : 1;
-  return center < surfaceCenter ? 1 : -1;
+/// Logical y for the pet window's TOP edge when standing on this surface.
+/// A window whose top edge sits too high for the pet to stand on (standing on
+/// it would push the pet off the top of the screen) is treated as reachable at
+/// the screen top: the pet is pinned to the top edge instead of falling back
+/// to random roaming on maximized/fullscreen desktops.
+function climbTopY(rect: Rect, workArea: Rect): number {
+  return Math.max(rect.top - WIN_H, workArea.top);
+}
+
+function isStandingOnSurface(pos: Point, surface: SurfaceInfo, workArea: Rect): boolean {
+  return Math.abs(pos.y - climbTopY(surface.rect, workArea)) < ARRIVAL_DISTANCE;
+}
+
+function nearestClimbTarget(pos: Point, env: Environment): Point | null {
+  let nearest: Point | null = null;
+  let nearestDistance = Infinity;
+
+  for (const window of env.windows) {
+    const support = surfaceSupportRange(window.rect, env.workArea);
+    // climbTopY clamps to the screen top, so only window tops below the
+    // reachable band are skipped (they would push the pet off the bottom).
+    const y = climbTopY(window.rect, env.workArea);
+    if (!support || y > env.workArea.bottom - WIN_H) continue;
+
+    const target = { x: Math.max(support.left, Math.min(support.right, pos.x)), y };
+    const distance = Math.hypot(target.x - pos.x, target.y - pos.y);
+    if (distance < nearestDistance) {
+      nearest = target;
+      nearestDistance = distance;
+    }
+  }
+
+  return nearest;
+}
+
+function findSurfaceBelow(pos: Point, env: Environment): SurfaceInfo {
+  // Standing on a window means the pet's top sits exactly at that window's
+  // climbTopY (within the arrival margin), matching isStandingOnSurface so
+  // the two can never disagree.
+  for (const w of env.windows) {
+    const support = surfaceSupportRange(w.rect, env.workArea);
+    if (!support || pos.x < support.left - ARRIVAL_DISTANCE || pos.x > support.right + ARRIVAL_DISTANCE) continue;
+    if (Math.abs(pos.y - climbTopY(w.rect, env.workArea)) < ARRIVAL_DISTANCE) {
+      return { rect: w.rect, isWindow: true };
+    }
+  }
+  return { rect: env.workArea, isWindow: false };
 }

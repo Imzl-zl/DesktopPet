@@ -137,12 +137,14 @@ function bounceY(vy: number, ny: number, bounds: Rect): [number, number] {
 /// Find the highest surface (window top edge or work-area bottom) under the
 /// pet's horizontal range [x1, x2], returned as the pet's TOP-Y when resting on
 /// it. `pos.y` is the window's top-left, so landing = top at `surface.top - WIN_H`.
+/// Window tops too high to stand on (pet would go off-screen) clamp to the
+/// work-area top, matching climbTopY in modes.ts.
 function findFloor(x1: number, x2: number, bounds: Rect, surfaces: Rect[]): number {
   let floor = bounds.bottom - WIN_H;
   for (const s of surfaces) {
     if (x2 < s.left || x1 > s.right) continue;
-    const top = s.top - WIN_H;
-    if (top < floor && top >= bounds.top) floor = top;
+    const top = Math.max(s.top - WIN_H, bounds.top);
+    if (top < floor) floor = top;
   }
   return floor;
 }

@@ -1,11 +1,10 @@
 {
   "identifier": "default",
-  "description": "Permissions for the pet overlay and the settings window.",
-  "windows": ["pet", "pet-*", "settings", "popover", "floating-ball"],
+  "description": "Permissions for the bootstrap, desktop-pet overlays, and settings windows.",
+  "windows": ["bootstrap", "pet-*", "settings", "popover", "floating-ball"],
   "permissions": [
     "core:default",
     "core:window:default",
-    "core:window:allow-start-dragging",
     "core:window:allow-set-position",
     "core:window:allow-set-size",
     "core:window:allow-set-focus",

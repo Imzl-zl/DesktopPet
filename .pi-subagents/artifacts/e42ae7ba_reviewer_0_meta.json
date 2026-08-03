@@ -1,0 +1,134 @@
+{
+  "runId": "e42ae7ba",
+  "agent": "reviewer",
+  "task": "只读复审本次性能改动，禁止编辑。上次审查发现并已修复两项阻断问题：1) 首次异步 scaleFactor/outerPosition 读取与 DPI/move 事件竞争；现用 `cacheGeneration` 阻止过时读取覆写事件缓存，新增可控交错测试。2) `onMoved`/`onScaleChanged` 订阅失败会永久锁住状态；现用 `Promise.allSettled`，失败清理半注册监听并允许下一次读取重试，新增测试。\n\n严格审查范围：`windows/src/roam/window.ts`、`windows/src/roam/window.test.ts`、`windows/src-tauri/src/lib.rs` 中 visible_wins 点击穿透分支、`windows/src/performance-contract.test.ts` 新增测试。其他工作区改动不是本次范围。\n\n契约：遵循 Tauri v2 官方 `onMoved`/`onScaleChanged`/`WebviewWindow::is_visible` 语义，保留拖拽、程序移动、跨 DPI 坐标正确性和 visibility 查询失败时的安全命中行为；不改漫游速度、物理、攀爬或设置。已有验证：`npm --prefix windows test` 37/37 通过，`npm --prefix windows run build` 通过，`cargo check --manifest-path windows/src-tauri/Cargo.toml` 通过，`git diff --check` 通过。\n\n请特别验证代次、pending promise、事件注册失败/部分成功和隐藏窗口分支。输出中文：Critical / Important / Minor（带文件行号），明确判断 ready 或 fixes required。\n\n---\n**Output:**\nWrite your findings to exactly this path: C:\\sudy\\github\\DesktopPet\\.pi-subagents\\review-performance-cache-followup.md\nThis path is authoritative for this run.\nIgnore any other output filename or output path mentioned elsewhere, including output destinations in the base agent prompt, system prompt, or task instructions.",
+  "exitCode": 0,
+  "usage": {
+    "input": 41770,
+    "output": 5219,
+    "cacheRead": 110080,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 5
+  },
+  "model": "cus-openai/gpt-5.6-terra:high",
+  "attemptedModels": [
+    "cus-openai/gpt-5.6-terra:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "cus-openai/gpt-5.6-terra:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 41770,
+        "output": 5219,
+        "cacheRead": 110080,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 5
+      }
+    }
+  ],
+  "durationMs": 129535,
+  "toolCount": 12,
+  "launchContractDigest": "73a3ff4e3884c94456652c9c41f7683f1d93de921719bb9fc0e0c9c8187f1430",
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "已给出一个 Important 发现（windows/src-tauri/src/lib.rs:691-694）和两个 Minor 测试覆盖发现，均含文件与行号；并列明已核实的正确行为。"
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "git diff --check -- windows/src/roam/window.ts windows/src/roam/window.test.ts windows/src-tauri/src/lib.rs windows/src/performance-contract.test.ts",
+          "result": "passed",
+          "summary": "指定范围内无空白错误。"
+        },
+        {
+          "command": "npm --prefix windows test -- --run src/roam/window.test.ts src/performance-contract.test.ts",
+          "result": "passed",
+          "summary": "2 个测试文件、14 个测试全部通过。"
+        },
+        {
+          "command": "npm --prefix windows test; npm --prefix windows run build; cargo check --manifest-path windows/src-tauri/Cargo.toml",
+          "result": "not-run",
+          "summary": "未重复执行调用方已报告通过的完整验证；本次运行了与审查范围直接相关的 Vitest 子集。"
+        }
+      ],
+      "validationOutput": [
+        "Tauri v2 前端定义确认 onMoved/onScaleChanged 返回 Promise<UnlistenFn>；Rust 依赖 tauri-2.11.2 确认 WebviewWindow::is_visible 返回 Result<bool>。",
+        "指定 Vitest 子集通过：14/14。"
+      ],
+      "residualRisks": [
+        "已知隐藏窗口仍在约每秒一次的持久化分支调用 outer_position，未达到测试名称和代码注释所述的完全跳过 geometry work。",
+        "事件注册失败测试未覆盖 onScaleChanged 失败/onMoved 成功及 unlisten 调用。"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "复审的性能改动为窗口逻辑坐标缓存和事件驱动失效、以及 Tauri 点击穿透循环对已知隐藏窗口的可见性筛选；未修改任何源文件。",
+      "reviewFindings": [
+        "important: windows/src-tauri/src/lib.rs:691-694 - 持久化分支对已知隐藏窗口仍执行 outer_position，违反隐藏窗口不进行 geometry work 的性能契约。",
+        "minor: windows/src/roam/window.test.ts:121-135 - 仅覆盖 onMoved 失败方向，未覆盖反向部分成功和 unlisten 断言。",
+        "minor: windows/src/performance-contract.test.ts:51-57 - 静态文本断言无法发现 visible_wins 之外的隐藏窗口几何读取。"
+      ],
+      "manualNotes": "结论为 fixes required；除上述隐藏窗口持久化查询外，代次防覆写、pending promise 合并、部分成功清理重试和 is_visible 查询失败的安全命中路径均已核实。"
+    }
+  },
+  "effects": {
+    "fileMutation": {
+      "status": "not-applicable",
+      "expected": false,
+      "attempted": true
+    }
+  },
+  "transcriptPath": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\e42ae7ba_reviewer_0_transcript.jsonl",
+  "timestamp": 1785561711746
+}

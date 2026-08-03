@@ -1,0 +1,4 @@
+- Windows persistent configuration uses `localStorage` keys; update through the owning module rather than direct ad hoc parsing.
+- `windows/src/pets.ts` owns immutable `PetStore` transformations. Each `PetInstance` has independent id/name/sprite/settings; library entries in `catalog.ts` are reusable sprite definitions.
+- `settings.ts` renders and persists the selected desktop instance; UI strings use `t()` / `i18n.ts` keys.
+- Maintain focused Vitest coverage near Windows state/layout changes.

@@ -1,0 +1,4 @@
+## Review
+- **Important** [windows/src/pet.ts](/C:/sudy/github/DesktopPet/windows/src/pet.ts:172): URL 去重只在 `load()` 入口判断。快速从精灵 A 切换到 B 时，A 的异步 `onload` 或 CORS 失败后的 `plain.onload` 仍会无条件写入 `this.img`、`clips` 和 `loaded`（[172](/C:/sudy/github/DesktopPet/windows/src/pet.ts:172)、[181](/C:/sudy/github/DesktopPet/windows/src/pet.ts:181)、[188](/C:/sudy/github/DesktopPet/windows/src/pet.ts:188)），即使 `loadedUrl` 已经是 B。因此窗口可能最终显示过期的 A 精灵，违反 URL/cached-instance 不留下 stale sprite 的要求。最小安全修复：为每次 `load` 捕获递增请求序号，或在两个 `onload` 和 `onerror` 回调开始处确认该请求仍是当前 `loadedUrl`；过期请求不得启动 plain 重试或修改渲染状态。
+
+- **Minor** [windows/src/performance-contract.test.ts](/C:/sudy/github/DesktopPet/windows/src/performance-contract.test.ts:30): 精灵缓存测试仅匹配 `loadedUrl` 字符串及提前返回，未覆盖 A 后于 B 完成加载的异步顺序，因而无法发现上述 stale-sprite 回归。最小安全修复：使用可控的 `Image` mock 延迟触发两次加载回调，断言旧请求不能覆盖最新请求；至少断言 CORS 与 plain 回调均受请求版本保护。

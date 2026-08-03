@@ -40,7 +40,7 @@ export const ACHIEVEMENTS = [
 ];
 export const ACH_NAME: Record<string, string> = {
   firstMeal: "First Meal", sessions100: "100 Sessions", sessions500: "500 Sessions",
-  tokens1M: "1M Tokens", tokens10M: "10M Tokens", tokens50M: "50M Tokens",
+  tokens1M: "1M Energy", tokens10M: "10M Energy", tokens50M: "50M Energy",
   level5: "Level 5", level10: "Level 10", level20: "Level 20", level35: "Level 35",
   streak7: "7-Day Streak", streak14: "14-Day Streak", streak30: "30-Day Streak", nightOwl: "Night Owl",
 };
@@ -217,16 +217,16 @@ function save(store: Store) {
   localStorage.setItem(KEY, JSON.stringify(store));
 }
 
-export function stateFor(petId: string): CareState {
+export function stateFor(instanceId: string): CareState {
   const store = load();
-  return { ...emptyState(), ...(store[petId] || {}) };
+  return { ...emptyState(), ...(store[instanceId] || {}) };
 }
 
-export function mutate(petId: string, change: (s: CareState) => void): CareState {
+export function mutate(instanceId: string, change: (s: CareState) => void): CareState {
   const store = load();
-  const s = { ...emptyState(), ...(store[petId] || {}) };
+  const s = { ...emptyState(), ...(store[instanceId] || {}) };
   change(s);
-  store[petId] = s;
+  store[instanceId] = s;
   save(store);
   return s;
 }
@@ -235,11 +235,22 @@ export function allStates(): Store {
   return load();
 }
 
+/** Moves the pre-instance care record once without overwriting live progress. */
+export function migrateLegacyCareState(legacySlug: string, instanceId: string): void {
+  if (!legacySlug || !instanceId || legacySlug === instanceId) return;
+  const store = load();
+  const legacy = store[legacySlug];
+  if (!legacy) return;
+  if (!store[instanceId]) store[instanceId] = legacy;
+  delete store[legacySlug];
+  save(store);
+}
+
 /// Feed through a care mutation; returns true when the pet leveled up.
 /// The caller decides how to celebrate (bubble flash / chime / notify).
-export function feed(slug: string, change: (s: CareState) => void): boolean {
-  const before = levelForXP(stateFor(slug).xp);
-  mutate(slug, change);
-  const after = levelForXP(stateFor(slug).xp);
+export function feed(instanceId: string, change: (s: CareState) => void): boolean {
+  const before = levelForXP(stateFor(instanceId).xp);
+  mutate(instanceId, change);
+  const after = levelForXP(stateFor(instanceId).xp);
   return after > before;
 }

@@ -1,0 +1,6 @@
+## Review
+- Correct：未发现 Critical、Important 或 Minor 级别问题。控制器接入位于 [floating-ball.ts](C:/sudy/github/DesktopPet/windows/src/floating-ball.ts:32) 与 [floating-ball.ts](C:/sudy/github/DesktopPet/windows/src/floating-ball.ts:182)：已不调用 `startDragging()`，改用全局 `cursorPosition` 和 `PhysicalPosition` 设置窗口物理坐标。
+- Correct：[floating-ball-pointer.ts](C:/sudy/github/DesktopPet/windows/src/floating-ball-pointer.ts:30) 对 `pointerup`、`pointercancel`、`lostpointercapture` 统一收尾；先清除活动指针再释放 capture，避免 `lostpointercapture` 重入造成重复完成。短时且未越阈值的左键仍触发菜单。
+- Correct：[floating-ball-drag.ts](C:/sudy/github/DesktopPet/windows/src/floating-ball-drag.ts:105) 串行合并移动，并在 [floating-ball-drag.ts](C:/sudy/github/DesktopPet/windows/src/floating-ball-drag.ts:131) 等最后移动任务结束后持久化。移动或持久化失败由 completion reject，最终在 [floating-ball.ts](C:/sudy/github/DesktopPet/windows/src/floating-ball.ts:189) 明确写入页面 `console.error`。
+- Correct：三个对应测试共 10 项均通过，覆盖短点击、物理坐标偏移、最终移动后持久化、移动失败传播、cancel、capture 丢失去重及异步错误上报；`tsc --noEmit` 和 Vite 构建通过。
+- Note：剩余风险仅为真实 Windows 多显示器、不同 DPI 缩放下的运行时交互验证；当前单元测试可验证坐标转换与控制流，但不能替代该环境的实际 Tauri WebView 验收。

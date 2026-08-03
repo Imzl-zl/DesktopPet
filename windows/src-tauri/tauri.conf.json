@@ -14,7 +14,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "label": "pet",
+        "label": "bootstrap",
         "title": "DesktopPet",
         "url": "index.html",
         "width": 260,
@@ -26,6 +26,7 @@
         "resizable": false,
         "shadow": false,
         "focus": false,
+        "visible": false,
         "x": 1200,
         "y": 600
       }

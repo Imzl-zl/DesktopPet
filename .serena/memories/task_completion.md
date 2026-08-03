@@ -1,0 +1,3 @@
+- For Windows UI/state work: run `npm --prefix windows run test` then `npm --prefix windows run build`.
+- Inspect the final diff; do not overwrite unrelated pre-existing changes in the dirty worktree.
+- For browser-visible changes, start the Vite/Tauri-compatible development server when feasible and smoke-test the affected interactions.

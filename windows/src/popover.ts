@@ -2,17 +2,22 @@
 // toggle, pet-size slider, and a Settings / Updates / Quit footer. Hides
 // itself when it loses focus.
 
+import "./styles.css";
+
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch, exit } from "@tauri-apps/plugin-process";
-import { t } from "./i18n";
+import { t, setLang, type Lang } from "./i18n";
+import { Pet } from "./pet";
+import { getLibrary } from "./catalog";
+import { loadPetStore, savePetStore, selectedPetInstance, updatePetInstance } from "./pets";
 
 function applyStatic() {
   const set = (id: string, key: string) => { const el = document.getElementById(id); if (el) el.textContent = t(key); };
   set("pop-sub", "Your little companion");
-  set("t-pop-showpet", "Show pet");
+  set("t-pop-showpet", "Show desktop pets");
   set("t-pop-size", "Pet size");
   set("t-pop-settings", "Settings");
   set("t-pop-updates", "Updates");
@@ -22,14 +27,35 @@ function applyStatic() {
 // ---- controls ----------------------------------------------------------------
 
 const showPet = document.getElementById("pop-showpet") as HTMLInputElement;
-invoke<boolean>("get_pet_visible").then((v) => { showPet.checked = v; }).catch(() => { showPet.checked = true; });
-showPet.onchange = () => invoke("set_pet_visible", { visible: showPet.checked }).catch(() => {});
+invoke<boolean>("get_desktop_pets_visible").then((visible) => { showPet.checked = visible; }).catch(() => { showPet.checked = true; });
+showPet.onchange = () => invoke("set_desktop_pets_visible", { visible: showPet.checked }).catch(() => {});
+
+// Living pet in the popover header: mirror the instance selected in Settings.
+const popPetCanvas = document.getElementById("pop-pet") as HTMLCanvasElement | null;
+const popPet = popPetCanvas ? new Pet(popPetCanvas) : null;
+
+function loadPopoverPet(): void {
+  const store = loadPetStore();
+  const instance = store ? selectedPetInstance(store) : null;
+  const pet = getLibrary().find((candidate) => candidate.slug === instance?.spriteSlug) ?? getLibrary()[0];
+  if (pet) popPet?.load(pet.url);
+}
+loadPopoverPet();
 
 const size = document.getElementById("pop-size") as HTMLInputElement;
-size.value = localStorage.getItem("ap_pet_size") || "100";
+function syncSize(): void {
+  const store = loadPetStore();
+  size.value = String((store ? selectedPetInstance(store) : null)?.size ?? 100);
+}
+syncSize();
 size.oninput = () => {
-  localStorage.setItem("ap_pet_size", size.value);
-  emit("bubble-changed", null);
+  const store = loadPetStore();
+  if (!store) return;
+  const instance = selectedPetInstance(store);
+  if (!instance) return;
+  savePetStore(updatePetInstance(store, instance.id, { size: parseInt(size.value, 10) }));
+  void emitTo(`pet-${instance.id}`, "pet-instance-changed", { instanceId: instance.id }).catch(() => {});
+  void emitTo("settings", "pet-instance-changed", { instanceId: instance.id }).catch(() => {});
 };
 
 (document.getElementById("pop-settings") as HTMLButtonElement).onclick = () => {
@@ -66,6 +92,10 @@ updatesBtn.onclick = async () => {
 getCurrentWindow().onFocusChanged(({ payload: focused }) => {
   if (!focused) void getCurrentWindow().hide();
 });
+listen<Lang>("lang-changed", (event) => {
+  setLang(event.payload);
+  applyStatic();
+});
 listen("popover-close", () => void getCurrentWindow().hide());
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") void getCurrentWindow().hide();
@@ -73,8 +103,14 @@ window.addEventListener("keydown", (e) => {
 
 // Re-sync + refresh whenever the popover is shown again.
 listen("popover-shown", () => {
-  size.value = localStorage.getItem("ap_pet_size") || "100";
-  invoke<boolean>("get_pet_visible").then((v) => { showPet.checked = v; }).catch(() => {});
+  applyStatic();
+  syncSize();
+  loadPopoverPet();
+  invoke<boolean>("get_desktop_pets_visible").then((visible) => { showPet.checked = visible; }).catch(() => {});
+});
+listen("pets-changed", () => {
+  syncSize();
+  loadPopoverPet();
 });
 
 // Hug the content height like the macOS popover (no dead space).

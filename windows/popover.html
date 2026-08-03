@@ -3,12 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <title>DesktopPet</title>
-    <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body class="pop">
     <div class="pop-card">
       <div class="pop-head">
-        <img class="pop-appicon-img" src="/appicon.png" alt="DesktopPet" />
+        <div class="pop-brand-ic"><canvas id="pop-pet" width="64" height="64"></canvas></div>
         <div class="pop-meta">
           <b>DesktopPet</b>
           <div class="cap" id="pop-sub">Your little companion</div>
@@ -40,7 +39,7 @@
           <span id="t-pop-updates">Updates</span>
         </button>
         <span class="spacer"></span>
-        <button class="pop-fbtn" id="pop-quit">
+        <button class="pop-fbtn pop-fbtn-quit" id="pop-quit">
           <span class="ui-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg></span>
           <span id="t-pop-quit">Quit</span>
         </button>

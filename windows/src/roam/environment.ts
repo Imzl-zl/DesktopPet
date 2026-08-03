@@ -78,7 +78,7 @@ export function invalidateEnvironmentCache(): void {
   monitorCache = null;
 }
 
-export async function fetchEnvironment(): Promise<Environment | null> {
+export async function fetchEnvironment(includeSystemWindows = false): Promise<Environment | null> {
   try {
     // Single currentMonitor() call (cached) instead of the previous two.
     const m = await cachedMonitor();
@@ -92,7 +92,7 @@ export async function fetchEnvironment(): Promise<Environment | null> {
       bottom: (wa.position.y + wa.size.height) / sf,
     };
 
-    const windows = await fetchSystemWindows(sf);
+    const windows = includeSystemWindows ? await fetchSystemWindows(sf) : [];
     return { workArea, windows };
   } catch (e) {
     void invoke("log_debug", { msg: `roam: environment error: ${e}` }).catch(() => {});

@@ -1,0 +1,12 @@
+## Review
+
+- Critical: 无。
+- Important: [windows/src/roam/window.ts:25](C:/sudy/github/DesktopPet/windows/src/roam/window.ts:25) 到 [windows/src/roam/window.ts:36](C:/sudy/github/DesktopPet/windows/src/roam/window.ts:36) 的跨 DPI 事件顺序仍有竞态。`onMoved` 立即以当前 `cachedScaleFactor` 把物理坐标写入逻辑坐标缓存；若跨显示器时 `onMoved` 先于 `onScaleChanged` 投递，则这里仍是旧 DPI 比例，`currentLogicalPos()` 在缩放事件到达前会直接返回错误缓存（[window.ts:54](C:/sudy/github/DesktopPet/windows/src/roam/window.ts:54)-[window.ts:56](C:/sudy/github/DesktopPet/windows/src/roam/window.ts:56)），而不会重新读取原生位置。现有竞态用例只覆盖 `onScaleChanged` 再 `onMoved` 的顺序（[windows/src/roam/window.test.ts:113](C:/sudy/github/DesktopPet/windows/src/roam/window.test.ts:113)-[windows/src/roam/window.test.ts:118](C:/sudy/github/DesktopPet/windows/src/roam/window.test.ts:118)），不能证明该反向顺序安全。这与“防止跨 DPI 事件竞态”的目标不符，修复并补充反向顺序测试前不建议 ready。
+- Minor: 无。
+
+已确认的正确点：
+- [windows/src/roam/window.ts:25](C:/sudy/github/DesktopPet/windows/src/roam/window.ts:25)-[window.ts:49](C:/sudy/github/DesktopPet/windows/src/roam/window.ts:49) 使用 Tauri v2 的 `onMoved` / `onScaleChanged`，并在任一监听注册失败时调用所有已成功取得的 unlisten 函数；`trackingStarted` 仅在两项均成功时设置，后续调用会重试。对应单测覆盖注册失败与部分注册清理（[windows/src/roam/window.test.ts:121](C:/sudy/github/DesktopPet/windows/src/roam/window.test.ts:121)-[window.test.ts:158](C:/sudy/github/DesktopPet/windows/src/roam/window.test.ts:158)）。
+- [windows/src-tauri/src/lib.rs:629](C:/sudy/github/DesktopPet/windows/src-tauri/src/lib.rs:629)-[lib.rs:637](C:/sudy/github/DesktopPet/windows/src-tauri/src/lib.rs:637) 先以 `is_visible().unwrap_or(true)` 建立可见窗口集合：已知隐藏窗口不会触发 cursor 查询；visibility 查询失败则按可见处理，保留交互安全路径。
+- 点击穿透几何读取仅遍历 `visible_wins`（[windows/src-tauri/src/lib.rs:646](C:/sudy/github/DesktopPet/windows/src-tauri/src/lib.rs:646)-[lib.rs:675](C:/sudy/github/DesktopPet/windows/src-tauri/src/lib.rs:675)），每秒位置持久化同样仅遍历 `visible_wins`（[windows/src-tauri/src/lib.rs:690](C:/sudy/github/DesktopPet/windows/src-tauri/src/lib.rs:707)）。性能契约也明确断言这两点（[windows/src/performance-contract.test.ts:51](C:/sudy/github/DesktopPet/windows/src/performance-contract.test.ts:51)-[performance-contract.test.ts:65](C:/sudy/github/DesktopPet/windows/src/performance-contract.test.ts:65)）。
+
+结论：Not ready，须解决上述 Important 跨 DPI 缓存竞态。

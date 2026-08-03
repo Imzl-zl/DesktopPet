@@ -3,75 +3,98 @@
   <head>
     <meta charset="UTF-8" />
     <title>DesktopPet</title>
-    <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body class="settings">
-    <div class="shell">
-      <!-- Left sidebar navigation (was a top tabbar) -->
-      <aside class="tabbar">
-        <div class="brand">
-          <span class="ui-ic" data-icon="pet"></span>
-          <span class="brand-text">DesktopPet</span>
+    <!-- ============================================================
+         Left: living pet panel — the companion's identity & state,
+         visible on every tab. Right: dock + tab content.
+    ============================================================ -->
+    <div class="shell2">
+
+      <aside class="pet-panel care-hud" id="care-hud">
+        <div class="pp-brand">
+          <span class="brand-mark"><span class="ui-ic" data-icon="pet"></span></span>
+          <span class="pp-brandname">DesktopPet</span>
         </div>
-        <button class="tab sel" data-tab="pet">
-          <span class="ui-ic" data-icon="pet"></span>
-          <span id="tab-pet">Pet</span>
-        </button>
-        <button class="tab" data-tab="bubble">
-          <span class="ui-ic" data-icon="chat"></span>
-          <span id="tab-bubble">Bubble</span>
-        </button>
-        <button class="tab" data-tab="care">
-          <span class="ui-ic" data-icon="heart"></span>
-          <span id="tab-care">Care</span>
-        </button>
-        <button class="tab" data-tab="general">
-          <span class="ui-ic" data-icon="settings"></span>
-          <span id="tab-general">General</span>
-        </button>
-        
+
+        <div class="pp-stage">
+          <div class="stage-aura"></div>
+          <div class="stage-floor"></div>
+          <canvas id="hero-live" width="160" height="180"></canvas>
+        </div>
+
+        <div class="care-id">
+          <div class="care-name" id="care-name" title="Click to rename">—</div>
+          <input class="care-rename" id="care-rename" maxlength="40" style="display:none" />
+          <div class="care-stage">
+            <span class="care-lv-badge"><b id="care-level">Lv 0</b></span>
+            <span id="care-stagename">Hatchling</span>
+          </div>
+        </div>
+
+        <div class="care-hunger" id="care-hunger">—</div>
+
+        <div class="care-bar"><div class="care-bar-fill" id="care-xpfill"></div></div>
+        <div class="care-xprow"><span id="care-xp">0 XP</span><span id="care-tonext" class="dim"></span></div>
+
+        <div class="care-feed-row">
+          <button class="prominent" id="care-feed-btn">Feed</button>
+          <span class="cap" id="t-care-feed-sub">A snack for your companion. Feeding earns XP.</span>
+        </div>
+
+        <div class="pp-foot">
+          <span class="cap">v<span id="app-version">0.1.0</span></span>
+          <button class="linklike" id="pet-deselect" style="display:none">Use default pet</button>
+        </div>
       </aside>
 
-      <div class="main-col">
+      <!-- ============================================================
+           Right column: dock navigation + scrollable settings
+      ============================================================ -->
+      <div class="pp-main">
+        <nav class="tabbar dock">
+          <button class="tab sel" data-tab="pet">
+            <span class="ui-ic" data-icon="pet"></span>
+            <span id="tab-pet">Pet</span>
+          </button>
+          <button class="tab" data-tab="bubble">
+            <span class="ui-ic" data-icon="chat"></span>
+            <span id="tab-bubble">Bubble</span>
+          </button>
+          <button class="tab" data-tab="care">
+            <span class="ui-ic" data-icon="heart"></span>
+            <span id="tab-care">Care</span>
+          </button>
+          <button class="tab" data-tab="general">
+            <span class="ui-ic" data-icon="settings"></span>
+            <span id="tab-general">General</span>
+          </button>
+        </nav>
+
         <main class="pages">
           <!-- ================================ PET ================================ -->
-          <div class="page sel" data-page="pet">
+          <div class="page sel page-pet" data-page="pet">
             <header class="page-header">
               <h1 id="t-pet-title">Your companion</h1>
               <p id="t-pet-subtitle">Choose, dress up, and animate your desktop pet.</p>
             </header>
 
-            <div class="group wide">
-              <div class="ghead"><span id="t-ball">Floating ball</span></div>
+            <section class="group" id="desktop-display-controls">
+              <div class="ghead" id="t-display">Display</div>
               <div class="gcard">
                 <label class="row"><span class="rt"><span id="t-ball-on">Show floating ball</span>
                   <span class="cap" id="t-ball-on-sub">A draggable ball on your desktop. Left-click for a bubble, right-click for settings. Snaps to screen edges.</span></span>
                   <input type="checkbox" id="ball-on" /></label>
+                <label class="row"><span class="rt"><span id="t-show-pets">Show desktop pets</span>
+                  <span class="cap" id="t-show-pets-sub">Temporarily hide or show every pet without removing it from your desktop.</span></span>
+                  <input type="checkbox" id="show-desktop-pets" checked /></label>
               </div>
-            </div>
+            </section>
 
-            <div class="group wide">
-              <div class="gcard hero">
-                <canvas id="hero-thumb" width="84" height="84"></canvas>
-                <div class="hero-meta">
-                  <div class="hero-name" id="pet-current">…</div>
-                  <div class="cap" id="hero-desc"><span id="t-pet-sub">Pick the companion that floats on your desktop.</span></div>
-                  <button class="linklike" id="pet-deselect" style="display:none;align-self:flex-start">Use default pet</button>
-                </div>
-              </div>
-            </div>
-
-            <div class="group wide">
-              <div class="gcard">
-                <label class="row"><span class="rt"><span id="t-show-main">Show main pet</span>
-                  <span class="cap" id="t-show-main-sub">The main pet that earns XP. Uncheck to hide it and use only extra decoration pets.</span></span>
-                  <input type="checkbox" id="show-main-pet" checked /></label>
-              </div>
-            </div>
-
-            <div class="group wide">
-              <div class="ghead" id="t-choose">Choose pet</div>
+            <section class="group" id="pet-library">
+              <div class="ghead" id="t-library">Pet library</div>
               <div class="gcard pad">
+                <p class="cap" id="t-library-sub">Add any material to your desktop.</p>
                 <div class="search-wrap" id="pet-search-wrap" style="display:none"><span class="mag ui-ic" data-icon="search"></span><input id="pet-search" type="text" placeholder="Search your pets" autocomplete="off" /></div>
                 <div id="lib-empty" class="cap" style="padding: 6px 0" hidden><span id="t-lib-empty">No pets yet. Tap Browse to add one.</span></div>
                 <div id="pet-results" class="pet-results"></div>
@@ -85,30 +108,28 @@
                   <button class="small-btn" id="open-create"><span class="ui-ic" data-icon="edit"></span><span id="t-create">Create pet…</span></button>
                 </div>
               </div>
-            </div>
+            </section>
 
-            <div class="group">
-              <div class="ghead"><span id="t-extra">Extra pets on desktop</span></div>
-              <div class="gcard pad">
-                <div class="cap" id="t-extra-sub" style="padding: 6px 0">Pure decoration pets that just float and roam. They don't track tasks or earn XP.</div>
-                <div class="extra-label" id="t-extra-pick">Tap a pet to spawn it on desktop</div>
-                <div id="extra-grid" class="pet-results"></div>
-                <div id="extra-empty" class="cap" style="padding: 8px 0" hidden><span id="t-extra-no">No pets in library yet. Use Browse or Create first.</span></div>
-                <div id="extra-cap-msg" class="cap" style="padding: 8px 0; color: var(--orange)" hidden><span id="t-extra-cap">Desktop limit reached. Close one to spawn more.</span></div>
-                <div id="extra-desktop-wrap" hidden>
-                  <div class="extra-desktop-head">
-                    <span><span id="t-extra-running">On desktop</span> <span id="extra-count" class="dim"></span></span>
-                    <button class="mini" id="extra-close-all"><span id="t-extra-closeall">Close all</span></button>
-                  </div>
-                  <div id="extra-running" class="pet-results"></div>
+            <section class="group" id="desktop-pets">
+              <div class="section-head">
+                <div>
+                  <div class="ghead"><span id="t-extra">Desktop pets</span> <span id="extra-count" class="dim"></span></div>
+                  <p class="cap" id="t-extra-sub">Every pet is saved independently, with its own name, care, size, and roam settings.</p>
                 </div>
+                <button class="mini" id="extra-close-all"><span id="t-extra-closeall">Remove all</span></button>
               </div>
-            </div>
+              <div class="gcard pad">
+                <div id="desktop-editor-context" class="instance-context"></div>
+                <div id="desktop-instance-list" class="desktop-instance-grid"></div>
+                <div id="desktop-empty" class="cap" hidden><span id="t-desktop-empty">No desktop pets yet. Add one from your library.</span></div>
+                <div id="extra-cap-msg" class="cap" style="color: var(--orange)" hidden><span id="t-extra-cap">Desktop limit reached. Remove one to add another.</span></div>
+              </div>
+            </section>
 
             <div class="group">
               <div class="ghead" id="t-anims">Animations</div>
               <div class="gcard pad">
-                <span class="seg" id="anim-mood">
+                <span class="seg seg-full" id="anim-mood">
                   <button data-v="idle" id="am-idle">Idle</button>
                   <button data-v="working" class="sel" id="am-working">Working</button>
                   <button data-v="waiting" id="am-waiting">Waiting</button>
@@ -140,6 +161,11 @@
                   </select></div>
                 <div class="row"><span id="t-roam-speed">Speed</span>
                   <span class="slider-wrap"><input type="range" id="roam-speed" min="1" max="10" /><span class="val dim" id="roam-speed-val"></span></span></div>
+                <div class="row"><span id="t-wander-pause">Wander pause</span>
+                  <span class="roam-pause-fields"><input type="number" id="wander-pause-min" min="1" step="0.1" />
+                    <span class="cap" aria-hidden="true">–</span>
+                    <input type="number" id="wander-pause-max" min="1" step="0.1" />
+                    <span class="cap" id="t-wander-pause-unit">seconds</span></span></div>
               </div>
             </div>
           </div>
@@ -174,22 +200,7 @@
               </div>
             </div>
 
-            <div class="group wide" id="bubble-messages-group">
-              <div class="ghead" id="t-messages">Bubble messages</div>
-              <div class="gcard pad">
-                <div class="row tight"><span id="t-msg-src">Messages</span>
-                  <span class="seg" id="msg-src" data-key="ap_msg_src" data-default="system">
-                    <button data-v="system" id="o-ms-system">System</button>
-                    <button data-v="custom" id="o-ms-custom">Custom</button>
-                  </span></div>
-                <div id="msg-custom-wrap">
-<div id="msg-editors"></div>
-                  <div class="row tight"><span class="cap" id="t-msg-help">One message per line; a random one is shown.</span>
-                    <button class="mini" id="msg-reset">Reset to defaults</button></div>
-                </div>
-              </div>
-              
-<div class="group">
+            <div class="group">
               <div class="ghead" id="t-style">Style</div>
               <div class="gcard">
                 <div class="row"><span id="t-separator">Separator</span>
@@ -207,6 +218,22 @@
             </div>
 
             <div class="group wide">
+              <div class="ghead" id="t-messages">Bubble messages</div>
+              <div class="gcard pad">
+                <div class="row tight"><span id="t-msg-src">Messages</span>
+                  <span class="seg" id="msg-src" data-key="ap_msg_src" data-default="system">
+                    <button data-v="system" id="o-ms-system">System</button>
+                    <button data-v="custom" id="o-ms-custom">Custom</button>
+                  </span></div>
+                <div id="msg-custom-wrap">
+<div id="msg-editors"></div>
+                  <div class="row tight"><span class="cap" id="t-msg-help">One message per line; a random one is shown.</span>
+                    <button class="mini" id="msg-reset">Reset to defaults</button></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="group">
               <div class="ghead" id="t-click">Left-click pet</div>
               <div class="gcard">
                 <div class="row"><span id="t-click-action">Action</span>
@@ -215,7 +242,7 @@
                     <button data-v="self" id="o-lc-self">This pet</button>
                     <button data-v="all" id="o-lc-all">All pets</button>
                   </span></div>
-                <div class="cap" id="t-click-sub" style="padding: 6px 0">What happens when you left-click a pet without dragging. Uses a random line from your quick bubbles below.</div>
+                <div class="cap" id="t-click-sub" style="padding: 6px 16px">What happens when you left-click a pet without dragging. Uses a random line from your quick bubbles below.</div>
               </div>
             </div>
 
@@ -224,6 +251,9 @@
               <div class="gcard pad">
                 <div class="cap" id="t-quick-sub" style="padding: 6px 0">One message per line. Left-click a pet or send from the floating ball to show one at random.</div>
                 <textarea id="quick-bubbles" rows="6" placeholder="Hello!&#10;Coding…&#10;Need a break?" spellcheck="false"></textarea>
+                <div class="row tight"><span id="t-quick-duration">Display duration</span>
+                  <span class="quick-bubble-duration"><input type="number" id="quick-bubble-duration" min="1" step="0.1" />
+                    <span class="cap" id="t-quick-duration-unit">seconds</span></span></div>
                 <div class="row tight"><span class="cap" id="t-quick-help">Shift-click a preset on the floating ball to delete it.</span>
                   <button class="mini" id="quick-reset">Reset</button></div>
               </div>
@@ -240,30 +270,23 @@
             <div class="group wide">
               <div class="ghead" id="t-care-head">Your companion</div>
               <div class="ghelp" id="care-empty" style="display:none">Pick a pet in the Pet tab to start raising it.</div>
-              <div class="gcard care-hud">
-                <div class="care-top">
-                  <div class="care-id">
-                    <div class="care-name" id="care-name" title="Click to rename">—</div>
-                    <input class="care-rename" id="care-rename" maxlength="40" style="display:none" />
-                    <div class="care-stage"><b id="care-level">Lv 0</b> · <span id="care-stagename">Hatchling</span></div>
-                  </div>
-                  <div class="care-hunger" id="care-hunger">—</div>
-                </div>
-                <div class="care-bar"><div class="care-bar-fill" id="care-xpfill"></div></div>
-                <div class="care-xprow"><span id="care-xp">0 XP</span><span id="care-tonext" class="dim"></span></div>
-                <div class="care-feed-row">
-                  <button class="prominent" id="care-feed-btn">Feed</button>
-                  <span class="cap" id="t-care-feed-sub">A snack for your companion. Feeding earns XP.</span>
-                </div>
+              <div class="gcard">
                 <div class="care-achhead"><span id="t-care-ach">Achievements</span><span id="care-achcount" class="dim"></span></div>
                 <div class="care-badges" id="care-badges"></div>
-                <div class="care-grid">
-                  <div class="care-stat"><div class="cs-label" id="t-care-today">Today</div><div class="cs-val" id="care-today">0</div><div class="cs-sub" id="care-today-sub">0 snacks</div></div>
-                  <div class="care-stat"><div class="cs-label" id="t-care-streak">Streak</div><div class="cs-val" id="care-streak">0</div><div class="cs-sub" id="care-streak-sub">days fed</div></div>
-                  <div class="care-stat"><div class="cs-label" id="t-care-lifetime">Lifetime</div><div class="cs-val" id="care-lifetime">0</div><div class="cs-sub" id="care-lifetime-sub">XP earned</div></div>
-                  <div class="care-stat"><div class="cs-label" id="t-care-sessions">Sessions</div><div class="cs-val" id="care-sessions">0</div><div class="cs-sub" id="care-sessions-sub">completed</div></div>
-                </div>
-</div>
+              </div>
+            </div>
+
+            <div class="group wide">
+              <div class="ghead" id="t-care-stats">Stats</div>
+              <div class="care-grid">
+                <div class="care-stat"><div class="cs-label" id="t-care-today">Today</div><div class="cs-val" id="care-today">0</div><div class="cs-sub" id="care-today-sub">0 snacks</div></div>
+                <div class="care-stat"><div class="cs-label" id="t-care-streak">Streak</div><div class="cs-val" id="care-streak">0</div><div class="cs-sub" id="care-streak-sub">days fed</div></div>
+                <div class="care-stat"><div class="cs-label" id="t-care-lifetime">Lifetime</div><div class="cs-val" id="care-lifetime">0</div><div class="cs-sub" id="care-lifetime-sub">XP earned</div></div>
+                <div class="care-stat"><div class="cs-label" id="t-care-sessions">Sessions</div><div class="cs-val" id="care-sessions">0</div><div class="cs-sub" id="care-sessions-sub">completed</div></div>
+              </div>
+            </div>
+
+            <div class="group wide">
               <div class="ghelp" id="t-care-help">Feeding earns XP; your pet levels up through five stages. Chat with it, finish tasks and let it summarize your day.</div>
             </div>
           </div>
@@ -345,17 +368,14 @@
             <div class="group">
               <div class="ghead" id="t-app">About</div>
               <div class="gcard">
-                <div class="row"><span id="t-version">Version</span><span class="dim" id="app-version">0.1.0</span></div>
+                <div class="row"><span id="t-version">Version</span><span class="dim" id="app-version2">0.1.0</span></div>
                 <div class="row center"><button class="quit" id="quit-btn">Quit DesktopPet</button></div>
               </div>
             </div>
           </div>
-
-          <!-- =============================== ADVANCED ============================ -->
-          
         </main>
-      </div><!-- /main-col -->
-</div><!-- /shell -->
+      </div><!-- /pp-main -->
+    </div><!-- /shell2 -->
 
     <!-- Browse pets , searchable gallery to download pets (mac BrowsePetsView) -->
     <div class="modal-backdrop" id="browse-modal" hidden>
@@ -397,16 +417,14 @@
     <!-- Icon picker (mac IconPickerPopover): brand logos + symbol set -->
     <div class="modal-backdrop" id="icon-modal" hidden>
       <div class="modal">
-        <div class="modal-head"><b id="icon-modal-title">Icon</b><button class="linklike" id="icon-done">Done</button></div>
+        <div class="modal-head"><b id="icon-modal-title"><span id="t-icon-title">Icon</span></b><button class="linklike" id="icon-done"><span id="t-icon-done">Done</span></button></div>
         <div class="cap" id="t-ic-brand">Brand logos</div>
         <div class="icon-grid" id="ic-brands"></div>
         <div class="cap" id="t-ic-sym" style="margin-top:10px">Symbols</div>
         <div class="icon-grid" id="ic-symbols"></div>
-        <div class="row center" style="margin-top:8px"><button class="linklike" id="icon-reset">Reset to default</button></div>
+        <div class="row center" style="margin-top:8px"><button class="linklike" id="icon-reset"><span id="t-icon-reset">Reset to default</span></button></div>
       </div>
     </div>
-
-</div>
 
     <script type="module" src="/src/settings.ts"></script>
   </body>

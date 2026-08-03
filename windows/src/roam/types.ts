@@ -1,6 +1,11 @@
 // Shared types and constants for the roam subsystem.
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  DEFAULT_WANDER_PAUSE_MAX_MS,
+  DEFAULT_WANDER_PAUSE_MIN_MS,
+  normalizeWanderPauseRange,
+} from "./pause";
 
 export type RoamMode = "stay" | "wander" | "cursor" | "climb";
 
@@ -30,7 +35,11 @@ export type Config = {
   enabled: boolean;
   mode: RoamMode;
   speed: number;
+  wanderPauseMinMs: number;
+  wanderPauseMaxMs: number;
 };
+
+export type ConfigSource = () => Config;
 
 export const ROAM_KEY = "ap_roam";
 export const ROAM_MODE_KEY = "ap_roam_mode";
@@ -98,9 +107,28 @@ export function invalidateRoamConfig(): void {
   cfgRaw = "";
 }
 
+let configSource: ConfigSource | null = null;
+
+export function setRoamConfigSource(source: ConfigSource | null): void {
+  configSource = source;
+  invalidateRoamConfig();
+}
+
+function normalizeConfig(raw: Config): Config {
+  const wanderPause = normalizeWanderPauseRange(raw.wanderPauseMinMs, raw.wanderPauseMaxMs);
+  return {
+    enabled: raw.enabled,
+    mode: VALID_MODES.includes(raw.mode) ? raw.mode : "wander",
+    speed: Math.max(1, Math.min(10, Math.round(raw.speed))),
+    wanderPauseMinMs: wanderPause.minMs,
+    wanderPauseMaxMs: wanderPause.maxMs,
+  };
+}
+
 export function loadConfig(): Config {
-  // Per-window roam mode override wins over the global setting, so individual
-  // extra pets can wander / stay / follow cursor independently.
+  if (configSource) return normalizeConfig(configSource());
+  // Per-window roam mode override wins over the global setting for legacy
+  // windows. Desktop instances inject their own config above instead.
   const raw = snapshotRoamRaw();
   if (cfgCache && raw === cfgRaw) return cfgCache;
   cfgRaw = raw;
@@ -110,6 +138,8 @@ export function loadConfig(): Config {
     enabled: localStorage.getItem(ROAM_KEY) !== "0",
     mode,
     speed: Math.max(1, Math.min(10, parseInt(localStorage.getItem(ROAM_SPEED_KEY) || "5", 10))),
+    wanderPauseMinMs: DEFAULT_WANDER_PAUSE_MIN_MS,
+    wanderPauseMaxMs: DEFAULT_WANDER_PAUSE_MAX_MS,
   };
   return cfgCache;
 }

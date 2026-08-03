@@ -2,6 +2,7 @@
 // physics, and dispatches to the active movement mode.
 
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Pet } from "../pet";
 import { fetchEnvironment } from "./environment";
 import { runMode } from "./modes";
@@ -14,7 +15,7 @@ import {
   recordSample,
   releaseVelocity,
 } from "./physics";
-import type { RoamMode } from "./types";
+import type { Config, Environment, Point, RoamMode } from "./types";
 import {
   SLEEP_AFTER_MS,
   SLEEP_ROW_DEFAULT,
@@ -24,7 +25,7 @@ import {
   loadConfig,
   sleep,
 } from "./types";
-import { currentLogicalPos, setLogical } from "./window";
+import { currentLogicalPos, setDragPositionTracking, setLogical, setPhysical } from "./window";
 
 /// Tick delay when the pet is resting / sleeping / stationary. The active
 /// TICK_MS (30ms) is only needed while the pet is actually moving — resting
@@ -116,14 +117,15 @@ async function tick(): Promise<boolean> {
 
 /// Run one mode step and apply it. Returns true if the pet actually moved.
 async function stepMode(mode: RoamMode): Promise<boolean> {
-  const env = await fetchEnvironment();
+  const env = await fetchEnvironment(mode === "climb");
   if (!env) return false;
   const pos = await currentLogicalPos();
   if (!pos) return false;
 
   const next = await runMode(mode, { env, pos, pet: petRef });
   const clamped = clampToBounds(next, env.workArea);
-  if (Math.abs(clamped.x - pos.x) < 0.5 && Math.abs(clamped.y - pos.y) < 0.5) {
+  const moved = Math.abs(clamped.x - pos.x) >= 0.5 || Math.abs(clamped.y - pos.y) >= 0.5;
+  if (!moved) {
     return false;
   }
   lastMoveTs = Date.now();
@@ -142,17 +144,52 @@ function handleStationary(): void {
   }
 }
 
-async function handleDragRelease(vel: { vx: number; vy: number }): Promise<void> {
-  const env = await fetchEnvironment();
-  if (!env) return;
+type ReleaseContext = {
+  config: Config;
+  environment: Environment;
+};
 
-  const cfg = loadConfig();
+type ConfigReader = () => Config;
+type EnvironmentReader = (includeSystemWindows: boolean) => Promise<Environment | null>;
+
+export async function resolveReleaseContext(
+  getConfig: ConfigReader = loadConfig,
+  getEnvironment: EnvironmentReader = fetchEnvironment,
+): Promise<ReleaseContext | null> {
+  let config = getConfig();
+  const includedSystemWindows = config.mode === "climb";
+  let environment = await getEnvironment(includedSystemWindows);
+  if (!environment) return null;
+
+  config = getConfig();
+  if (config.mode === "climb" && !includedSystemWindows) {
+    environment = await getEnvironment(true);
+    if (!environment) return null;
+  }
+
+  return { config: getConfig(), environment };
+}
+
+async function persistPetPosition(): Promise<void> {
+  try {
+    await invoke<void>("persist_pet_position", { label: getCurrentWindow().label });
+  } catch (error) {
+    console.error("Unable to persist pet position", error);
+  }
+}
+
+async function handleDragRelease(vel: { vx: number; vy: number }): Promise<void> {
+  const context = await resolveReleaseContext();
+  if (!context) return;
+  const { config: cfg, environment: env } = context;
+
   if (cfg.mode === "climb" && env.windows.length > 0) {
     const surfaces = env.windows.map((w) => w.rect);
     await applyFall(vel.vx, env.workArea, surfaces, petRef, stop);
   } else {
     await applyThrow(vel.vx, vel.vy, env.workArea, petRef, stop);
   }
+  await persistPetPosition();
 }
 
 async function loop(): Promise<void> {
@@ -181,6 +218,7 @@ export function destroyEngine(): void {
 
 export function setDragging(isDragging: boolean): void {
   dragging = isDragging;
+  setDragPositionTracking(isDragging);
   if (isDragging) {
     cancelThrow();
     clearSamples();
@@ -189,4 +227,24 @@ export function setDragging(isDragging: boolean): void {
   } else if (petRef) {
     releasePending = true;
   }
+}
+
+/// Starts a pointer-managed drag after its native interaction lease is active.
+/// The starting position is sampled explicitly so a quick drag need not wait
+/// for two engine ticks before it can produce a throw velocity.
+export async function beginManualDrag(): Promise<void> {
+  setDragging(true);
+  const position = await currentLogicalPos();
+  if (position && dragging) recordSample(position);
+}
+
+/// Moves the window in physical coordinates and records every successful
+/// manual position in the same logical coordinate system used by physics.
+export async function moveManualDrag(position: Point): Promise<void> {
+  const logicalPosition = await setPhysical(position);
+  if (dragging) recordSample(logicalPosition);
+}
+
+export function finishManualDrag(): void {
+  setDragging(false);
 }

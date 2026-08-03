@@ -1,0 +1,4 @@
+- Cross-platform repository: macOS app in `Sources/` and `Tests/`; Windows app in `windows/`.
+- Windows settings UI is `windows/settings.html` + `windows/src/settings.ts` + `windows/src/styles.css`.
+- Desktop instances are distinct from reusable library sprite materials: see `mem:windows/pet-instances`.
+- macOS build/test details: `mem:tech_stack`; Windows commands: `mem:suggested_commands`.

@@ -1,0 +1,10 @@
+## Review
+- Correct: `windows/src/roam/window.ts:24-33` 使用的 Tauri v2 API 和负载类型正确。已核对本地 `@tauri-apps/api` 2.11.0 声明：`onMoved` 的 payload 为 `PhysicalPosition`，`onScaleChanged` 的 payload 含新的 `scaleFactor`；两者均覆盖官方文档列出的跨显示器 DPI 变更场景。
+- Correct: `windows/src-tauri/src/lib.rs:629-636` 先以 `WebviewWindow::is_visible()` 筛除已知隐藏窗口，仅当 `visible_wins` 非空时读取 cursor；`windows/src-tauri/src/lib.rs:631` 的 `unwrap_or(true)` 会把 visibility 查询错误放回旧的命中检测路径。已核对 Tauri 2.11.2 Rust API，该 getter 返回 `Result<bool>`。因此隐藏窗口不会再执行 `outer_position`、矩形命中或 `set_ignore_cursor_events`，而 visibility 查询失败仍保持安全交互行为。
+- Critical: `windows/src/roam/window.ts:45-49` 的首次缓存读取不是原子操作，也没有版本/代次保护。它先取得旧 `scaleFactor`，再等待 `outerPosition`；在两次 await 之间，窗口跨 DPI 显示器时 `onScaleChanged` 会在 `:31-34` 写入新比例并清空缓存，随后 `onMoved` 可在 `:24-30` 用新比例写入正确坐标。悬挂的读取最终仍会在 `:47-48` 用旧比例覆写这个新缓存。之后 `currentLogicalPos()` 在 `:41` 直接返回该错误缓存，不再轮询纠正，漫游/拖拽会基于错误逻辑坐标运行，违反跨 DPI 坐标正确性契约。示例：读取捕获 scale=1；切换到 scale=1.5 后 move 事件报告 physical `(300,450)` 并正确缓存 `(200,300)`；旧读取返回相同 physical 坐标后却缓存 `(300,450)`。应在 move/scale 事件递增代次，并仅在读取开始和结束代次相同才提交读取结果；否则重读或返回事件已写入的缓存。
+- Important: `windows/src/roam/window.ts:21-34` 在订阅 Promise 尚未成功前就将 `trackingStarted` 固定为 `true`，并以 `void` 丢弃两个 Promise。任一监听注册失败（例如窗口销毁期间或 IPC/权限错误）会产生未处理 rejection，且后续所有 `currentLogicalPos()` 都不会再尝试注册监听，退化为永久缓存而不是可恢复的事件跟踪。应保留/await 注册任务，捕获失败并允许后续调用重试；若模块并非与窗口同寿命，也应保留 unlisten 生命周期。
+- Minor: `windows/src/roam/window.test.ts:31-84` 未覆盖 Critical 中的读请求与 move/scale 事件交错的顺序，也未覆盖任一监听注册拒绝。当前 scale 测试在触发事件前完成初始读取，不能证明跨 DPI 迁移期间缓存不会被旧读取覆写。
+- Minor: `windows/src/performance-contract.test.ts:51-56` 只是源文本断言，未执行或模拟 Rust 的 `is_visible=false` 和 `is_visible=Err` 分支，也未断言 `cursor_position` 在全隐藏时未调用。它能防止明显结构性回退，但不能验证所声明的性能和安全行为。
+- Note: `windows/src-tauri/src/lib.rs:629-636` 的优化在全隐藏或部分隐藏时真实省去了 cursor 和隐藏窗口的几何/命中调用；但每个宠物每 60ms 新增一次同步 `is_visible()` 查询。因此全部窗口可见时，原有的 1 次 cursor + N 次 geometry 变为 N 次 visibility + 1 次 cursor + N 次 geometry。该成本符合当前“已知隐藏窗口跳过命中”的限定契约，但不构成全部可见场景的性能改善，应在性能结论中明确其适用范围。
+
+结论：**不可合并**。先修复 `window.ts` 的跨 DPI 读取/事件竞态并补充可控交错测试；建议同时处理监听注册失败的生命周期。Rust 可见性筛选的目标行为和安全回退可以保留。

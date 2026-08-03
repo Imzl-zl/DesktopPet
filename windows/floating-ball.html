@@ -3,21 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <title>DesktopPet</title>
-    <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body class="overlay floating-ball-body">
     <!-- The ball fills the entire small square window so there are no
          transparent gaps for Windows click-through to eat mouse events. -->
     <div id="ball" class="ball" title="">
-      <img id="ball-icon" src="/appicon.png" alt="" draggable="false" />
+      <canvas id="ball-pet" width="64" height="64"></canvas>
     </div>
 
     <!-- Left-click menu: type a message or pick from presets, choose target. -->
     <div id="ball-menu" class="ball-menu" hidden>
-      <div class="bm-target" id="bm-target">
-        <button data-v="all" class="sel" id="bm-target-all">All</button>
-        <button data-v="main" id="bm-target-main">Main</button>
-        <button data-v="extra" id="bm-target-extra">Extra</button>
+      <div class="bm-head">
+        <span class="bm-title">✦ <span id="bm-title-text">Quick bubble</span></span>
+        <span class="bm-hint" id="bm-hint">Shift-click to remove</span>
       </div>
       <input id="bm-input" type="text" maxlength="120" autocomplete="off"
              placeholder="Type a bubble message…" />

@@ -1,0 +1,3 @@
+- Root: Swift 6 / SwiftPM; macOS 13+ target. `DesktopPetCore` is logic layer; `Sources/App` is executable; Sparkle >=2.6 dependency.
+- Windows: TypeScript 5.6 + Vite 5.4 + Vitest 4.1 + Tauri 2. Node package root is `windows/`.
+- Windows source uses ES modules and browser APIs through Tauri packages.

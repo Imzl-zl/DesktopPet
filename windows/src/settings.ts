@@ -1,16 +1,86 @@
+import "./styles.css";
+
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit, emitTo, listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { exit } from "@tauri-apps/plugin-process";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { loadCatalog, savedSlug, saveSlug, clearSlug, getLibrary, addToLibrary, removeFromLibrary, petDisplayName, renamePet, type Pet, type LibPet } from "./catalog";
+import { loadCatalog, savedSlug, getLibrary, addToLibrary, removeFromLibrary, petDisplayName, type Pet as CatalogPet, type LibPet } from "./catalog";
 import { t, getLang, setLang, type Lang } from "./i18n";
 import { uiIcon } from "./icons";
 
 import { slice, type Rect } from "./pet";
-import { getRoamMode, setRoamMode, getRoamSpeed, setRoamSpeed } from "./roam";
+import { Pet as AnimatedPet } from "./pet";
 
 import * as care from "./care";
+import {
+  createPetInstance,
+  initializePetStore,
+  newPetInstanceId,
+  removePetInstance,
+  savePetStore,
+  selectPetInstance,
+  selectedPetInstance,
+  updatePetInstance,
+  type PetInstance,
+  type PetStore,
+} from "./pets";
+import { DEFAULT_WANDER_PAUSE_MAX_MS, DEFAULT_WANDER_PAUSE_MIN_MS } from "./roam/pause";
+import {
+  QUICK_BUBBLE_DURATION_KEY,
+  normalizeQuickBubbleDurationSeconds,
+} from "./quick-bubble";
+
+function legacyPet() {
+  const slug = savedSlug();
+  return slug ? { slug, name: petDisplayName(slug) } : null;
+}
+
+function currentPetStore(): PetStore {
+  return initializePetStore(legacyPet());
+}
+
+function currentPetInstance(): PetInstance | null {
+  return selectedPetInstance(currentPetStore());
+}
+
+function syncDesktopPetWindows(store: PetStore): Promise<void> {
+  return invoke("sync_desktop_pet_windows", {
+    pets: store.instances.map(({ id, visible }) => ({ id, visible })),
+  });
+}
+
+type PersistDesktopPetsOptions = {
+  syncWindows?: boolean;
+  instanceId?: string;
+};
+
+function persistDesktopPets(store: PetStore, options: PersistDesktopPetsOptions = {}): void {
+  const { syncWindows = true, instanceId } = options;
+  savePetStore(store);
+  if (syncWindows) void syncDesktopPetWindows(store).catch((error) => alert(String(error)));
+  if (instanceId) {
+    void emitTo(`pet-${instanceId}`, "pet-instance-changed", { instanceId }).catch(() => {});
+  } else {
+    void emit("pets-changed");
+  }
+}
+
+function instanceFromLibrary(pet: LibPet): PetInstance {
+  return {
+    id: newPetInstanceId(),
+    name: pet.name,
+    spriteSlug: pet.slug,
+    visible: true,
+    size: 100,
+    roamEnabled: true,
+    roamMode: "wander",
+    roamSpeed: 5,
+    wanderPauseMinMs: DEFAULT_WANDER_PAUSE_MIN_MS,
+    wanderPauseMaxMs: DEFAULT_WANDER_PAUSE_MAX_MS,
+    reactsToActivity: false,
+  };
+}
 
 // ------------------------------------------------------------- segmented ----
 // macOS-style segmented controls: <span class="seg" data-key data-default>.
@@ -55,28 +125,37 @@ function fmtNum(n: number): string {
   return String(n);
 }
 function currentPetName(): string {
-  const slug = savedSlug();
-  if (!slug) return t("Your pet");
-  const custom = petDisplayName(slug);
-  if (custom !== slug) return custom;
-  const hit = getLibrary().find((p) => p.slug === slug) || catalog.find((p) => p.slug === slug);
-  return hit?.name || slug;
+  return currentPetInstance()?.name || t("Your pet");
 }
 function renderCare() {
-  const slug = savedSlug();
+  const instance = currentPetInstance();
   const empty = document.getElementById("care-empty");
   const hud = document.querySelector(".care-hud") as HTMLElement | null;
-  if (!slug) {
+  if (!instance) {
     if (empty) empty.style.display = "";
-    if (hud) hud.style.display = "none";
+    // Keep the left panel visible but show a placeholder state
+    const name = document.getElementById("care-name");
+    if (name) name.textContent = t("No pet yet");
+    const stage = document.getElementById("care-stagename");
+    if (stage) stage.textContent = "";
+    const hunger = document.getElementById("care-hunger");
+    if (hunger) hunger.textContent = "";
+    const level = document.getElementById("care-level");
+    if (level) level.textContent = "";
+    const xp = document.getElementById("care-xp");
+    if (xp) xp.textContent = "";
+    const tonext = document.getElementById("care-tonext");
+    if (tonext) tonext.textContent = "";
+    const fill = document.getElementById("care-xpfill");
+    if (fill) fill.style.width = "0%";
     return;
   }
   if (empty) empty.style.display = "none";
   if (hud) hud.style.display = "";
-  const s = care.stateFor(slug);
+  const s = care.stateFor(instance.id);
   const internal = care.levelForXP(s.xp);
   const setTxt = (id: string, v: string) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  setTxt("care-name", currentPetName());
+  setTxt("care-name", instance.name);
   setTxt("care-level", `${t("Lv")} ${care.displayLevel(s.xp)}`);
   setTxt("care-stagename", t(care.stageName(internal)));
   setTxt("care-hunger", t(care.hunger(s)));
@@ -112,8 +191,7 @@ function setupRename() {
   const input = document.getElementById("care-rename") as HTMLInputElement | null;
   if (!nameEl || !input) return;
   const startEdit = () => {
-    const slug = savedSlug();
-    if (!slug) return;
+    if (!currentPetInstance()) return;
     input.value = currentPetName();
     nameEl.style.display = "none";
     input.style.display = "";
@@ -121,8 +199,13 @@ function setupRename() {
     input.select();
   };
   const commit = () => {
-    const slug = savedSlug();
-    if (slug) renamePet(slug, input.value);
+    const instance = currentPetInstance();
+    if (instance) {
+      persistDesktopPets(
+        updatePetInstance(currentPetStore(), instance.id, { name: input.value.trim() || instance.spriteSlug }),
+        { syncWindows: false, instanceId: instance.id },
+      );
+    }
     input.style.display = "none";
     nameEl.style.display = "";
     renderCare();
@@ -141,71 +224,95 @@ setupRename();
 const feedBtn = document.getElementById("care-feed-btn") as HTMLButtonElement | null;
 if (feedBtn) {
   feedBtn.onclick = () => {
-    const slug = savedSlug();
-    if (!slug) return;
-    const leveled = care.feed(slug, (st) => care.recordMeal(st));
-    emit("care-updated", null);
-    if (leveled) emit("quick-bubble", { text: `${t("Level up")}! ${t("Lv")} ${care.displayLevel(care.stateFor(slug).xp)}`, target: "main" });
+    const instance = currentPetInstance();
+    if (!instance) return;
+    const leveled = care.feed(instance.id, (state) => care.recordMeal(state));
+    emit("care-updated", { instanceId: instance.id });
+    if (leveled) emit("quick-bubble", { text: `${t("Level up")}! ${t("Lv")} ${care.displayLevel(care.stateFor(instance.id).xp)}` });
     renderCare();
   };
 }
 
 // Refresh when the pet window feeds the pet, and periodically for the hunger clock.
-listen("care-updated", () => { if (document.querySelector('.page[data-page="care"].sel')) renderCare(); });
-setInterval(() => { if (document.querySelector('.page[data-page="care"].sel')) renderCare(); }, 30_000);
+listen("care-updated", () => { renderCare(); });
+// The left pet panel is always visible — keep its state fresh even when
+// the Care tab itself isn't selected.
+setInterval(() => { renderCare(); }, 30_000);
 
 // ------------------------------------------------------------------ pet ----
 // macOS model: the pager shows your INSTALLED pets (library); the full catalog
 // lives in the Browse dialog where "Get" adds a pet to the library.
-const current = document.getElementById("pet-current") as HTMLDivElement;
+const current = document.getElementById("pet-current") as HTMLDivElement | null;
 const search = document.getElementById("pet-search") as HTMLInputElement;
 const results = document.getElementById("pet-results") as HTMLDivElement;
 
-let catalog: Pet[] = [];
+// ---- living pet: the left pet-panel canvas animates the current pet with
+// the same engine as the desktop window (Pet from ./pet). Identity/XP/hunger
+// text is rendered by renderCare() into the care-* hooks in the panel.
+let stagePet: AnimatedPet | null = null;
 
-function selectedPet(): LibPet | undefined {
-  const slug = savedSlug();
-  if (!slug) return undefined;
-  return getLibrary().find((p) => p.slug === slug);
+function initLivingPets() {
+  const c2 = document.getElementById("hero-live") as HTMLCanvasElement | null;
+  if (c2) stagePet = new AnimatedPet(c2);
+  let loadedUrl: string | null = null;
+  const loadPet = (url: string | null) => {
+    if (!url || url === loadedUrl) return;
+    loadedUrl = url;
+    stagePet?.load(url);
+  };
+  return { loadPet };
 }
 
-async function pick(p: LibPet) {
-  saveSlug(p.slug);
-  localStorage.setItem("ap_pet_url", p.url);
-  localStorage.removeItem("ap_pet_custom"); // legacy key
-  await emit("set-pet", { slug: p.slug, url: p.url });
+const livingPets = initLivingPets();
+
+let catalog: CatalogPet[] = [];
+
+function selectedPet(): LibPet | undefined {
+  const instance = currentPetInstance();
+  return instance ? getLibrary().find((pet) => pet.slug === instance.spriteSlug) : undefined;
+}
+
+let refreshDesktopPets: () => void = () => {};
+
+function addInstanceFromLibrary(pet: LibPet) {
+  const store = currentPetStore();
+  if (store.instances.length >= MAX_DESKTOP_PETS) return;
+  persistDesktopPets(createPetInstance(store, instanceFromLibrary(pet)));
+  livingPets.loadPet(pet.url);
   showCurrent();
+  refreshDesktopPets();
   renderPage();
+  renderCare();
 }
 
 function showCurrent() {
   const sel = selectedPet();
   const deselectBtn = document.getElementById("pet-deselect") as HTMLButtonElement | null;
   if (sel) {
-    current.textContent = sel.name;
-    if (deselectBtn) {
-      deselectBtn.textContent = t("Use default pet");
-      deselectBtn.style.display = "";
-    }
+    if (current) current.textContent = sel.name;
+    if (deselectBtn) deselectBtn.style.display = "none";
   } else {
-    current.textContent = t("Default pet");
+    if (current) current.textContent = t("No pet yet");
     if (deselectBtn) deselectBtn.style.display = "none";
   }
-  const hero = document.getElementById("hero-thumb") as HTMLCanvasElement;
-  const ctx = hero.getContext("2d");
-  if (ctx) ctx.clearRect(0, 0, hero.width, hero.height);
-  if (sel) drawThumb(hero, sel.url);
+  const hero = document.getElementById("hero-thumb") as HTMLCanvasElement | null;
+  const ctx = hero?.getContext("2d");
+  if (ctx && hero) ctx.clearRect(0, 0, hero.width, hero.height);
+  if (hero && sel) drawThumb(hero, sel.url);
+  livingPets.loadPet(sel?.url ?? null);
   loadHeroDescription(sel);
 }
 
-/// Clear the user's explicit pet choice and fall back to the catalog default.
+/// Removes the selected desktop instance. This control stays hidden in the
+/// refreshed layout; removal normally happens from the desktop-pet list.
 function deselectPet() {
-  clearSlug();
-  localStorage.removeItem("ap_pet_url");
-  localStorage.removeItem("ap_pet_custom");
-  emit("set-pet", { slug: null, url: null });
+  const instance = currentPetInstance();
+  if (instance) persistDesktopPets(removePetInstance(currentPetStore(), instance.id));
+  const next = getLibrary()[0];
+  livingPets.loadPet(next?.url ?? null);
   showCurrent();
   renderPage();
+  renderCare();
 }
 
 // The pet's own description (from its pet.json on the CDN), like the macOS
@@ -246,38 +353,43 @@ function renderPage() {
   if (page >= totalPages) page = totalPages - 1;
   results.innerHTML = "";
   for (const p of view.slice(page * PER_PAGE, page * PER_PAGE + PER_PAGE)) {
-    const item = document.createElement("button");
-    item.className = "pet-item";
+    const item = document.createElement("article");
+    item.className = "library-item";
     item.dataset.slug = p.slug;
-    if (p.slug === savedSlug()) item.classList.add("sel");
+    const remove = document.createElement("button");
+    remove.className = "icon-btn library-remove";
+    remove.type = "button";
+    remove.title = t("Remove");
+    remove.setAttribute("aria-label", t("Remove"));
+    remove.innerHTML = uiIcon("x");
+    remove.onclick = () => {
+      if (currentPetStore().instances.some((instance) => instance.spriteSlug === p.slug)) {
+        alert(t("Remove the desktop pets using this sprite before removing it from your library."));
+        return;
+      }
+      removeFromLibrary(p.slug);
+      showCurrent();
+      renderPage();
+    };
+
     const cv = document.createElement("canvas");
     cv.width = 48; cv.height = 48; cv.className = "pet-thumb";
     drawThumb(cv, p.url);
     const label = document.createElement("span");
+    label.className = "library-name";
     label.textContent = p.name;
-    const del = document.createElement("span");
-    del.className = "pet-del";
-    del.textContent = "✕";
-    del.title = t("Remove");
-    del.onclick = (ev) => {
-      ev.stopPropagation();
-      removeFromLibrary(p.slug);
-      if (p.slug === savedSlug()) {
-        // Removing the active pet clears the explicit choice so the main window
-        // falls back to the catalog default instead of silently switching to
-        // whatever happens to be library[0].
-        clearSlug();
-        localStorage.removeItem("ap_pet_url");
-        localStorage.removeItem("ap_pet_custom");
-        emit("set-pet", { slug: null, url: null });
-      }
-      showCurrent();
-      renderPage();
-    };
-    item.appendChild(del);
-    item.appendChild(cv);
-    item.appendChild(label);
-    item.onclick = () => pick(p);
+
+    const actions = document.createElement("div");
+    actions.className = "library-actions";
+    const add = document.createElement("button");
+    add.className = "mini library-action";
+    add.type = "button";
+    add.innerHTML = `${uiIcon("plus")}<span>${t("Add to desktop")}</span>`;
+    add.disabled = currentPetStore().instances.length >= MAX_DESKTOP_PETS;
+    add.onclick = () => addInstanceFromLibrary(p);
+
+    actions.append(add);
+    item.append(remove, cv, label, actions);
     results.appendChild(item);
   }
   const pager = document.getElementById("pet-pager") as HTMLElement;
@@ -316,17 +428,18 @@ function drawThumb(cv: HTMLCanvasElement, url: string) {
   img.src = url;
 }
 
-// Toggle for showing/hiding the main pet window (so users can run only extra decoration pets).
-async function initMainPetVisibility() {
-  const box = document.getElementById("show-main-pet") as HTMLInputElement | null;
+// Toggle the visibility of all desktop pet windows without changing which
+// instances exist or their individual enabled state.
+async function initDesktopPetsVisibility() {
+  const box = document.getElementById("show-desktop-pets") as HTMLInputElement | null;
   if (!box) return;
   try {
-    box.checked = await invoke("get_pet_visible");
+    box.checked = await invoke("get_desktop_pets_visible");
   } catch {
     box.checked = true;
   }
   box.addEventListener("change", () => {
-    invoke("set_pet_visible", { visible: box.checked }).catch(() => {});
+    invoke("set_desktop_pets_visible", { visible: box.checked }).catch(() => {});
   });
 }
 
@@ -342,22 +455,21 @@ async function initPet() {
   for (;;) {
     catalog = await loadCatalog();
     if (catalog.length) break;
-    current.textContent = t("Couldn't load pets , check your internet connection.");
+    if (current) current.textContent = t("Couldn't load pets , check your internet connection.");
     await new Promise((r) => setTimeout(r, 15000));
   }
   if (!getLibrary().length) {
-    const slug = savedSlug();
-    const c = catalog.find((p) => p.slug === slug) ?? catalog[Math.floor(catalog.length / 2)];
-    if (c) {
-      addToLibrary({ slug: c.slug, name: c.name, url: c.spritesheetUrl, petJsonUrl: c.petJsonUrl });
-      // Keep the three selection stores in sync so the Settings hero, the main
-      // window, and the per-project fallback all agree on the default pet.
-      saveSlug(c.slug);
-      localStorage.setItem("ap_pet_url", c.spritesheetUrl);
-    }
+    const legacySlug = savedSlug();
+    const chosen = catalog.find((pet) => pet.slug === legacySlug) ?? catalog[Math.floor(catalog.length / 2)];
+    if (chosen) addToLibrary({ slug: chosen.slug, name: chosen.name, url: chosen.spritesheetUrl, petJsonUrl: chosen.petJsonUrl });
+  }
+  if (!currentPetInstance()) {
+    const first = getLibrary()[0];
+    if (first) persistDesktopPets(createPetInstance(currentPetStore(), instanceFromLibrary(first)));
   }
   renderPage();
   showCurrent();
+  renderCare();
 }
 
 // -------------------------------------------------------------- browse ----
@@ -447,7 +559,7 @@ function initBrowse() {
         btn.textContent = t("Get");
         btn.onclick = () => {
           addToLibrary({ slug: p.slug, name: p.name, url: p.url, petJsonUrl: p.petJsonUrl });
-          void pick({ slug: p.slug, name: p.name, url: p.url, petJsonUrl: p.petJsonUrl });
+          renderPage();
           btn.className = "bw-added";
           btn.textContent = `✓ ${t("Added")}`;
           btn.disabled = true;
@@ -570,138 +682,94 @@ function initCreate() {
     filePick.click();
   };
   createBtn.onclick = () => {
-    const slug = `local-${Date.now()}`;
-    addToLibrary({ slug, name: name.value.trim(), url: dataUrl, custom: true });
-    void pick({ slug, name: name.value.trim(), url: dataUrl, custom: true });
+    const pet = { slug: `local-${Date.now()}`, name: name.value.trim(), url: dataUrl, custom: true };
+    addToLibrary(pet);
+    addInstanceFromLibrary(pet);
     modal.hidden = true;
-    renderPage();
-    showCurrent();
   };
 }
 
-// ----------------------------------------------------------- extra pets ----
-// Pure-decoration pet windows: spawn extra pets that just float and roam,
-// ignoring care/tray logic. Multiple may be open at once; each is closed
-// from the grid below or by closing its window directly.
-const EXTRA_PREFIX = "pet-extra-";
-const MAX_EXTRA_PETS = 12;
+// --------------------------------------------------------- desktop pets ----
+// Every card below represents a persistent PetInstance. The library provides
+// sprite definitions only; it never doubles as an implicit "main" pet.
+const MAX_DESKTOP_PETS = 12;
 
-function slugFromExtraLabel(label: string): string {
-  const rest = label.slice(EXTRA_PREFIX.length);
-  const i = rest.lastIndexOf("-");
-  return i > 0 ? rest.slice(0, i) : rest;
-}
-
-function initExtraPets() {
-  const grid = document.getElementById("extra-grid") as HTMLDivElement;
-  const emptyMsg = document.getElementById("extra-empty") as HTMLElement;
+function initDesktopPets() {
   const capMsg = document.getElementById("extra-cap-msg") as HTMLElement;
-  const desktopWrap = document.getElementById("extra-desktop-wrap") as HTMLElement;
+  const emptyMsg = document.getElementById("desktop-empty") as HTMLElement;
+  const context = document.getElementById("desktop-editor-context") as HTMLElement;
   const countEl = document.getElementById("extra-count") as HTMLElement;
-  const runningEl = document.getElementById("extra-running") as HTMLDivElement;
+  const runningEl = document.getElementById("desktop-instance-list") as HTMLDivElement;
   const closeAllBtn = document.getElementById("extra-close-all") as HTMLButtonElement;
 
-  // Build a thumbnail card for a library pet, used in the spawn grid.
-  const spawnCard = (p: LibPet): HTMLButtonElement => {
-    const item = document.createElement("button");
-    item.className = "pet-item spawn";
-    const cv = document.createElement("canvas");
-    cv.width = 48; cv.height = 48; cv.className = "pet-thumb";
-    drawThumb(cv, p.url);
-    const label = document.createElement("span");
-    label.textContent = p.name;
-    item.appendChild(cv);
-    item.appendChild(label);
-    item.onclick = async () => {
-      if (item.classList.contains("disabled")) return;
-      item.disabled = true;
-      try { await invoke("spawn_extra_pet", { slug: p.slug }); }
-      catch (e) { alert(String(e)); return; }
-      finally { setTimeout(() => { item.disabled = false; }, 350); }
-      void renderRunning();
-    };
-    return item;
-  };
+  const instanceCard = (instance: PetInstance): HTMLElement => {
+    const item = document.createElement("article");
+    item.className = "desktop-instance";
+    item.classList.toggle("selected", currentPetInstance()?.id === instance.id);
 
-  // Build a thumbnail card for an already-spawned window, with a close ✕.
-  const runningCard = (label: string, p?: LibPet): HTMLDivElement => {
-    const item = document.createElement("div");
-    item.className = "pet-item running";
-    const del = document.createElement("span");
-    del.className = "pet-del";
-    del.textContent = "✕";
-    del.title = t("Close");
-    del.onclick = async (ev) => {
-      ev.stopPropagation();
-      try { await invoke("close_extra_pet", { label }); }
-      catch (e) { alert(String(e)); return; }
-      void renderRunning();
-    };
-    const cv = document.createElement("canvas");
-    cv.width = 48; cv.height = 48; cv.className = "pet-thumb";
-    if (p?.url) drawThumb(cv, p.url);
+    const select = document.createElement("button");
+    select.className = "desktop-instance-select";
+    select.type = "button";
+    select.setAttribute("aria-label", instance.name);
+    const canvas = document.createElement("canvas");
+    canvas.width = 48;
+    canvas.height = 48;
+    canvas.className = "pet-thumb";
+    const definition = getLibrary().find((pet) => pet.slug === instance.spriteSlug);
+    if (definition) drawThumb(canvas, definition.url);
     const name = document.createElement("span");
-    name.textContent = p?.name ?? slugFromExtraLabel(label);
-    item.appendChild(del);
-    item.appendChild(cv);
-    item.appendChild(name);
+    name.textContent = instance.name;
+    select.append(canvas, name);
+    select.onclick = () => {
+      persistDesktopPets(selectPetInstance(currentPetStore(), instance.id), { syncWindows: false });
+      if (definition) livingPets.loadPet(definition.url);
+      renderDesktopPets();
+      renderPage();
+      renderCare();
+    };
+
+    const remove = document.createElement("button");
+    remove.className = "icon-btn desktop-instance-remove";
+    remove.type = "button";
+    remove.title = t("Remove");
+    remove.setAttribute("aria-label", t("Remove"));
+    remove.innerHTML = uiIcon("x");
+    remove.onclick = () => {
+      persistDesktopPets(removePetInstance(currentPetStore(), instance.id));
+      renderDesktopPets();
+      renderPage();
+      renderCare();
+    };
+
+    item.append(select, remove);
     return item;
   };
 
-  const renderGrid = () => {
-    const lib = getLibrary();
-    grid.innerHTML = "";
-    if (!lib.length) {
-      emptyMsg.hidden = false;
-      grid.style.display = "none";
-      return;
-    }
-    emptyMsg.hidden = true;
-    grid.style.display = "";
-    for (const p of lib) grid.appendChild(spawnCard(p));
-  };
-
-  const renderRunning = async () => {
-    let labels: string[] = [];
-    try { labels = await invoke<string[]>("list_extra_pets"); } catch { return; }
-    const count = labels.length;
-    countEl.textContent = count ? `(${count}/${MAX_EXTRA_PETS})` : "";
-    const atCap = count >= MAX_EXTRA_PETS;
-    capMsg.hidden = !atCap;
-    grid.querySelectorAll<HTMLButtonElement>(".pet-item.spawn").forEach((b) => {
-      b.classList.toggle("disabled", atCap);
-    });
-    if (!count) { desktopWrap.hidden = true; return; }
-    desktopWrap.hidden = false;
-    const lib = getLibrary();
+  const renderDesktopPets = () => {
+    const store = currentPetStore();
+    const selected = selectedPetInstance(store);
+    countEl.textContent = `(${store.instances.length}/${MAX_DESKTOP_PETS})`;
+    closeAllBtn.hidden = store.instances.length === 0;
+    capMsg.hidden = store.instances.length < MAX_DESKTOP_PETS;
+    emptyMsg.hidden = store.instances.length > 0;
+    runningEl.hidden = store.instances.length === 0;
+    context.textContent = selected ? `${t("Editing")}: ${selected.name}` : "";
     runningEl.innerHTML = "";
-    for (const label of labels) {
-      const slug = slugFromExtraLabel(label);
-      runningEl.appendChild(runningCard(label, lib.find((x) => x.slug === slug)));
-    }
+    for (const instance of store.instances) runningEl.appendChild(instanceCard(instance));
   };
 
-  closeAllBtn.onclick = async () => {
-    let labels: string[] = [];
-    try { labels = await invoke<string[]>("list_extra_pets"); } catch { return; }
-    if (!labels.length) return;
-    closeAllBtn.disabled = true;
-    await Promise.all(labels.map((l) => invoke("close_extra_pet", { label: l }).catch(() => {})));
-    closeAllBtn.disabled = false;
-    void renderRunning();
+  refreshDesktopPets = renderDesktopPets;
+  closeAllBtn.onclick = () => {
+    let store = currentPetStore();
+    for (const instance of [...store.instances]) store = removePetInstance(store, instance.id);
+    persistDesktopPets(store);
+    renderDesktopPets();
+    renderPage();
+    renderCare();
   };
 
-  renderGrid();
-  void renderRunning();
-  // Poll: extra windows can be closed via the OS, and the library may change
-  // from Browse/Create without a tab switch, so sync both every 2s.
-  let lastLibLen = -1;
-  setInterval(() => {
-    const len = getLibrary().length;
-    if (len !== lastLibLen) { lastLibLen = len; renderGrid(); }
-    void renderRunning();
-  }, 2000);
-  document.addEventListener("ap-pet-tab-shown", () => { renderGrid(); void renderRunning(); });
+  renderDesktopPets();
+  document.addEventListener("ap-pet-tab-shown", renderDesktopPets);
 }
 
 // ---------------------------------------------------------------- bubble ----
@@ -757,33 +825,63 @@ function initBubble() {
   idle.onchange = () => { localStorage.setItem("ap_idle", idle.checked ? "1" : "0"); changed(); };
 }
 
-// ----------------------------------------------- pet size / fx / import ----
+// ----------------------------------------------- instance controls ----
 function initPetControls() {
-  const changed = () => { emit("bubble-changed", null); };
   const size = document.getElementById("pet-size") as HTMLInputElement;
-  size.value = localStorage.getItem("ap_pet_size") || "100";
-  size.oninput = () => { localStorage.setItem("ap_pet_size", size.value); changed(); };
-  document.querySelectorAll<HTMLButtonElement>(".size-presets button").forEach((b) => {
-    b.onclick = () => {
-      size.value = b.dataset.size!;
-      localStorage.setItem("ap_pet_size", size.value);
-      size.dispatchEvent(new Event("input"));
-      changed();
-    };
-  });
-
   const roamMode = document.getElementById("roam-mode") as HTMLSelectElement;
   const roamSpeed = document.getElementById("roam-speed") as HTMLInputElement;
   const roamSpeedVal = document.getElementById("roam-speed-val") as HTMLSpanElement;
-  roamMode.value = getRoamMode();
-  roamSpeed.value = String(getRoamSpeed());
-  roamSpeedVal.textContent = roamSpeed.value;
-  roamMode.onchange = () => { setRoamMode(roamMode.value as "wander" | "cursor" | "stay" | "climb"); };
-  roamSpeed.oninput = () => {
-    const v = parseInt(roamSpeed.value, 10);
-    setRoamSpeed(v);
-    roamSpeedVal.textContent = String(v);
+  const wanderPauseMin = document.getElementById("wander-pause-min") as HTMLInputElement;
+  const wanderPauseMax = document.getElementById("wander-pause-max") as HTMLInputElement;
+
+  const updateSelected = (patch: Partial<Omit<PetInstance, "id">>) => {
+    const instance = currentPetInstance();
+    if (!instance) return;
+    persistDesktopPets(
+      updatePetInstance(currentPetStore(), instance.id, patch),
+      { syncWindows: false, instanceId: instance.id },
+    );
   };
+
+  const sync = () => {
+    const instance = currentPetInstance();
+    size.disabled = !instance;
+    roamMode.disabled = !instance;
+    roamSpeed.disabled = !instance;
+    wanderPauseMin.disabled = !instance;
+    wanderPauseMax.disabled = !instance;
+    size.value = String(instance?.size ?? 100);
+    roamMode.value = instance?.roamMode ?? "wander";
+    roamSpeed.value = String(instance?.roamSpeed ?? 5);
+    roamSpeedVal.textContent = roamSpeed.value;
+    wanderPauseMin.value = String((instance?.wanderPauseMinMs ?? DEFAULT_WANDER_PAUSE_MIN_MS) / 1000);
+    wanderPauseMax.value = String((instance?.wanderPauseMaxMs ?? DEFAULT_WANDER_PAUSE_MAX_MS) / 1000);
+  };
+
+  size.oninput = () => updateSelected({ size: parseInt(size.value, 10) });
+  document.querySelectorAll<HTMLButtonElement>(".size-presets button").forEach((button) => {
+    button.onclick = () => {
+      size.value = button.dataset.size!;
+      updateSelected({ size: parseInt(size.value, 10) });
+    };
+  });
+  roamMode.onchange = () => updateSelected({ roamMode: roamMode.value as PetInstance["roamMode"] });
+  roamSpeed.oninput = () => updateSelected({ roamSpeed: parseInt(roamSpeed.value, 10) });
+  const saveWanderPause = () => {
+    updateSelected({
+      wanderPauseMinMs: Math.round(Number.parseFloat(wanderPauseMin.value) * 1000),
+      wanderPauseMaxMs: Math.round(Number.parseFloat(wanderPauseMax.value) * 1000),
+    });
+    sync();
+  };
+  wanderPauseMin.onchange = saveWanderPause;
+  wanderPauseMax.onchange = saveWanderPause;
+
+  sync();
+  void listen("pets-changed", sync);
+  void listen<{ instanceId: string }>("pet-instance-changed", (event) => {
+    if (currentPetInstance()?.id === event.payload.instanceId) sync();
+  });
 }
 
 // ------------------------------------------------------------ animations ----
@@ -986,8 +1084,8 @@ function initAnimations() {
 
   const loadSheet = () => {
     const lib = getLibrary();
-    const sel = lib.find((x) => x.slug === savedSlug()) ?? lib[0];
-    const url = localStorage.getItem("ap_pet_custom") || localStorage.getItem("ap_pet_url") || sel?.url;
+    const sel = lib.find((pet) => pet.slug === currentPetInstance()?.spriteSlug) ?? lib[0];
+    const url = sel?.url;
     if (!url) { setTimeout(loadSheet, 3000); return; } // library may seed late
     const im = new Image();
     im.crossOrigin = "anonymous";
@@ -996,7 +1094,7 @@ function initAnimations() {
     im.src = url.startsWith("data:") ? url : url + (url.includes("?") ? "&" : "?") + "cors=1";
   };
   loadSheet();
-  listen("set-pet", () => setTimeout(loadSheet, 50));
+  void listen("pets-changed", () => setTimeout(loadSheet, 50));
 }
 
 // ----------------------------------------------------------------- sounds ----
@@ -1160,9 +1258,10 @@ function applyStatic() {
   set("quit-btn", "Quit DesktopPet");
   // pet
   set("t-pet-sub", "Pick the companion that floats on your desktop.");
-  set("t-show-main", "Show main pet");
-  set("t-show-main-sub", "The main pet that earns XP. Uncheck to hide it and use only extra decoration pets.");
-  set("t-choose", "Choose pet");
+  set("t-show-pets", "Show desktop pets");
+  set("t-show-pets-sub", "Temporarily hide or show every pet without removing it from your desktop.");
+  set("t-library", "Pet library");
+  set("t-library-sub", "Add any material to your desktop.");
   set("t-lib-empty", "No pets yet. Tap Browse to add one.");
   set("t-browse", "Browse pets…");
   set("t-create", "Create pet…");
@@ -1181,13 +1280,11 @@ function applyStatic() {
   set("cr-create", "Create");
   set("cr-choose", "Choose image…");
   set("t-size", "Size on screen");
-  set("t-extra", "Extra pets on desktop");
-  set("t-extra-sub", "Pure decoration pets that just float and roam. They don't track tasks or earn XP.");
-  set("t-extra-pick", "Tap a pet to spawn it on desktop");
-  set("t-extra-running", "On desktop");
-  set("t-extra-closeall", "Close all");
-  set("t-extra-no", "No pets in library yet. Use Browse or Create first.");
-  set("t-extra-cap", "Desktop limit reached. Close one to spawn more.");
+  set("t-extra", "Desktop pets");
+  set("t-extra-sub", "Every pet is saved independently, with its own name, care, size, and roam settings.");
+  set("t-extra-closeall", "Remove all");
+  set("t-desktop-empty", "No desktop pets yet. Add one from your library.");
+  set("t-extra-cap", "Desktop limit reached. Remove one to add another.");
   set("t-anims", "Animations");
   set("t-anim-hint", "Hover a clip to preview it.");
   set("am-idle", "Idle");
@@ -1197,14 +1294,17 @@ function applyStatic() {
   set("am-celebrate", "Celebrate");
   // care
   set("t-care-head", "Your companion");
+  set("t-care-stats", "Stats");
   set("t-care-help", "Feeding earns XP; your pet levels up through five stages. Chat with it, finish tasks and let it summarize your day.");
+  set("care-empty", "Pick a pet in the Pet tab to start raising it.");
+  set("care-feed-btn", "Feed");
   set("t-care-ach", "Achievements");
   set("t-care-today", "Today");
   set("t-care-streak", "Streak");
   set("t-care-lifetime", "Lifetime");
   set("t-care-sessions", "Sessions");
   set("care-streak-sub", "days fed");
-  set("care-lifetime-sub", "tokens eaten");
+  set("care-lifetime-sub", "XP earned");
   set("care-sessions-sub", "completed");
   set("t-care-burn", "Burn, last 7 days");
   // bubble
@@ -1220,9 +1320,6 @@ function applyStatic() {
   set("t-reactive-head", "Reactive comments");
   set("t-reactive", "React to activity");
   set("t-reactive-sub", "The pet reacts to token usage, streaks, hunger, and busy sessions.");
-  set("t-split", "Project pets");
-  set("t-split-label", "Split pets by project");
-  set("t-split-sub", "Give a project its own pet window; the rest stay on the main pet.");
   set("t-display", "Display");
   set("t-rows", "Rows");
   set("o-bm-list", "All rows");
@@ -1233,9 +1330,29 @@ function applyStatic() {
   set("t-maxrows", "Max rows");
   set("t-filter", "Include states");
   set("t-vocab-foot", "Whimsical phrases shown while something is happening, e.g. \"Brewing…\" or \"Compiling…\".");
+  set("t-current", "Current pet");
   set("t-ball", "Floating ball");
   set("t-ball-on", "Show floating ball");
   set("t-ball-on-sub", "A draggable ball on your desktop. Left-click for a bubble, right-click for settings. Snaps to screen edges.");
+  set("t-roam", "Roam");
+  set("t-roam-mode", "Mode");
+  set("t-roam-speed", "Speed");
+  set("t-wander-pause", "Wander pause");
+  set("t-wander-pause-unit", "seconds");
+  set("t-roam-stay", "Stay");
+  set("t-roam-wander", "Wander");
+  set("t-roam-cursor", "Follow cursor");
+  set("t-roam-climb", "Climb windows");
+  set("t-style", "Style");
+  set("t-separator", "Separator");
+  set("t-dotstyle", "State dot");
+  set("o-dot-plain", "Plain dot");
+  set("t-ic-brand", "Brand logos");
+  set("t-ic-sym", "Symbols");
+  set("t-icon-title", "Icon");
+  set("t-icon-done", "Done");
+  set("t-icon-reset", "Reset to default");
+  set("t-care-feed-sub", "A snack for your companion. Feeding earns XP.");
   set("t-click", "Left-click pet");
   set("t-click-action", "Action");
   set("t-click-sub", "What happens when you left-click a pet without dragging. Uses a random line from your quick bubbles below.");
@@ -1244,12 +1361,16 @@ function applyStatic() {
   set("o-lc-all", "All pets");
   set("t-quick", "Quick bubbles");
   set("t-quick-sub", "One message per line. Left-click a pet or send from the floating ball to show one at random.");
+  set("t-quick-duration", "Display duration");
+  set("t-quick-duration-unit", "seconds");
   set("t-quick-help", "Shift-click a preset on the floating ball to delete it.");
   set("t-messages", "Bubble messages");
   set("t-msg-src", "Messages");
   set("o-ms-system", "System");
   set("o-ms-custom", "Custom");
   set("msg-reset", "Reset to defaults");
+  set("o-sep-space", "space");
+  set("quick-reset", "Reset");
   set("t-msg-help", "One message per line; a random one is shown.");
   document.querySelectorAll<HTMLElement>(".msg-label").forEach((el) => {
     if (el.dataset.label) el.textContent = t(el.dataset.label);
@@ -1271,6 +1392,8 @@ function initMisc() {
   getVersion().then((v) => {
     const a = document.getElementById("app-version");
     if (a) a.textContent = v;
+    const a2 = document.getElementById("app-version2");
+    if (a2) a2.textContent = v;
   }).catch(() => {});
   (document.getElementById("quit-btn") as HTMLButtonElement).onclick = () => { exit(0); };
   document.querySelectorAll<HTMLElement>("[data-url]").forEach((el) => {
@@ -1354,7 +1477,19 @@ function writeQuickList(list: string[]) {
 function initQuickBubbles() {
   const ta = document.getElementById("quick-bubbles") as HTMLTextAreaElement | null;
   const reset = document.getElementById("quick-reset") as HTMLButtonElement | null;
+  const duration = document.getElementById("quick-bubble-duration") as HTMLInputElement | null;
   if (!ta) return;
+  if (duration) {
+    const syncDuration = () => {
+      duration.value = String(normalizeQuickBubbleDurationSeconds(localStorage.getItem(QUICK_BUBBLE_DURATION_KEY)));
+    };
+    syncDuration();
+    duration.onchange = () => {
+      const seconds = normalizeQuickBubbleDurationSeconds(duration.value);
+      localStorage.setItem(QUICK_BUBBLE_DURATION_KEY, String(seconds));
+      syncDuration();
+    };
+  }
   const current = readQuickList();
   ta.value = (current.length ? current : QUICK_DEFAULTS).join("\n");
   if (!current.length) writeQuickList(QUICK_DEFAULTS);
@@ -1371,8 +1506,9 @@ function initQuickBubbles() {
 initTabs();
 initLang();
 initIcons();
+renderCare();
 initPet();
-initMainPetVisibility();
+initDesktopPetsVisibility();
 initPetControls();
 initBubble();
 initAnimations();
@@ -1383,6 +1519,6 @@ initReduceMotion();
 initSliders();
 initSegs();
 initMisc();
-initExtraPets();
+initDesktopPets();
 initFloatingBall();
 initQuickBubbles();

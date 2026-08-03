@@ -114,6 +114,8 @@ export class Pet {
   private ctx: CanvasRenderingContext2D;
   private img = new Image();
   private loaded = false;
+  private loadedUrl: string | null = null;
+  private loadVersion = 0;
   private clips: Rect[][] = [];
   private frame = 0;
   private row = 0;
@@ -163,10 +165,14 @@ export class Pet {
   private clipMaxW: number[] = [];
 
   load(spritesheetUrl: string) {
+    if (spritesheetUrl === this.loadedUrl) return;
+    this.loadedUrl = spritesheetUrl;
+    const loadVersion = ++this.loadVersion;
     this.loaded = false;
     const img = new Image();
     img.crossOrigin = "anonymous"; // CDN sends CORS , lets us read alpha
     img.onload = () => {
+      if (loadVersion !== this.loadVersion) return;
       this.img = img;
       this.clips = slice(img);
       this.clipMaxW = this.clips.map((clip) => Math.max(...clip.map((r) => r.w)));
@@ -176,6 +182,7 @@ export class Pet {
     // A pre-CORS cached copy makes the crossOrigin load fail , retry plain
     // (displayable, but slicing falls back to the fixed grid).
     img.onerror = () => {
+      if (loadVersion !== this.loadVersion) return;
       // Diagnostics for the Windows build (debug.log via Rust).
       try {
         // @ts-ignore tauri global (withGlobalTauri)
@@ -183,10 +190,14 @@ export class Pet {
       } catch {}
       const plain = new Image();
       plain.onload = () => {
+        if (loadVersion !== this.loadVersion) return;
         this.img = plain;
         this.clips = [];
         this.frame = 0;
         this.loaded = true;
+      };
+      plain.onerror = () => {
+        if (loadVersion === this.loadVersion) this.loadedUrl = null;
       };
       plain.src = spritesheetUrl;
     };

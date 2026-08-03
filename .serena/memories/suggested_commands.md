@@ -1,0 +1,4 @@
+- Windows (Git Bash): `npm --prefix windows run test`, `npm --prefix windows run build`, `npm --prefix windows run tauri dev`.
+- Windows release bundle: `cd windows && npm run tauri build`.
+- Root macOS: `swift build`, `swift test`; on Windows use `./scripts/verify-core-windows.sh` for core logic instead of plain `swift test`.
+- Use `rg` for repository search.

@@ -1,21 +1,25 @@
 // Floating ball: a draggable desktop orb. Left-click opens a bubble menu,
-// right-click opens Settings, drag moves the window and snaps to the nearest
-// edge on release.
+// right-click opens Settings, drag moves the window and persists its position
+// on release.
+
+import "./styles.css";
 
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow, currentMonitor, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
+import { cursorPosition, currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize, PhysicalPosition } from "@tauri-apps/api/window";
+import { FloatingBallDragController } from "./floating-ball-drag";
+import { attachFloatingBallPointerDrag } from "./floating-ball-pointer";
 import { t, setLang, type Lang } from "./i18n";
+import { Pet } from "./pet";
+import { getLibrary } from "./catalog";
+import { loadPetStore, selectedPetInstance } from "./pets";
 
 const QUICK_KEY = "ap_quick_bubbles";
-const TARGET_KEY = "ap_ball_target";
 const MAX_PRESETS = 12;
 
 const WIN_SIZE = 80;        // window is larger than the 56px orb so shadows/scale fit
 const MENU_W = 300;
 const MENU_H = 420;
-const DRAG_THRESHOLD_PX = 4;
-const CLICK_MAX_MS = 280;
 
 const ball = document.getElementById("ball") as HTMLDivElement;
 const menu = document.getElementById("ball-menu") as HTMLDivElement;
@@ -23,16 +27,15 @@ const input = document.getElementById("bm-input") as HTMLInputElement;
 const presetsEl = document.getElementById("bm-presets") as HTMLDivElement;
 const sendBtn = document.getElementById("bm-send") as HTMLButtonElement;
 const cancelBtn = document.getElementById("bm-cancel") as HTMLButtonElement;
-const targetEl = document.getElementById("bm-target") as HTMLDivElement;
 
 const win = getCurrentWindow();
+const floatingBallDrag = new FloatingBallDragController({
+  cursorPosition,
+  setPosition: (position) => win.setPosition(new PhysicalPosition(position.x, position.y)),
+  persistPosition: () => invoke<void>("persist_floating_ball_position"),
+});
 
 let selectedPreset = -1;
-let mayBeClick = false;
-let isDragging = false;
-let dragStartX = 0;
-let dragStartY = 0;
-let dragStartTime = 0;
 
 function readPresets(): string[] {
   try {
@@ -46,22 +49,6 @@ function readPresets(): string[] {
 function writePresets(list: string[]) {
   localStorage.setItem(QUICK_KEY, JSON.stringify(list.slice(0, MAX_PRESETS)));
   void emit("bubble-changed", null);
-}
-
-function readTarget(): "all" | "main" | "extra" {
-  const v = localStorage.getItem(TARGET_KEY);
-  return v === "main" || v === "extra" ? v : "all";
-}
-
-function writeTarget(v: "all" | "main" | "extra") {
-  localStorage.setItem(TARGET_KEY, v);
-}
-
-function syncTargetButtons() {
-  const cur = readTarget();
-  targetEl.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
-    b.classList.toggle("sel", b.dataset.v === cur);
-  });
 }
 
 function syncSend() {
@@ -104,10 +91,11 @@ function paintPresets() {
 }
 
 function applyLangStrings() {
+  const bmTitle = document.getElementById("bm-title-text");
+  if (bmTitle) bmTitle.textContent = t("Quick bubble");
+  const bmHint = document.getElementById("bm-hint");
+  if (bmHint) bmHint.textContent = t("Shift-click to remove");
   input.placeholder = t("Type a bubble message…");
-  (document.getElementById("bm-target-all") as HTMLElement).textContent = t("All");
-  (document.getElementById("bm-target-main") as HTMLElement).textContent = t("Main");
-  (document.getElementById("bm-target-extra") as HTMLElement).textContent = t("Extra");
   cancelBtn.textContent = t("Cancel");
   sendBtn.textContent = t("Send");
   ball.title = t("Left-click: bubble · Right-click: settings · Drag to move");
@@ -124,7 +112,6 @@ async function showMenu() {
   if (!menu.hidden) return;
   input.value = "";
   selectedPreset = -1;
-  syncTargetButtons();
   paintPresets();
   syncSend();
 
@@ -185,56 +172,21 @@ function send() {
   if (!text) return;
   const next = [text, ...readPresets().filter((x) => x !== text)];
   writePresets(next);
-  void emit("quick-bubble", { text, target: readTarget() });
+  void emit("quick-bubble", { text });
   hideMenu();
 }
 
 // ---- click vs drag ---------------------------------------------------------
-// We do not use data-tauri-drag-region: it can be flaky on small Windows
-// webviews and makes click detection unreliable. Instead, detect movement
-// ourselves and call startDragging() once the cursor has moved enough.
-
-ball.addEventListener("mousedown", (e) => {
-  if (e.button !== 0) return;
-  if (!menu.hidden) { hideMenu(); return; }
-  mayBeClick = true;
-  isDragging = false;
-  dragStartX = e.screenX;
-  dragStartY = e.screenY;
-  dragStartTime = performance.now();
-  ball.classList.add("pressed");
-});
-
-window.addEventListener("mousemove", (e) => {
-  if (!mayBeClick || isDragging) return;
-  const dx = Math.abs(e.screenX - dragStartX);
-  const dy = Math.abs(e.screenY - dragStartY);
-  if (dx <= DRAG_THRESHOLD_PX && dy <= DRAG_THRESHOLD_PX) return;
-
-  mayBeClick = false;
-  isDragging = true;
-  ball.classList.remove("pressed");
-  ball.classList.add("dragging");
-
-  getCurrentWindow().startDragging().finally(() => {
-    isDragging = false;
-    ball.classList.remove("dragging");
-    void invoke("snap_floating_ball");
-  });
-});
-
-window.addEventListener("mouseup", (e) => {
-  ball.classList.remove("pressed");
-  if (!mayBeClick) return;
-  mayBeClick = false;
-  // Reject the click if the cursor moved beyond the drag threshold, even if
-  // mousemove didn't fire in time to start the OS drag. This prevents the
-  // menu from flashing open when the user intended to drag.
-  const dx = Math.abs(e.screenX - dragStartX);
-  const dy = Math.abs(e.screenY - dragStartY);
-  if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) return;
-  const elapsed = performance.now() - dragStartTime;
-  if (elapsed <= CLICK_MAX_MS) showMenu();
+// Tauri's native startDragging can lose mouseup on Windows, leaving the window
+// attached to the cursor. Pointer capture keeps the interaction in the webview.
+attachFloatingBallPointerDrag(ball, {
+  drag: floatingBallDrag,
+  isMenuOpen: () => !menu.hidden,
+  hideMenu,
+  showMenu,
+  now: () => performance.now(),
+  scale: () => window.devicePixelRatio,
+  reportError: (error) => console.error("Unable to finish floating ball drag", error),
 });
 
 ball.addEventListener("contextmenu", (e) => {
@@ -248,10 +200,6 @@ input.addEventListener("input", () => { selectedPreset = -1; paintPresets(); syn
 input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && input.value.trim()) { e.preventDefault(); send(); }
   else if (e.key === "Escape") { hideMenu(); }
-});
-
-targetEl.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
-  b.onclick = () => { writeTarget(b.dataset.v as "all" | "main" | "extra"); syncTargetButtons(); };
 });
 
 cancelBtn.onclick = () => hideMenu();
@@ -269,8 +217,24 @@ applyReduceMotion();
 window.addEventListener("storage", (e) => { if (e.key === "ap_reduce_motion") applyReduceMotion(); });
 
 applyLangStrings();
-syncTargetButtons();
 paintPresets();
 syncSend();
 void listen("bubble-changed", () => paintPresets());
 void listen<Lang>("lang-changed", (e) => { setLang(e.payload); applyLangStrings(); paintPresets(); });
+
+// ---- living pet inside the orb: mirror the instance selected in Settings.
+const ballCanvas = document.getElementById("ball-pet") as HTMLCanvasElement | null;
+let ballPet: Pet | null = null;
+
+function loadBallPet(): void {
+  const store = loadPetStore();
+  const instance = store ? selectedPetInstance(store) : null;
+  const pet = getLibrary().find((candidate) => candidate.slug === instance?.spriteSlug) ?? getLibrary()[0];
+  if (pet) ballPet?.load(pet.url);
+}
+
+if (ballCanvas) {
+  ballPet = new Pet(ballCanvas);
+  loadBallPet();
+}
+void listen("pets-changed", loadBallPet);

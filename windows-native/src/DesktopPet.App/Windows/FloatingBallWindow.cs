@@ -25,6 +25,7 @@ public sealed class FloatingBallWindow : Window
     private readonly Action<string> _sendQuickBubble;
     private readonly Func<string> _readPresetPool;
     private readonly Func<SpriteSheet?> _selectedSprite;
+    private readonly Action _openSettings;
     private readonly Image _petImage = new();
     private WriteableBitmap? _petBitmap;
     private PetRenderer? _petRenderer;
@@ -42,11 +43,13 @@ public sealed class FloatingBallWindow : Window
         Action<string> sendQuickBubble,
         Func<string> readPresetPool,
         Func<SpriteSheet?> selectedSprite,
+        Action openSettings,
         string dataDirectory)
     {
         _sendQuickBubble = sendQuickBubble;
         _readPresetPool = readPresetPool;
         _selectedSprite = selectedSprite;
+        _openSettings = openSettings;
         _positionFilePath = Path.Combine(dataDirectory, "ball-pos");
 
         Width = 80;
@@ -334,9 +337,9 @@ public sealed class FloatingBallWindow : Window
         }
     }
 
-    /// <summary>右键：设置占位（Phase 4 接设置窗口）。</summary>
+    /// <summary>右键：打开设置窗口。</summary>
     private void ShowSettingsPlaceholder()
     {
-        MessageBox.Show(this, "设置窗口将在 Phase 4 交付。", "DesktopPet", MessageBoxButton.OK, MessageBoxImage.Information);
+        _openSettings();
     }
 }

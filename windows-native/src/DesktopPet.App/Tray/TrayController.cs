@@ -25,10 +25,15 @@ public sealed class TrayController : IDisposable
         _toggleItem = new MenuItem { Header = "显示/隐藏宠物", IsCheckable = true, IsChecked = manager.GloballyVisible };
         _toggleItem.Click += (_, _) => manager.SetGlobalVisible(_toggleItem.IsChecked);
 
+        var settingsItem = new MenuItem { Header = "设置" };
+        settingsItem.Click += (_, _) => manager.OpenSettings();
+
         var quitItem = new MenuItem { Header = "退出" };
         quitItem.Click += (_, _) => Application.Current.Shutdown();
 
         var menu = new ContextMenu();
+        menu.Items.Add(settingsItem);
+        menu.Items.Add(new Separator());
         menu.Items.Add(_toggleItem);
         menu.Items.Add(new Separator());
         menu.Items.Add(quitItem);

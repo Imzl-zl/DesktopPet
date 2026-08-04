@@ -54,6 +54,7 @@ public sealed class PetWindow : Window
     private readonly SystemRoamClock _roamClock = new();
     private string _clickAction = "none"; // ap_left_click_action：none/self/all
     private string? _quickPresetPool;
+    private int _quickBubbleDurationSeconds = 4;
     private Action<string>? _broadcastQuickBubble;
     private string? _moodLine;
     private string? _renderSignature;
@@ -275,6 +276,14 @@ public sealed class PetWindow : Window
         _broadcastQuickBubble = broadcast;
     }
 
+    /// <summary>气泡时长（设置页 1-10s，对齐 readQuickBubbleDurationMs）。</summary>
+    public void ApplyQuickBubbleDuration(int seconds)
+    {
+        _quickBubbleDurationSeconds = Math.Clamp(seconds, 1, 10);
+    }
+
+    private long QuickBubbleDurationMs => _quickBubbleDurationSeconds * 1000L;
+
     /// <summary>点击行为配置（ap_left_click_action：none/self/all）。</summary>
     public void SetClickAction(string action)
     {
@@ -290,7 +299,7 @@ public sealed class PetWindow : Window
     /// <summary>收到广播的快速气泡（对齐 listen&lt;quick-bubble&gt;）。</summary>
     public void ShowBroadcastQuickBubble(string text)
     {
-        _quickBubble.Show(text, QuickBubbleDuration.ReadDurationMs(_ => null));
+        _quickBubble.Show(text, QuickBubbleDurationMs);
         RenderBubble();
     }
 
@@ -560,7 +569,7 @@ public sealed class PetWindow : Window
         if (text is null) return;
         if (_clickAction == "self")
         {
-            _quickBubble.Show(text, QuickBubbleDuration.ReadDurationMs(_ => null));
+            _quickBubble.Show(text, QuickBubbleDurationMs);
             RenderBubble();
         }
         else

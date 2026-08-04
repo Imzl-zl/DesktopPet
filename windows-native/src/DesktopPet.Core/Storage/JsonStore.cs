@@ -20,6 +20,8 @@ public interface IJsonStore
     void SaveGlobalVisibility(bool visible);
     Dictionary<string, CareState> LoadCare();
     void SaveCare(IReadOnlyDictionary<string, CareState> states);
+    AppSettings? LoadSettings();
+    void SaveSettings(AppSettings settings);
 }
 
 /// <summary>%APPDATA%/DesktopPet/ 的 JSON 文件实现（迁移计划 §2 持久化决策）。
@@ -114,6 +116,31 @@ public sealed class FileJsonStore : IJsonStore
     public void SaveCare(IReadOnlyDictionary<string, CareState> states)
         => WriteFile("care.json", JsonSerializer.Serialize(states, CareJsonOptions));
 
+    public AppSettings? LoadSettings()
+    {
+        var raw = ReadFile("app-settings.json");
+        if (raw is null) return null;
+        try
+        {
+            var settings = JsonSerializer.Deserialize<AppSettings>(raw, SettingsJsonOptions);
+            return settings is null ? null : AppSettings.Normalize(settings);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    public void SaveSettings(AppSettings settings)
+        => WriteFile("app-settings.json", JsonSerializer.Serialize(AppSettings.Normalize(settings), SettingsJsonOptions));
+
+    /// <summary>app-settings.json 序列化：camelCase + 枚举字符串。</summary>
+    private static readonly JsonSerializerOptions SettingsJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+    };
+
     /// <summary>care.json 序列化：camelCase（对齐 TS ap_care 格式，迁移工具可直接读）。</summary>
     private static readonly JsonSerializerOptions CareJsonOptions = new()
     {
@@ -138,4 +165,7 @@ public sealed class InMemoryJsonStore : IJsonStore
     public void SaveGlobalVisibility(bool visible) => GlobalVisibility = visible;
     public Dictionary<string, CareState> LoadCare() => new(Care);
     public void SaveCare(IReadOnlyDictionary<string, CareState> states) => Care = new(states);
+    public AppSettings? Settings { get; set; }
+    public AppSettings? LoadSettings() => Settings;
+    public void SaveSettings(AppSettings settings) => Settings = settings;
 }

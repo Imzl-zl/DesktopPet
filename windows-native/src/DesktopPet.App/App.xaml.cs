@@ -34,23 +34,37 @@ public partial class App : Application
             return;
         }
 
+        var isBench = e.Args.Any(a => a.StartsWith("--bench-"));
+        if (isBench) PetWindow.BenchLogEnabled = true;
+
         var dataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "DesktopPet");
         _store = new FileJsonStore(dataDir);
 
-        var store = InitializeStore();
+        var store = isBench ? PetStoreModel.EmptyPetStore() : InitializeStore();
         _manager = new PetWindowManager(_store, new SpriteLoader(dataDir));
         _manager.Reconcile(store, _store.LoadGlobalVisibility());
-        _manager.CreateFloatingBall(dataDir);
-        _tray = new TrayController(_manager);
 
-        var args = e.Args;
-        var benchIndex = Array.FindIndex(args, a => a.StartsWith("--bench-"));
+        if (!isBench)
+        {
+            var i18n = new DesktopPet.Core.I18n.I18nService(DesktopPet.Core.I18n.I18nService.Detect());
+            _manager.SetI18n(i18n);
+            var settings = _store.LoadSettings() ?? AppSettings.Defaults(i18n.Lang);
+            _manager.ApplySettings(settings);
+            _manager.CreateFloatingBall(dataDir);
+            _tray = new TrayController(_manager);
+
+            if (e.Args.Contains("--settings"))
+            {
+                _manager.OpenSettings();
+            }
+        }
+
+        var benchIndex = Array.FindIndex(e.Args, a => a.StartsWith("--bench-"));
         if (benchIndex >= 0)
         {
-            PetWindow.BenchLogEnabled = true;
-            var arg = args[benchIndex];
+            var arg = e.Args[benchIndex];
             var ms = 8000;
             var eq = arg.IndexOf('=');
             if (eq > 0 && int.TryParse(arg[(eq + 1)..], out var parsed)) ms = parsed;

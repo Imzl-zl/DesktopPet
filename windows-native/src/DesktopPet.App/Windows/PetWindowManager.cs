@@ -23,6 +23,8 @@ public sealed class PetWindowManager
     private readonly SpriteLoader _spriteLoader;
     private bool _globallyVisible = true;
     private FloatingBallWindow? _floatingBall;
+    private DesktopPet.App.Settings.SettingsWindow? _settingsWindow;
+    private DesktopPet.Core.I18n.I18nService? _i18n;
 
     /// <summary>Phase 2 内置预设池（Phase 4 设置页可编辑，对齐 ap_quick_bubbles）。</summary>
     public string PresetPoolJson { get; set; } =
@@ -170,6 +172,40 @@ public sealed class PetWindowManager
         Reconcile(store, _globallyVisible);
     }
 
+    /// <summary>设置窗口入口（托盘/浮球右键）。</summary>
+    public void OpenSettings()
+    {
+        if (_settingsWindow is null)
+        {
+            _settingsWindow = new DesktopPet.App.Settings.SettingsWindow(_store, this, _spriteLoader,
+                _i18n ?? new DesktopPet.Core.I18n.I18nService());
+        }
+        if (_settingsWindow.IsVisible)
+        {
+            _settingsWindow.Activate();
+        }
+        else
+        {
+            _settingsWindow.Show();
+        }
+    }
+
+    /// <summary>注入 i18n（App bootstrap）。</summary>
+    public void SetI18n(DesktopPet.Core.I18n.I18nService i18n) => _i18n = i18n;
+
+    /// <summary>应用设置到所有宠物窗口（对齐 Tauri 版 listen/emit 语义）。</summary>
+    public void ApplySettings(AppSettings settings)
+    {
+        var presetsJson = System.Text.Json.JsonSerializer.Serialize(settings.QuickBubblePresets);
+        foreach (var window in _windows.Values)
+        {
+            window.SetClickAction(settings.LeftClickAction);
+            window.SetQuickPresetPool(presetsJson);
+            window.ApplyQuickBubbleDuration(settings.QuickBubbleDurationSeconds);
+        }
+        PresetPoolJson = presetsJson;
+    }
+
     /// <summary>快速气泡广播：浮球发送 → 全员同时说（对齐 emit(&quot;quick-bubble&quot; target all）。</summary>
     public void BroadcastQuickBubble(string text)
     {
@@ -187,6 +223,7 @@ public sealed class PetWindowManager
             BroadcastQuickBubble,
             () => PresetPoolJson,
             SelectedSpriteSheet,
+            OpenSettings,
             dataDirectory);
         _floatingBall.Show();
     }

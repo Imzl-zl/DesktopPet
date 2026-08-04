@@ -1,5 +1,6 @@
 using System.Windows;
 using DesktopPet.App.Interop;
+using DesktopPet.App.Rendering;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Storage;
 
@@ -16,15 +17,17 @@ public sealed class PetWindowManager
     private readonly Dictionary<string, PetWindow> _windows = new();
     private readonly Dictionary<string, PetPosition> _positions;
     private readonly IJsonStore _store;
+    private readonly SpriteLoader _spriteLoader;
     private bool _globallyVisible = true;
 
     public bool GloballyVisible => _globallyVisible;
 
     public event Action<bool>? GlobalVisibilityChanged;
 
-    public PetWindowManager(IJsonStore store)
+    public PetWindowManager(IJsonStore store, SpriteLoader spriteLoader)
     {
         _store = store;
+        _spriteLoader = spriteLoader;
         _positions = store.LoadPositions();
         _globallyVisible = store.LoadGlobalVisibility();
     }
@@ -49,7 +52,8 @@ public sealed class PetWindowManager
         {
             if (!_windows.TryGetValue(instance.Id, out var window))
             {
-                window = new PetWindow(instance, OnDragFinished);
+                window = new PetWindow(instance, _spriteLoader, OnDragFinished);
+                window.SetImportHandler(ImportSprite);
                 _windows[instance.Id] = window;
                 PositionAndShow(window, instance, index);
             }
@@ -109,7 +113,8 @@ public sealed class PetWindowManager
             WanderPauseMaxMs = Pause.DefaultWanderPauseMaxMs,
             ReactsToActivity = false,
         };
-        var window = new PetWindow(instance, OnDragFinished);
+        var window = new PetWindow(instance, _spriteLoader, OnDragFinished);
+        window.SetImportHandler(ImportSprite);
         _windows[instance.Id] = window;
         window.ShowAt(physicalX, physicalY);
         return window;
@@ -122,6 +127,33 @@ public sealed class PetWindowManager
         var position = new PetPosition(x, y);
         _positions[window.PetId] = position;
         _store.SavePositions(PetPositionsFile.Update(_positions, window.PetId, position));
+    }
+
+    /// <summary>
+    /// 导入精灵：保存本地缓存 + 创建宠物实例 + 重建窗口（拖拽文件到宠物窗口触发）。
+    /// </summary>
+    public void ImportSprite(byte[] bytes, string suggestedName)
+    {
+        var id = PetStoreModel.NewPetInstanceId();
+        _spriteLoader.SaveLocal(id, bytes);
+        var instance = new PetInstance
+        {
+            Id = id,
+            Name = suggestedName.Length > 0 ? suggestedName[..Math.Min(40, suggestedName.Length)] : "New Pet",
+            SpriteSlug = id,
+            Visible = true,
+            Size = 100,
+            RoamEnabled = true,
+            RoamMode = RoamMode.Wander,
+            RoamSpeed = 5,
+            WanderPauseMinMs = Pause.DefaultWanderPauseMinMs,
+            WanderPauseMaxMs = Pause.DefaultWanderPauseMaxMs,
+            ReactsToActivity = true,
+        };
+        var store = _store.LoadPetStore() ?? PetStoreModel.EmptyPetStore();
+        store = PetStoreModel.CreatePetInstance(store, instance);
+        _store.SavePetStore(store);
+        Reconcile(store, _globallyVisible);
     }
 
     public void Shutdown()

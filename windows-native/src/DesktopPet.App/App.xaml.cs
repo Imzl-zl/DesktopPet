@@ -2,6 +2,7 @@ using System.IO;
 using System.Threading;
 using System.Windows;
 using DesktopPet.App.Bench;
+using DesktopPet.App.Rendering;
 using DesktopPet.App.Tray;
 using DesktopPet.App.Windows;
 using DesktopPet.Core.Pets;
@@ -38,7 +39,7 @@ public partial class App : Application
         _store = new FileJsonStore(dataDir);
 
         var store = InitializeStore();
-        _manager = new PetWindowManager(_store);
+        _manager = new PetWindowManager(_store, new SpriteLoader(dataDir));
         _manager.Reconcile(store, _store.LoadGlobalVisibility());
         _tray = new TrayController(_manager);
 

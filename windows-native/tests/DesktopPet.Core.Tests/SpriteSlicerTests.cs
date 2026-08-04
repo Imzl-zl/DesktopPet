@@ -96,4 +96,28 @@ public class SpriteSlicerTests
     {
         Assert.Empty(SpriteSlicer.Slice(Array.Empty<byte>(), 0, 0));
     }
+
+    // ---- 真实 CDN 宠物包对照（scripts/slice-reference 用 TS slice() 固化期望）----
+
+    [Fact]
+    public void Slice_MatchesTsReference_OnRealPetSheets()
+    {
+        var petDir = Path.Combine(FixturesDir, "pets");
+        var expectedJson = JsonSerializer.Deserialize<JsonElement>(
+            File.ReadAllText(Path.Combine(FixturesDir, "pets-expected.json")));
+
+        foreach (var entry in expectedJson.EnumerateArray())
+        {
+            var fileName = entry.GetProperty("name").GetString()!.Replace("pets/", "");
+            var (rgba, w, h) = DecodePng(Path.Combine(petDir, fileName));
+            var expectedClips = entry.GetProperty("clips");
+            var actual = SpriteSlicer.Slice(rgba, w, h);
+
+            Assert.Equal(expectedClips.GetArrayLength(), actual.Count);
+            for (var i = 0; i < expectedClips.GetArrayLength(); i++)
+            {
+                Assert.Equal(ToRectList(expectedClips, i), actual[i]);
+            }
+        }
+    }
 }

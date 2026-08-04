@@ -20,7 +20,8 @@ public sealed record AppSettings(
     int QuickBubbleDurationSeconds,  // 1-10，默认 4
     string[] QuickBubblePresets,
     RoamConfig Roam,
-    AppLang Lang)
+    AppLang Lang,
+    AiSettings Ai)                   // Phase 5：AI 设置（旧 JSON 无此字段 → 归一化给默认）
 {
     public static AppSettings Defaults(AppLang detectedLang) => new(
         Theme: "system",
@@ -34,7 +35,8 @@ public sealed record AppSettings(
         QuickBubbleDurationSeconds: 4,
         QuickBubblePresets: ["辛苦了~", "摸摸头", "加油！", "休息一下吧", "盯——", "(*´∀`*)"],
         Roam: new RoamConfig(true, RoamMode.Wander, 5, 1200, 3500),
-        Lang: detectedLang);
+        Lang: detectedLang,
+        Ai: AiSettings.Defaults);
 
     public static AppSettings Normalize(AppSettings raw)
     {
@@ -54,6 +56,7 @@ public sealed record AppSettings(
             Math.Clamp(raw.QuickBubbleDurationSeconds, 1, 10),
             raw.QuickBubblePresets ?? [],
             roam with { Speed = roam.Speed },
-            raw.Lang);
+            raw.Lang,
+            AiSettings.Normalize(raw.Ai));
     }
 }

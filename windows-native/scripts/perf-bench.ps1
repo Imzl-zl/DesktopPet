@@ -8,27 +8,26 @@ param(
 
 <#
 .SYNOPSIS
-Phase 0 性能基线（迁移计划 §7 指标）：拖拽延迟 <16ms、空闲 CPU <1%、内存 <120MB。
+# (ascii rewrite)
 
-流程：
-  1. （可选）Release 构建
-  2. Drag 基准：启动 App --bench-drag 模式 → SendInput 真实拖拽序列 →
-     读取 App 内 GetMessageTime 差值采样（pet 窗口 MoveWindow 延迟）→ 断言 <16ms
-  3. Idle 基准：启动 App --bench-idle 模式（静止：渲染循环停止）→ PerformanceCounter
-     采样 CPU/内存 → 断言 CPU <1%、内存 <120MB
-  4. 输出报告，断言失败返回非零退出码
+# (ascii rewrite)
+  1. (optional) Release build
+  2. Drag bench: App --bench-drag mode, SendInput drag sequence, GetMessageTime sampling, assert <16ms
+  3. Idle bench: App --bench-idle mode, PerformanceCounter CPU/mem sampling, assert <1% / <120MB
+  4. Report; non-zero exit on assertion failure
 #>
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $appDir = Join-Path $root "src\DesktopPet.App"
-$exe = Join-Path $appDir "bin\$Configuration\net8.0-windows\DesktopPet.App.exe"
+# Phase 5: TFM now net8.0-windows10.0.19041.0 + win-x64 (WinAppSDK self-contained needs Platform=x64)
+$exe = Join-Path $appDir "bin\$Configuration\net8.0-windows10.0.19041.0\win-x64\DesktopPet.App.exe"
 $tmp = [System.IO.Path]::GetTempPath()
 $dragReady = Join-Path $tmp "desktoppet-bench-drag.ready"
 $dragJson = Join-Path $tmp "desktoppet-bench-drag.json"
 $idleReady = Join-Path $tmp "desktoppet-bench-idle.ready"
 
-# ---- user32 输入模拟（bench-input.cs，独立文件避免 here-string 解析问题） ----
+# ---- user32 input simulation (bench-input.cs, separate file to avoid here-string issues) ----
 Add-Type -Path (Join-Path $PSScriptRoot "bench-input.cs")
 
 function Wait-ForFile([string]$Path, [int]$TimeoutSeconds = 30) {
@@ -50,7 +49,7 @@ function Remove-BenchArtifacts {
 $results = [ordered]@{}
 $failed = @()
 
-# ---- Drag 基准 ----
+# ---- Drag bench ----
 function Invoke-DragBench {
     Write-Host "`n== Drag latency bench (SendInput, $DragIterations iterations) ==" -ForegroundColor Cyan
     Remove-BenchArtifacts
@@ -58,7 +57,7 @@ function Invoke-DragBench {
     try {
         Wait-ForFile $dragReady
         $pos = Get-Content $dragReady -Raw | ConvertFrom-Json
-        # 精灵中心（App 按 DPI 换算输出的物理坐标）
+# (ascii rewrite)
         $startX = [int]$pos.centerX
         $startY = [int]$pos.centerY
 
@@ -66,7 +65,7 @@ function Invoke-DragBench {
             [BenchInput]::Move($startX, $startY)
             Start-Sleep -Milliseconds 30
             [BenchInput]::Down()
-            [BenchInput]::DragMoves($startX, $startY, 24, 4, 3, 8)   # ~125Hz 鼠标节奏
+            [BenchInput]::DragMoves($startX, $startY, 24, 4, 3, 8)   # ~125Hz sampling
             [BenchInput]::Up()
             Start-Sleep -Milliseconds 120
             Write-Host "  iteration $($i + 1) done"
@@ -79,7 +78,7 @@ function Invoke-DragBench {
         $r = Get-Content $dragJson -Raw | ConvertFrom-Json
         $results["drag"] = "procAvg=$([math]::Round($r.processingAvgMs, 2))ms procMax=$([math]::Round($r.processingMaxMs, 2))ms e2eAvg=$([math]::Round($r.endToEndAvgMs, 2))ms e2eP95=$([math]::Round($r.endToEndP95Ms, 2))ms e2eMax=$([math]::Round($r.endToEndMaxMs, 2))ms samples=$($r.sampleCount)"
         Write-Host "  result: processing avg=$([math]::Round($r.processingAvgMs, 2))ms max=$([math]::Round($r.processingMaxMs, 2))ms | end-to-end avg=$([math]::Round($r.endToEndAvgMs, 2))ms p95=$([math]::Round($r.endToEndP95Ms, 2))ms max=$([math]::Round($r.endToEndMaxMs, 2))ms samples=$($r.sampleCount)" -ForegroundColor Yellow
-        # 验收（迁移计划 §7）：跟手 = 端到端平均 <16ms；处理成本 max <16ms
+# (ascii rewrite)
         if ($r.processingMaxMs -ge 16 -or $r.endToEndAvgMs -ge 16) {
             $script:failed += "drag latency: processingMax=$([math]::Round($r.processingMaxMs, 2))ms e2eAvg=$([math]::Round($r.endToEndAvgMs, 2))ms"
         }
@@ -88,14 +87,14 @@ function Invoke-DragBench {
     }
 }
 
-# ---- Idle 基准 ----
+# ---- Idle bench ----
 function Invoke-IdleBench {
     Write-Host "`n== Idle bench (${IdleSeconds}s, animation loop stopped) ==" -ForegroundColor Cyan
     Remove-BenchArtifacts
     $proc = Start-Process -FilePath $exe -ArgumentList "--bench-idle=$($IdleSeconds * 1000)" -PassThru
     try {
         Wait-ForFile $idleReady
-        Start-Sleep -Seconds 3   # 跳过启动/加载瞬态
+# (ascii rewrite)
 
         $cores = [System.Environment]::ProcessorCount
         $samples = @()
@@ -119,7 +118,7 @@ function Invoke-IdleBench {
         if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force; throw "bench app did not exit" }
 
         $steady = $samples[-1]
-        # 对比口径：WebView2 的 ~100MB 常驻是私有内存，因此断言用 PrivateMemorySize64
+        # baseline: WebView2 ~100MB resident; measure PrivateMemorySize64
         $results["idle"] = "cpu=$([math]::Round($steady.CpuPct, 3))% ws=$($steady.MemMb)MB private=$($steady.PrivateMb)MB"
         if ($steady.CpuPct -ge 1.0) { $script:failed += "idle CPU >= 1% ($([math]::Round($steady.CpuPct, 3))%)" }
         if ($steady.PrivateMb -ge 120) { $script:failed += "idle private memory >= 120MB ($($steady.PrivateMb)MB)" }
@@ -131,7 +130,7 @@ function Invoke-IdleBench {
 # ---- main ----
 if (-not $SkipBuild) {
     Write-Host "Building Release..." -ForegroundColor Cyan
-    & dotnet build (Join-Path $root "DesktopPet.sln") -c $Configuration --nologo -v q
+    & dotnet build (Join-Path $root "DesktopPet.sln") -c $Configuration --nologo -v q -p:Platform=x64 -p:Platform=x64
     if ($LASTEXITCODE -ne 0) { throw "build failed" }
 }
 

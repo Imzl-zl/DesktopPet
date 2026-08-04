@@ -14,3 +14,4 @@ desktoppet-drag.log
 # VS / Rider
 .vs/
 .idea/
+**/TestResults/

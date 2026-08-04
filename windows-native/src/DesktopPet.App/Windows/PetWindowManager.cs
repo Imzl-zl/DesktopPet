@@ -17,6 +17,8 @@ namespace DesktopPet.App.Windows;
 /// </summary>
 public sealed class PetWindowManager
 {
+    private Ai.AiCoordinator? _aiCoordinator;
+    private Action<string>? _setOutputMode;
     private readonly Dictionary<string, PetWindow> _windows = new();
     private readonly Dictionary<string, PetPosition> _positions;
     private readonly IJsonStore _store;
@@ -178,7 +180,7 @@ public sealed class PetWindowManager
         if (_settingsWindow is null)
         {
             _settingsWindow = new DesktopPet.App.Settings.SettingsWindow(_store, this, _spriteLoader,
-                _i18n ?? new DesktopPet.Core.I18n.I18nService());
+                _i18n ?? new DesktopPet.Core.I18n.I18nService(), _aiCoordinator);
         }
         if (_settingsWindow.IsVisible)
         {
@@ -192,6 +194,16 @@ public sealed class PetWindowManager
 
     /// <summary>注入 i18n（App bootstrap）。</summary>
     public void SetI18n(DesktopPet.Core.I18n.I18nService i18n) => _i18n = i18n;
+
+    /// <summary>设置窗跳转 AI 助手页（对话窗人格快捷切换入口）。</summary>
+    public void NavigateSettingsToAi()
+        => (_settingsWindow as DesktopPet.App.Settings.SettingsWindow)?.NavigateTo("ai");
+
+    /// <summary>注入 AI 编排器（设置窗口 AI 页用）。</summary>
+    public void SetAiCoordinator(Ai.AiCoordinator? coordinator) => _aiCoordinator = coordinator;
+
+    /// <summary>注入浮球 AI 输出模式切换回调（danmaku/chat/silent）。</summary>
+    public void SetOutputModeHandler(Action<string>? handler) => _setOutputMode = handler;
 
     /// <summary>应用设置到所有宠物窗口（对齐 Tauri 版 listen/emit 语义）。</summary>
     public void ApplySettings(AppSettings settings)
@@ -224,7 +236,8 @@ public sealed class PetWindowManager
             () => PresetPoolJson,
             SelectedSpriteSheet,
             OpenSettings,
-            dataDirectory);
+            dataDirectory,
+            _setOutputMode);
         _floatingBall.Show();
     }
 

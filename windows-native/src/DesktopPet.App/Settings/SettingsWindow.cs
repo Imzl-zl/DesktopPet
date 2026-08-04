@@ -32,12 +32,16 @@ public sealed class SettingsWindow : Window
     private readonly DispatcherTimer _previewTimer;
     private string _currentPage = "pets";
 
-    public SettingsWindow(IJsonStore store, PetWindowManager manager, SpriteLoader spriteLoader, I18nService i18n)
+    private readonly Ai.AiCoordinator? _ai;
+
+    public SettingsWindow(IJsonStore store, PetWindowManager manager, SpriteLoader spriteLoader, I18nService i18n,
+        Ai.AiCoordinator? ai = null)
     {
         _store = store;
         _manager = manager;
         _spriteLoader = spriteLoader;
         _i18n = i18n;
+        _ai = ai;
         _settings = AppSettings.Normalize(store.LoadSettings() ?? AppSettings.Defaults(i18n.Lang));
 
         Title = "DesktopPet";
@@ -77,7 +81,7 @@ public sealed class SettingsWindow : Window
         var pages = new (string Id, string Label)[]
         {
             ("pets", "宠物"), ("appearance", "外观"), ("bubble", "气泡"),
-            ("roam", "漫游"), ("language", "语言"), ("about", "关于"),
+            ("roam", "漫游"), ("ai", "AI 助手"), ("language", "语言"), ("about", "关于"),
         };
         foreach (var (id, label) in pages)
         {
@@ -97,6 +101,13 @@ public sealed class SettingsWindow : Window
         return nav;
     }
 
+    /// <summary>外部跳转（对话窗人格切换入口）。</summary>
+    public void NavigateTo(string id)
+    {
+        ShowPage(id);
+        if (!IsVisible) Show();
+    }
+
     private void ShowPage(string id)
     {
         _currentPage = id;
@@ -106,6 +117,7 @@ public sealed class SettingsWindow : Window
             "appearance" => BuildAppearancePage(),
             "bubble" => BuildBubblePage(),
             "roam" => BuildRoamPage(),
+            "ai" => BuildAiPage(),
             "language" => BuildLanguagePage(),
             _ => BuildAboutPage(),
         };
@@ -454,11 +466,191 @@ public sealed class SettingsWindow : Window
         return grid;
     }
 
+    // ---- AI 助手页（Phase 5：总开关 / 分析 / 输出模式 / 人格卡片 / 模型连接 / 屏幕上下文）----
+
+    private UIElement BuildAiPage()
+    {
+        var stack = new StackPanel();
+        var ai = _settings.Ai;
+        var personas = _ai?.Personas ?? new Core.Personas.PersonasFileModel();
+
+        // AI 总开关
+        var masterToggle = new CheckBox
+        {
+            Content = "启用 AI（开启后启动后台分析进程）",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            IsChecked = ai.Enabled,
+        };
+        masterToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { Enabled = masterToggle.IsChecked == true } });
+        stack.Children.Add(Card(new StackPanel
+        {
+            Children =
+            {
+                masterToggle,
+                new TextBlock
+                {
+                    Text = "关闭 = 纯桌宠模式：无截屏、无网络调用、无后台进程",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
+                    Margin = new Thickness(0, 4, 0, 0),
+                },
+            },
+        }));
+
+        // 分析开关
+        var analysisToggle = new CheckBox
+        {
+            Content = "屏幕分析（感知你在做什么）",
+            IsChecked = ai.ScreenAnalysis,
+        };
+        analysisToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { ScreenAnalysis = analysisToggle.IsChecked == true } });
+        stack.Children.Add(Card(analysisToggle));
+
+        // 输出模式三选一
+        var modePanel = new StackPanel();
+        modePanel.Children.Add(new TextBlock { Text = "AI 主动输出模式", FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
+        foreach (var (id, name, desc) in new[]
+        {
+            ("danmaku", "弹幕", "全屏滚动弹幕（Win2D GPU）"),
+            ("chat", "对话", "回复出现在对话气泡窗口"),
+            ("silent", "静默", "无主动输出，仅应答对话"),
+        })
+        {
+            var radio = new RadioButton
+            {
+                Content = name + " — " + desc,
+                GroupName = "output-mode",
+                IsChecked = ai.OutputMode == id,
+                Margin = new Thickness(0, 4, 0, 0),
+            };
+            radio.Click += (_, _) => Save(s => s with { Ai = s.Ai with { OutputMode = id } });
+            modePanel.Children.Add(radio);
+        }
+        stack.Children.Add(Card(modePanel));
+
+        // 屏幕上下文开关（对话携带最近屏幕事件，隐私默认关）
+        var contextToggle = new CheckBox
+        {
+            Content = "对话携带屏幕上下文（默认关：开启后对话请求才包含屏幕描述）",
+            IsChecked = ai.ScreenContextEnabled,
+            Margin = new Thickness(0, 0, 0, 4),
+        };
+        contextToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { ScreenContextEnabled = contextToggle.IsChecked == true } });
+        stack.Children.Add(Card(contextToggle));
+
+        // 人格卡片网格
+        var personaPanel = new StackPanel();
+        personaPanel.Children.Add(new TextBlock
+        {
+            Text = "人格（影响所有 AI 输出）",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
+        var grid = new WrapPanel();
+        foreach (var persona in personas.MergeWithBuiltins())
+        {
+            var selected = persona.Id == personas.SelectedId;
+            var card = new Border
+            {
+                Background = new SolidColorBrush(selected
+                    ? Color.FromRgb(0xFF, 0xE8, 0xDF)
+                    : Color.FromRgb(0xFF, 0xFF, 0xFF)),
+                BorderBrush = new SolidColorBrush(selected
+                    ? Color.FromRgb(0xFF, 0x8A, 0x65)
+                    : Color.FromArgb(0x14, 0x1C, 0x20, 0x28)),
+                BorderThickness = new Thickness(selected ? 2 : 1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(10, 6, 10, 6),
+                Margin = new Thickness(0, 0, 8, 8),
+                Width = 150,
+                Cursor = System.Windows.Input.Cursors.Hand,
+            };
+            var inner = new StackPanel();
+            inner.Children.Add(new TextBlock
+            {
+                Text = persona.Name + (persona.Builtin ? "" : " ✎"),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+            });
+            inner.Children.Add(new TextBlock
+            {
+                Text = persona.Description,
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
+                TextWrapping = TextWrapping.Wrap,
+            });
+            card.Child = inner;
+            var personaId = persona.Id;
+            card.MouseLeftButtonUp += (_, _) =>
+            {
+                if (_ai is null) return;
+                var file = _ai.Personas.Select(personaId);
+                _ai.ApplyPersonas(file); // 立即生效 + 持久化
+                ShowPage("ai");          // 重建页面：新选中态高亮，卡片不消失
+            };
+            grid.Children.Add(card);
+        }
+        personaPanel.Children.Add(grid);
+        stack.Children.Add(Card(personaPanel));
+
+        // 模型连接
+        var providers = _ai?.Providers ?? new Core.Scheduling.ProvidersFileModel();
+        var providerPanel = new StackPanel();
+        providerPanel.Children.Add(new TextBlock
+        {
+            Text = "模型连接（OpenAI 兼容：云端 / 本地 Ollama 通吃）",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
+        if (providers.Models.Count == 0)
+        {
+            providerPanel.Children.Add(new TextBlock
+            {
+                Text = "未配置模型连接。对话不可用；屏幕分析仅做变化检测（无评论）。",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+        else
+        {
+            var combo = new ComboBox { Margin = new Thickness(0, 0, 0, 6) };
+            var selectedProvider = providers.Models.FirstOrDefault(p => p.Id == ai.ProviderId) ?? providers.Models[0];
+            foreach (var p in providers.Models)
+            {
+                combo.Items.Add(p.Name + "（" + p.ModelName + "）");
+            }
+            combo.SelectedIndex = providers.Models.IndexOf(selectedProvider);
+            combo.SelectionChanged += (_, _) =>
+            {
+                var picked = providers.Models[Math.Max(0, combo.SelectedIndex)];
+                Save(s => s with { Ai = s.Ai with { ProviderId = picked.Id } });
+            };
+            providerPanel.Children.Add(combo);
+            providerPanel.Children.Add(new TextBlock
+            {
+                Text = selectedProvider.BaseUrl,
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x92, 0xA0)),
+            });
+        }
+        stack.Children.Add(Card(providerPanel));
+
+        return PageScroller(stack);
+    }
+
     private void Save(Func<AppSettings, AppSettings> change)
     {
         _settings = AppSettings.Normalize(change(_settings));
         _store.SaveSettings(_settings);
         _manager.ApplySettings(_settings);
+        _ai?.ApplySettings(_settings); // AI 设置同步（总开关启停 Agent / 配置下发）
     }
 
     private void SaveRoam(Core.Roaming.RoamConfig roam)

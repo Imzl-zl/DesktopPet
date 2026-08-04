@@ -27,7 +27,8 @@ public class AppSettingsTests
             ShowIdleChatter: false, BobAnimation: true, PetSizePercent: 999,
             LeftClickAction: "all", QuickBubbleDurationSeconds: 99,
             QuickBubblePresets: ["x"], Roam: new RoamConfig(true, (RoamMode)42, 0, 100, 99_999),
-            Lang: AppLang.En);
+            Lang: AppLang.En,
+            Ai: AiSettings.Defaults);
 
         var n = AppSettings.Normalize(raw);
 

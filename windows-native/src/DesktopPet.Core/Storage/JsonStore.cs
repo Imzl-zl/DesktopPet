@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DesktopPet.Core.Ai;
 using DesktopPet.Core.Care;
+using DesktopPet.Core.Personas;
+using DesktopPet.Core.Scheduling;
 using DesktopPet.Core.Pets;
 
 namespace DesktopPet.Core.Storage;
@@ -22,6 +25,10 @@ public interface IJsonStore
     void SaveCare(IReadOnlyDictionary<string, CareState> states);
     AppSettings? LoadSettings();
     void SaveSettings(AppSettings settings);
+    PersonasFileModel? LoadPersonasFile();
+    void SavePersonasFile(PersonasFileModel personas);
+    ProvidersFileModel? LoadProvidersFile();
+    void SaveProvidersFile(ProvidersFileModel providers);
 }
 
 /// <summary>%APPDATA%/DesktopPet/ 的 JSON 文件实现（迁移计划 §2 持久化决策）。
@@ -36,6 +43,8 @@ public sealed class FileJsonStore : IJsonStore
     };
 
     private readonly string _directory;
+
+    public string DirectoryPath => _directory;
 
     public FileJsonStore(string directory)
     {
@@ -134,6 +143,34 @@ public sealed class FileJsonStore : IJsonStore
     public void SaveSettings(AppSettings settings)
         => WriteFile("app-settings.json", JsonSerializer.Serialize(AppSettings.Normalize(settings), SettingsJsonOptions));
 
+    public PersonasFileModel? LoadPersonasFile()
+    {
+        var raw = ReadFile("personas.json");
+        if (raw is null) return null;
+        try
+        {
+            var personas = JsonSerializer.Deserialize<PersonasFileModel>(raw, SettingsJsonOptions);
+            return personas is null ? null : PersonasFileModel.Normalize(personas);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    public void SavePersonasFile(PersonasFileModel personas)
+        => WriteFile("personas.json", JsonSerializer.Serialize(PersonasFileModel.Normalize(personas), SettingsJsonOptions));
+
+    public ProvidersFileModel? LoadProvidersFile()
+    {
+        var raw = ReadFile("providers.json");
+        if (raw is null) return null;
+        return ProvidersFileModel.Deserialize(raw);
+    }
+
+    public void SaveProvidersFile(ProvidersFileModel providers)
+        => WriteFile("providers.json", ProvidersFileModel.Serialize(providers));
+
     /// <summary>app-settings.json 序列化：camelCase + 枚举字符串。</summary>
     private static readonly JsonSerializerOptions SettingsJsonOptions = new()
     {
@@ -168,4 +205,10 @@ public sealed class InMemoryJsonStore : IJsonStore
     public AppSettings? Settings { get; set; }
     public AppSettings? LoadSettings() => Settings;
     public void SaveSettings(AppSettings settings) => Settings = settings;
+    public PersonasFileModel? Personas { get; set; }
+    public PersonasFileModel? LoadPersonasFile() => Personas;
+    public void SavePersonasFile(PersonasFileModel personas) => Personas = personas;
+    public ProvidersFileModel? Providers { get; set; }
+    public ProvidersFileModel? LoadProvidersFile() => Providers;
+    public void SaveProvidersFile(ProvidersFileModel providers) => Providers = providers;
 }

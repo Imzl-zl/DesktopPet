@@ -26,6 +26,7 @@ public sealed class FloatingBallWindow : Window
     private readonly Func<string> _readPresetPool;
     private readonly Func<SpriteSheet?> _selectedSprite;
     private readonly Action _openSettings;
+    private readonly Action<string>? _setOutputMode; // danmaku/chat/silent（AI 输出模式）
     private readonly Image _petImage = new();
     private WriteableBitmap? _petBitmap;
     private PetRenderer? _petRenderer;
@@ -44,12 +45,14 @@ public sealed class FloatingBallWindow : Window
         Func<string> readPresetPool,
         Func<SpriteSheet?> selectedSprite,
         Action openSettings,
-        string dataDirectory)
+        string dataDirectory,
+        Action<string>? setOutputMode = null)
     {
         _sendQuickBubble = sendQuickBubble;
         _readPresetPool = readPresetPool;
         _selectedSprite = selectedSprite;
         _openSettings = openSettings;
+        _setOutputMode = setOutputMode;
         _positionFilePath = Path.Combine(dataDirectory, "ball-pos");
 
         Width = 80;
@@ -295,6 +298,40 @@ public sealed class FloatingBallWindow : Window
         };
         send.Click += (_, _) => SendAndClose(_input.Text);
         stack.Children.Add(send);
+
+        // AI 输出模式行（Phase 5）：弹幕 / 对话 / 静默；静默 = 停 Agent 无主动输出
+        if (_setOutputMode is not null)
+        {
+            var modeRow = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+            var label = new TextBlock
+            {
+                Text = "AI 输出：",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0),
+            };
+            modeRow.Children.Add(label);
+            foreach (var (id, name) in new[] { ("danmaku", "弹幕"), ("chat", "对话"), ("silent", "静默") })
+            {
+                var modeButton = new Button
+                {
+                    Content = name,
+                    FontSize = 11,
+                    Margin = new Thickness(0, 0, 6, 0),
+                    Padding = new Thickness(10, 4, 10, 4),
+                    Background = new SolidColorBrush(Color.FromArgb(0x1F, 0x4A, 0x90, 0xE0)),
+                    BorderThickness = new Thickness(0),
+                };
+                modeButton.Click += (_, _) =>
+                {
+                    CloseMenu();
+                    _setOutputMode(id);
+                };
+                modeRow.Children.Add(modeButton);
+            }
+            stack.Children.Add(modeRow);
+        }
 
         card.Child = stack;
         _menu = new Popup

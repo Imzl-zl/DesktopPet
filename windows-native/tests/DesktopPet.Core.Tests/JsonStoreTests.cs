@@ -1,4 +1,5 @@
 using DesktopPet.Core.Pets;
+using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
 using Xunit;
 

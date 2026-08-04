@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DesktopPet.Core.Pets;
+using DesktopPet.Core.Roaming;
 using Xunit;
 
 namespace DesktopPet.Core.Tests;

@@ -29,6 +29,8 @@ public sealed class SpriteLoader
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("DesktopPet/0.1 (Windows; .NET 8)");
     }
 
+    public string SpritesDirectory => _spritesDir;
+
     /// <summary>导入的本地精灵写入缓存目录（slug 为实例 id）。</summary>
     public void SaveLocal(string slug, byte[] bytes)
     {

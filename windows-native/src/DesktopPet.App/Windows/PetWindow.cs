@@ -8,8 +8,10 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using DesktopPet.App.Interop;
 using DesktopPet.App.Rendering;
+using DesktopPet.Core.Interaction;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Rendering;
+using DesktopPet.Core.Roaming;
 
 namespace DesktopPet.App.Windows;
 
@@ -39,6 +41,22 @@ public sealed class PetWindow : Window
     private int _frameIndex;
     private bool _animationEnabled = true;
 
+    // ---- 漫游引擎（Phase 2）----
+    private readonly RoamEngine _roamEngine = null!; // 构造中初始化
+    private readonly DispatcherTimer _roamTimer;
+    private readonly BubbleView _bubble = new();
+    private readonly DispatcherTimer _renderTimer;
+    private readonly QuickBubbleController _quickBubble;
+    private readonly SystemRoamClock _roamClock = new();
+    private string _clickAction = "none"; // ap_left_click_action：none/self/all
+    private string? _quickPresetPool;
+    private Action<string>? _broadcastQuickBubble;
+    private string? _moodLine;
+    private string? _renderSignature;
+    private long _celebrateUntil;
+    private bool _wasCelebrating;
+    private string _celebrateText = "";
+
     // 拖拽状态（对齐 windows/src/window-drag.ts 语义：阈值区分点击/拖拽）
     private bool _pressed;
     private bool _dragging;
@@ -54,6 +72,10 @@ public sealed class PetWindow : Window
     private readonly List<double> _endToEndLatencyMs = [];
 
     public string PetId => _instance.Id;
+
+    public nint Hwnd => _hwnd;
+
+    public double DpiScale => _dpiScale;
 
     public IReadOnlyList<double> ProcessingLatencySamples => _processingLatencyMs;
 
@@ -104,7 +126,15 @@ public sealed class PetWindow : Window
         _image.Stretch = Stretch.Fill;
         _image.SnapsToDevicePixels = true;
         RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.NearestNeighbor);
-        Content = _image;
+
+        // 气泡层叠在精灵上方，顶部对齐（headroom 由 SnugToHeadroom 控制）
+        var root = new Grid();
+        root.Children.Add(_image);
+        root.Children.Add(_bubble);
+        _bubble.HorizontalAlignment = HorizontalAlignment.Center;
+        _bubble.VerticalAlignment = VerticalAlignment.Top;
+        _bubble.Margin = new Thickness(0, 8, 0, 0);
+        Content = root;
 
         _animationTimer = new DispatcherTimer(DispatcherPriority.Render)
         {
@@ -112,11 +142,68 @@ public sealed class PetWindow : Window
         };
         _animationTimer.Tick += (_, _) => AdvanceFrame();
 
+        // 漫游 tick（对齐 roam engine：活跃 30ms / 静止 200ms）
+        _roamTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(RoamEngine.IdleTickMs) };
+        _roamTimer.Tick += (_, _) =>
+        {
+            var active = _roamEngine.Step(_roamClock.NowMs());
+            var target = active ? RoamConstants.TickMs : RoamEngine.IdleTickMs;
+            if (Math.Abs(_roamTimer.Interval.TotalMilliseconds - target) > 1)
+            {
+                _roamTimer.Interval = TimeSpan.FromMilliseconds(target);
+            }
+        };
+
+        // 气泡渲染（对齐 pet-window render() 500ms 循环）
+        _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _renderTimer.Tick += (_, _) => RenderBubble();
+
+        _quickBubble = new QuickBubbleController(new DispatcherBubbleClock(), () =>
+        {
+            _renderSignature = null; // 过期后强制重渲染（对齐 renderSig 失效）
+            RenderBubble();
+        });
+
+
+        var environmentSource = new PetWindowEnvironmentSource();
+        environmentSource.SetDpiScale(_dpiScale);
+        _roamEngine = new RoamEngine(
+            new PetWindowRoamHost(this),
+            environmentSource,
+            () =>
+            {
+                var instance = _instance;
+                return new RoamConfig(
+                    instance.RoamEnabled,
+                    instance.RoamMode,
+                    (int)instance.RoamSpeed,
+                    instance.WanderPauseMinMs,
+                    instance.WanderPauseMaxMs);
+            },
+            _roamClock,
+            () => Random.Shared.NextDouble(),
+            pet: null, // 动画行由 render 循环管理，Phase 2 漫游行控制通过 SetRow
+            sleepRowOverride: null,
+            cursorProvider: () =>
+            {
+                var (x, y) = NativeMethods.CursorPosition();
+                return new RoamPoint(x / _dpiScale, y / _dpiScale);
+            });
         Loaded += OnLoaded;
         IsVisibleChanged += (_, _) =>
         {
-            if (!IsVisible) _animationTimer.Stop();
-            else RestartAnimation();
+            if (!IsVisible)
+            {
+                _animationTimer.Stop();
+                _roamTimer.Stop();
+                _renderTimer.Stop();
+            }
+            else
+            {
+                RestartAnimation();
+                _roamTimer.Start();
+                _renderTimer.Start();
+            }
         };
     }
 
@@ -168,6 +255,149 @@ public sealed class PetWindow : Window
     public void SetImportHandler(Action<byte[], string> onImportRequested)
     {
         _onImportRequested = onImportRequested;
+    }
+
+    /// <summary>快速气泡广播出口（manager 注入：浮球/点击 → 全部窗口）。</summary>
+    public void SetBroadcastQuickBubble(Action<string> broadcast)
+    {
+        _broadcastQuickBubble = broadcast;
+    }
+
+    /// <summary>点击行为配置（ap_left_click_action：none/self/all）。</summary>
+    public void SetClickAction(string action)
+    {
+        _clickAction = action switch { "self" => "self", "all" => "all", _ => "none" };
+    }
+
+    /// <summary>快速气泡预设池（ap_quick_bubbles JSON 数组）。</summary>
+    public void SetQuickPresetPool(string json)
+    {
+        _quickPresetPool = json;
+    }
+
+    /// <summary>收到广播的快速气泡（对齐 listen&lt;quick-bubble&gt;）。</summary>
+    public void ShowBroadcastQuickBubble(string text)
+    {
+        _quickBubble.Show(text, QuickBubbleDuration.ReadDurationMs(_ => null));
+        RenderBubble();
+    }
+
+    private string? RandomPreset()
+    {
+        if (_quickPresetPool is null) return null;
+        try
+        {
+            var list = System.Text.Json.JsonSerializer.Deserialize<string[]>(_quickPresetPool);
+            var presets = list?.Where(x => !string.IsNullOrWhiteSpace(x)).ToList() ?? [];
+            if (presets.Count == 0) return null;
+            return presets[Random.Shared.Next(presets.Count)];
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>渲染气泡（对齐 pet-window render()：快速气泡优先 > celebrate/done/idle，签名去重）。</summary>
+    private void RenderBubble()
+    {
+        var now = _roamClock.NowMs();
+        var quickText = _quickBubble.Current();
+        if (quickText is not null)
+        {
+            _renderSignature = null;
+            _bubble.RenderLine(quickText);
+            SnugBubble();
+            return;
+        }
+
+        // Phase 2 无 activity 生产者：resolved 恒 idle；celebrate 供 Phase 3 升级触发
+        const string resolved = "idle";
+        var celebrating = now < _celebrateUntil;
+        var mood = celebrating ? "celebrate" : resolved;
+        _renderer?.SetState(mood);
+        if (celebrating && _wasCelebrating && now >= _celebrateUntil)
+        {
+            PickMoodLine(resolved);
+        }
+        _wasCelebrating = celebrating;
+
+        var signature = $"{mood}|{_moodLine}|{(celebrating ? _celebrateText : "")}";
+        if (signature != _renderSignature)
+        {
+            _renderSignature = signature;
+            if (celebrating)
+            {
+                _bubble.RenderLine(_celebrateText.Length > 0 ? _celebrateText : "Done!");
+            }
+            else if (_moodLine is { Length: > 0 })
+            {
+                _bubble.RenderLine(_moodLine);
+            }
+            else
+            {
+                _bubble.Hide();
+            }
+        }
+        SnugBubble();
+    }
+
+    private static readonly string[] DefaultIdleLines =
+        ["…", "♪", "Zzz…", "(*´∀`*)", "呼~", "盯——"];
+
+    private void PickMoodLine(string mood)
+    {
+        // Phase 2 内置台词池；Phase 4 接 i18n / activity.ts 台词
+        _moodLine = DefaultIdleLines[Random.Shared.Next(DefaultIdleLines.Length)];
+    }
+
+    private void SnugBubble()
+    {
+        if (_renderer is not null)
+        {
+            // 气泡坐在精灵头顶：headroom 占 buffer 比例 × 窗口高度
+            _bubble.SnugToHeadroom(_renderer.Headroom * Height);
+        }
+    }
+
+    /// <summary>升级/成就庆祝爆发（Phase 3 care 接入后调用）。</summary>
+    public void FlashCelebrate(string line)
+    {
+        _celebrateText = line;
+        _celebrateUntil = _roamClock.NowMs() + 3000;
+        RenderBubble();
+    }
+
+    private sealed class DispatcherBubbleClock : IQuickBubbleClock
+    {
+        private sealed class OneShot(Action callback, long delayMs) : IDisposable
+        {
+            private readonly DispatcherTimer _timer = new()
+            {
+                Interval = TimeSpan.FromMilliseconds(Math.Max(0, delayMs)),
+            };
+
+            public void Start()
+            {
+                _timer.Tick += (_, _) =>
+                {
+                    _timer.Stop();
+                    callback();
+                };
+                _timer.Start();
+            }
+
+            public void Dispose() => _timer.Stop();
+        }
+
+        public long Now() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        public IDisposable Schedule(Action callback, long delayMs)
+        {
+            var timer = new OneShot(callback, delayMs);
+            timer.Start();
+            return timer;
+        }
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -252,6 +482,7 @@ public sealed class PetWindow : Window
         var windowPos = PhysicalPosition();
         _grabOffset = (cursor.X - windowPos.X, cursor.Y - windowPos.Y);
         CaptureMouse();
+        _roamEngine.BeginManualDrag(); // 采样起点 + 取消抛掷（对齐 beginManualDrag）
         BenchTrace($"raw down hit at {client.X},{client.Y}");
     }
 
@@ -271,7 +502,7 @@ public sealed class PetWindow : Window
         var targetY = cursor.Y - _grabOffset.Y;
         var messageTime = NativeMethods.MessageTime();
         var sw = Stopwatch.StartNew();
-        NativeMethods.MoveWindow(_hwnd, targetX, targetY);
+        _roamEngine.MoveManualDrag(new RoamPoint(targetX, targetY)); // 移动 + 物理采样
         sw.Stop();
         _processingLatencyMs.Add(sw.Elapsed.TotalMilliseconds);
         // 端到端：消息生成 → 窗口位移完成（含系统输入管线/队列等待）
@@ -287,9 +518,32 @@ public sealed class PetWindow : Window
         if (_dragging)
         {
             _dragging = false;
+            _roamEngine.FinishManualDrag(); // releasePending → 引擎 tick 抛掷/下落
             var (x, y) = PhysicalPosition();
             _onDragFinished(this, x, y);
             BenchTrace($"raw drag finished at {x},{y}");
+        }
+        else if (Environment.TickCount64 - _pressTickMs <= 280)
+        {
+            // 未超阈值 = 点击（对齐 WindowDragController clickMaxMs + onClick）
+            OnPetClick();
+        }
+    }
+
+    /// <summary>点击宠物（对齐 onPetClick：LEFT_CLICK_KEY none/self/all）。</summary>
+    private void OnPetClick()
+    {
+        if (_clickAction == "none") return;
+        var text = RandomPreset();
+        if (text is null) return;
+        if (_clickAction == "self")
+        {
+            _quickBubble.Show(text, QuickBubbleDuration.ReadDurationMs(_ => null));
+            RenderBubble();
+        }
+        else
+        {
+            _broadcastQuickBubble?.Invoke(text);
         }
     }
 
@@ -450,7 +704,7 @@ public sealed class PetWindow : Window
     public static bool BenchLogEnabled { get; set; }
 
     /// <summary>窗口左上角物理像素位置（GetWindowRect 直读，不依赖 WPF DPI 转换）。</summary>
-    private (int X, int Y) PhysicalPosition()
+    internal (int X, int Y) PhysicalPosition()
     {
         var rect = new NativeMethods.RECT();
         NativeMethods.GetWindowRect(_hwnd, ref rect);
@@ -471,6 +725,83 @@ public sealed class PetWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _animationTimer.Stop();
+        _roamTimer.Stop();
+        _renderTimer.Stop();
         base.OnClosed(e);
+    }
+}
+
+/// <summary>PetWindow 的漫游宿主适配：物理/逻辑位置换算（对齐 roam/window.ts）。</summary>
+internal sealed class PetWindowRoamHost : IRoamHost
+{
+    private readonly PetWindow _window;
+
+    public PetWindowRoamHost(PetWindow window) => _window = window;
+
+    public RoamPoint? CurrentLogicalPos()
+    {
+        var (x, y) = _window.PhysicalPosition();
+        return new RoamPoint(x / _window.DpiScale, y / _window.DpiScale);
+    }
+
+    public void SetLogical(RoamPoint pos)
+    {
+        var (x, y) = _window.PhysicalPosition();
+        NativeMethods.MoveWindow(_window.Hwnd,
+            (int)Math.Round(pos.X * _window.DpiScale),
+            (int)Math.Round(pos.Y * _window.DpiScale));
+        // 仅当确实移动才持久化（对齐 engine 的移动判定在 StepMode）
+        _ = x; _ = y;
+    }
+
+    public RoamPoint SetPhysical(RoamPoint physicalPos)
+    {
+        NativeMethods.MoveWindow(_window.Hwnd,
+            (int)Math.Round(physicalPos.X),
+            (int)Math.Round(physicalPos.Y));
+        return new RoamPoint(physicalPos.X / _window.DpiScale, physicalPos.Y / _window.DpiScale);
+    }
+}
+
+/// <summary>漫游环境源：work area + 系统窗口枚举（150ms TTL 缓存，对齐 Rust WIN_CACHE_TTL）。</summary>
+internal sealed class PetWindowEnvironmentSource : IRoamEnvironmentSource
+{
+    private readonly uint _ownProcessId = (uint)Environment.ProcessId;
+    private long _cacheUntil;
+    private RoamEnvironment? _cache;
+    private readonly SystemRoamClock _clock = new();
+    private double _dpiScale = 1;
+
+    public void SetDpiScale(double dpiScale) => _dpiScale = dpiScale;
+
+    public RoamEnvironment? Fetch(bool includeSystemWindows)
+    {
+        var now = _clock.NowMs();
+        if (_cache is not null && now < _cacheUntil && includeSystemWindows)
+        {
+            return _cache;
+        }
+
+        var (waW, waH) = NativeMethods.PrimaryWorkAreaSize();
+        var workArea = new RoamRect(0, 0, waW / _dpiScale, waH / _dpiScale);
+
+        var windows = new List<SystemWindowInfo>();
+        if (includeSystemWindows)
+        {
+            foreach (var (title, x, y, w, h) in NativeMethods.EnumerateVisibleWindows(_ownProcessId))
+            {
+                windows.Add(new SystemWindowInfo(title, new RoamRect(
+                    x / _dpiScale, y / _dpiScale,
+                    (x + w) / _dpiScale, (y + h) / _dpiScale)));
+            }
+        }
+
+        var env = new RoamEnvironment(workArea, windows);
+        if (includeSystemWindows)
+        {
+            _cache = env;
+            _cacheUntil = now + 150;
+        }
+        return env;
     }
 }

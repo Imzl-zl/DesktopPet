@@ -64,4 +64,48 @@ internal static partial class NativeMethods
         GetCursorPos(out var point);
         return (point.X, point.Y);
     }
+
+    // ---- 系统窗口枚举（climb 漫游环境，对齐 Rust sys_windows.rs）----
+
+    private delegate bool EnumWindowsProc(nint hWnd, nint lParam);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool EnumWindows(EnumWindowsProc callback, nint lParam);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowVisible(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial uint GetWindowThreadProcessId(nint hWnd, out uint processId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowTextW", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int GetWindowText(nint hWnd, System.Text.StringBuilder buffer, int maxCount);
+
+    /// <summary>枚举可见顶层窗口（非空标题、尺寸 >40x40、排除自身进程），物理坐标。</summary>
+    public static List<(string Title, int X, int Y, int Width, int Height)> EnumerateVisibleWindows(uint excludeProcessId)
+    {
+        var result = new List<(string, int, int, int, int)>();
+        EnumWindows((hWnd, _) =>
+        {
+            if (!IsWindowVisible(hWnd)) return true;
+            var rect = new RECT();
+            if (!GetWindowRect(hWnd, ref rect)) return true;
+            var w = rect.Right - rect.Left;
+            var h = rect.Bottom - rect.Top;
+            if (w < 40 || h < 40) return true; // 跳过零尺寸/最小化
+
+            GetWindowThreadProcessId(hWnd, out var pid);
+            if (pid == excludeProcessId) return true; // 排除自己的窗口（不爬自己）
+
+            var title = new System.Text.StringBuilder(512);
+            var len = GetWindowText(hWnd, title, title.Capacity);
+            if (len <= 0) return true; // 仅保留非空标题（过滤工具提示/IME 栏）
+
+            result.Add((title.ToString(), rect.Left, rect.Top, w, h));
+            return true;
+        }, 0);
+        return result;
+    }
 }

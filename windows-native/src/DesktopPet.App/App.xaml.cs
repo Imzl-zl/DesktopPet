@@ -6,6 +6,7 @@ using DesktopPet.App.Rendering;
 using DesktopPet.App.Tray;
 using DesktopPet.App.Windows;
 using DesktopPet.Core.Pets;
+using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
 
 namespace DesktopPet.App;
@@ -41,6 +42,7 @@ public partial class App : Application
         var store = InitializeStore();
         _manager = new PetWindowManager(_store, new SpriteLoader(dataDir));
         _manager.Reconcile(store, _store.LoadGlobalVisibility());
+        _manager.CreateFloatingBall(dataDir);
         _tray = new TrayController(_manager);
 
         var args = e.Args;

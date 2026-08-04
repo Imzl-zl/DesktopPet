@@ -1,7 +1,9 @@
+using System.IO;
 using System.Windows;
 using DesktopPet.App.Interop;
 using DesktopPet.App.Rendering;
 using DesktopPet.Core.Pets;
+using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
 
 namespace DesktopPet.App.Windows;
@@ -19,6 +21,11 @@ public sealed class PetWindowManager
     private readonly IJsonStore _store;
     private readonly SpriteLoader _spriteLoader;
     private bool _globallyVisible = true;
+    private FloatingBallWindow? _floatingBall;
+
+    /// <summary>Phase 2 内置预设池（Phase 4 设置页可编辑，对齐 ap_quick_bubbles）。</summary>
+    public string PresetPoolJson { get; set; } =
+        "[\"辛苦了~\",\"摸摸头\",\"加油！\",\"休息一下吧\",\"盯——\",\"(*´∀`*)\"]";
 
     public bool GloballyVisible => _globallyVisible;
 
@@ -54,6 +61,9 @@ public sealed class PetWindowManager
             {
                 window = new PetWindow(instance, _spriteLoader, OnDragFinished);
                 window.SetImportHandler(ImportSprite);
+                window.SetBroadcastQuickBubble(BroadcastQuickBubble);
+                window.SetClickAction("none"); // Phase 4 设置页配置 LEFT_CLICK_KEY
+                window.SetQuickPresetPool(PresetPoolJson);
                 _windows[instance.Id] = window;
                 PositionAndShow(window, instance, index);
             }
@@ -115,6 +125,9 @@ public sealed class PetWindowManager
         };
         var window = new PetWindow(instance, _spriteLoader, OnDragFinished);
         window.SetImportHandler(ImportSprite);
+        window.SetBroadcastQuickBubble(BroadcastQuickBubble);
+        window.SetClickAction("none");
+        window.SetQuickPresetPool(PresetPoolJson);
         _windows[instance.Id] = window;
         window.ShowAt(physicalX, physicalY);
         return window;
@@ -156,8 +169,42 @@ public sealed class PetWindowManager
         Reconcile(store, _globallyVisible);
     }
 
+    /// <summary>快速气泡广播：浮球发送 → 全员同时说（对齐 emit(&quot;quick-bubble&quot; target all）。</summary>
+    public void BroadcastQuickBubble(string text)
+    {
+        foreach (var window in _windows.Values)
+        {
+            window.ShowBroadcastQuickBubble(text);
+        }
+    }
+
+    /// <summary>创建浮球窗口（球内活体宠物 = 选中实例精灵）。</summary>
+    public void CreateFloatingBall(string dataDirectory)
+    {
+        if (_floatingBall is not null) return;
+        _floatingBall = new FloatingBallWindow(
+            BroadcastQuickBubble,
+            () => PresetPoolJson,
+            SelectedSpriteBytes,
+            dataDirectory);
+        _floatingBall.Show();
+    }
+
+    /// <summary>选中实例的精灵文件路径（浮球内活体宠物）。</summary>
+    private string? SelectedSpriteBytes()
+    {
+        var store = _store.LoadPetStore();
+        var selected = store is null ? null : PetStoreModel.SelectedPetInstance(store);
+        if (selected is null && store is { Instances.Count: > 0 }) selected = store.Instances[0];
+        if (selected is null) return null;
+        var path = Path.Combine(_spriteLoader.SpritesDirectory, $"{selected.SpriteSlug}.png");
+        return File.Exists(path) ? path : null;
+    }
+
     public void Shutdown()
     {
+        _floatingBall?.Close();
+        _floatingBall = null;
         foreach (var window in _windows.Values.ToList())
         {
             window.Close();

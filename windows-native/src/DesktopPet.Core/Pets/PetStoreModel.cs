@@ -1,14 +1,7 @@
 using System.Text.Json;
+using DesktopPet.Core.Roaming;
 
 namespace DesktopPet.Core.Pets;
-
-public enum RoamMode
-{
-    Stay,
-    Wander,
-    Cursor,
-    Climb,
-}
 
 public sealed record PetInstance
 {
@@ -157,12 +150,12 @@ public static class PetStoreModel
         }
 
         var roamMode = ReadString("roamMode");
-        RoamMode? mode = roamMode?.ToLowerInvariant() switch
+        Roaming.RoamMode? mode = roamMode?.ToLowerInvariant() switch
         {
-            "stay" => RoamMode.Stay,
-            "wander" => RoamMode.Wander,
-            "cursor" => RoamMode.Cursor,
-            "climb" => RoamMode.Climb,
+            "stay" => Roaming.RoamMode.Stay,
+            "wander" => Roaming.RoamMode.Wander,
+            "cursor" => Roaming.RoamMode.Cursor,
+            "climb" => Roaming.RoamMode.Climb,
             _ => null,
         };
 

@@ -1,0 +1,16 @@
+# .NET build outputs
+**/bin/
+**/obj/
+*.user
+
+# Node (slice reference runner) — fixtures/ 下的 PNG 与 JSON 是提交的对照真值
+node_modules/
+
+# Bench artifacts
+desktoppet-bench-*.json
+desktoppet-bench-*.ready
+desktoppet-drag.log
+
+# VS / Rider
+.vs/
+.idea/

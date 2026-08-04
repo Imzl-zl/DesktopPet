@@ -1,0 +1,135 @@
+using System.Windows;
+using DesktopPet.App.Interop;
+using DesktopPet.Core.Pets;
+using DesktopPet.Core.Storage;
+
+namespace DesktopPet.App.Windows;
+
+/// <summary>
+/// 多实例窗口管理器：1:1 继承 Rust sync_desktop_pet_windows 语义 —— 每宠物一
+/// 窗口（label 语义 = pet-{id}）、创建缺失/关闭多余/独立显隐；全局显隐对齐
+/// set_desktop_pets_visible（pets-visible 文件 + 全窗口 show/hide）。位置：
+/// 已保存（物理像素）优先，否则右下角默认排布。
+/// </summary>
+public sealed class PetWindowManager
+{
+    private readonly Dictionary<string, PetWindow> _windows = new();
+    private readonly Dictionary<string, PetPosition> _positions;
+    private readonly IJsonStore _store;
+    private bool _globallyVisible = true;
+
+    public bool GloballyVisible => _globallyVisible;
+
+    public event Action<bool>? GlobalVisibilityChanged;
+
+    public PetWindowManager(IJsonStore store)
+    {
+        _store = store;
+        _positions = store.LoadPositions();
+        _globallyVisible = store.LoadGlobalVisibility();
+    }
+
+    /// <summary>reconcile：wanted 集合 = 当前 store 实例；多退少补 + 显隐同步。</summary>
+    public void Reconcile(PetStore store, bool globallyVisible)
+    {
+        _globallyVisible = globallyVisible;
+        var wantedIds = new HashSet<string>(store.Instances.Select(i => i.Id));
+
+        foreach (var (id, window) in _windows.ToList())
+        {
+            if (!wantedIds.Contains(id))
+            {
+                window.Close();
+                _windows.Remove(id);
+            }
+        }
+
+        var index = 0;
+        foreach (var instance in store.Instances)
+        {
+            if (!_windows.TryGetValue(instance.Id, out var window))
+            {
+                window = new PetWindow(instance, OnDragFinished);
+                _windows[instance.Id] = window;
+                PositionAndShow(window, instance, index);
+            }
+            else
+            {
+                var visible = instance.Visible && _globallyVisible;
+                if (visible != window.IsVisible) window.Visibility = visible ? Visibility.Visible : Visibility.Hidden;
+            }
+            index++;
+        }
+    }
+
+    private void PositionAndShow(PetWindow window, PetInstance instance, int index)
+    {
+        var position = _positions.TryGetValue(instance.Id, out var saved)
+            ? (saved.X, saved.Y)
+            : DefaultPosition(index);
+        window.ShowAt(position.X, position.Y);
+        if (!(instance.Visible && _globallyVisible)) window.Hide();
+    }
+
+    /// <summary>默认排布：主屏右下角依次向左上堆叠（对齐 Rust default_pet_position）。</summary>
+    private static (int X, int Y) DefaultPosition(int index)
+    {
+        var (width, height) = NativeMethods.PrimaryWorkAreaSize();
+        var (x, y) = WindowPlacement.DefaultPetPosition(width, height, index);
+        return ((int)x, (int)y);
+    }
+
+    /// <summary>全局显隐（托盘）：写 pets-visible 文件 + 全部宠物窗口 show/hide。
+    /// 隐藏后恢复位置不漂移（窗口坐标不变，只切 Visibility）。</summary>
+    public void SetGlobalVisible(bool visible)
+    {
+        _globallyVisible = visible;
+        _store.SaveGlobalVisibility(visible);
+        foreach (var window in _windows.Values)
+        {
+            window.Visibility = visible ? Visibility.Visible : Visibility.Hidden;
+        }
+        GlobalVisibilityChanged?.Invoke(visible);
+    }
+
+    /// <summary>bench 模式用：摆单只宠物到指定物理坐标并返回窗口。</summary>
+    public PetWindow ShowBenchPet(int physicalX, int physicalY)
+    {
+        var instance = new PetInstance
+        {
+            Id = PetStoreModel.NewPetInstanceId(),
+            Name = "Bench Pet",
+            SpriteSlug = "placeholder",
+            Visible = true,
+            Size = 100,
+            RoamEnabled = false,
+            RoamMode = RoamMode.Stay,
+            RoamSpeed = 5,
+            WanderPauseMinMs = Pause.DefaultWanderPauseMinMs,
+            WanderPauseMaxMs = Pause.DefaultWanderPauseMaxMs,
+            ReactsToActivity = false,
+        };
+        var window = new PetWindow(instance, OnDragFinished);
+        _windows[instance.Id] = window;
+        window.ShowAt(physicalX, physicalY);
+        return window;
+    }
+
+    public IReadOnlyList<PetWindow> VisibleWindows => _windows.Values.ToList();
+
+    private void OnDragFinished(PetWindow window, int x, int y)
+    {
+        var position = new PetPosition(x, y);
+        _positions[window.PetId] = position;
+        _store.SavePositions(PetPositionsFile.Update(_positions, window.PetId, position));
+    }
+
+    public void Shutdown()
+    {
+        foreach (var window in _windows.Values.ToList())
+        {
+            window.Close();
+        }
+        _windows.Clear();
+    }
+}

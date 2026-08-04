@@ -8,10 +8,12 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using DesktopPet.App.Interop;
 using DesktopPet.App.Rendering;
+using DesktopPet.Core.Care;
 using DesktopPet.Core.Interaction;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Rendering;
 using DesktopPet.Core.Roaming;
+using DesktopPet.Core.Storage;
 
 namespace DesktopPet.App.Windows;
 
@@ -29,6 +31,8 @@ public sealed class PetWindow : Window
     private readonly PetInstance _instance;
     private readonly Action<PetWindow, int, int> _onDragFinished;
     private readonly SpriteLoader _spriteLoader;
+    private readonly IJsonStore _store;
+    private CareState _careState = null!;
     private readonly Image _image = new();
     private readonly WriteableBitmap _bitmap;
     private readonly double _dpiScale;
@@ -94,11 +98,14 @@ public sealed class PetWindow : Window
         }
     }
 
-    public PetWindow(PetInstance instance, SpriteLoader spriteLoader, Action<PetWindow, int, int> onDragFinished)
+    public PetWindow(PetInstance instance, SpriteLoader spriteLoader, IJsonStore store, Action<PetWindow, int, int> onDragFinished)
     {
         _instance = instance;
         _spriteLoader = spriteLoader;
+        _store = store;
         _onDragFinished = onDragFinished;
+        var care = _store.LoadCare();
+        _careState = care.TryGetValue(instance.Id, out var state) ? state : CareEngine.EmptyState(DateTime.Now);
 
         AllowDrop = true;
         DragOver += OnDragOver;
@@ -173,10 +180,15 @@ public sealed class PetWindow : Window
             () =>
             {
                 var instance = _instance;
+                var stage = CareEngine.StageIndex(CareEngine.LevelForXp(_careState.Xp));
+                var caps = StageCapabilitiesFor.For(stage);
+                var mode = instance.RoamMode;
+                if (mode == RoamMode.Cursor && !caps.CursorMode) mode = RoamMode.Wander;
+                if (mode == RoamMode.Climb && !caps.ClimbMode) mode = RoamMode.Wander;
                 return new RoamConfig(
                     instance.RoamEnabled,
-                    instance.RoamMode,
-                    (int)instance.RoamSpeed,
+                    mode,
+                    (int)Math.Max(1, instance.RoamSpeed * caps.SpeedFactor),
                     instance.WanderPauseMinMs,
                     instance.WanderPauseMaxMs);
             },
@@ -345,8 +357,18 @@ public sealed class PetWindow : Window
     private static readonly string[] DefaultIdleLines =
         ["…", "♪", "Zzz…", "(*´∀`*)", "呼~", "盯——"];
 
+    private static readonly string[] HungryLines =
+        ["饿了…", "想吃小鱼干~", "好饿哦…", "投喂时间到！"];
+
     private void PickMoodLine(string mood)
     {
+        // Phase 3：饥饿感知台词（对齐 care 饥饿状态影响气泡文案）
+        var hunger = CareEngine.HungerAt(_careState, DateTime.Now);
+        if (hunger >= Hunger.Peckish && Random.Shared.Next(3) == 0)
+        {
+            _moodLine = HungryLines[Random.Shared.Next(HungryLines.Length)];
+            return;
+        }
         // Phase 2 内置台词池；Phase 4 接 i18n / activity.ts 台词
         _moodLine = DefaultIdleLines[Random.Shared.Next(DefaultIdleLines.Length)];
     }
@@ -617,6 +639,7 @@ public sealed class PetWindow : Window
         if (_renderer is not null)
         {
             _renderer.DrawFrame(buffer, _bufferWidth, _bufferHeight);
+            ApplyStageOverlay(buffer);
         }
         else
         {
@@ -652,6 +675,47 @@ public sealed class PetWindow : Window
                 }
             }
         }
+    }
+
+    /// <summary>成长表现叠加：与宠物渲染器同帧绘制（§3.7 光晕/辉光/皇冠/星点）。</summary>
+    private void ApplyStageOverlay(byte[] buffer)
+    {
+        var frame = _renderer!.CurrentFrame();
+        if (frame is null) return;
+        var (x, y, w, h) = _renderer.SpriteRect;
+        var scale = Math.Max(1, w / frame.Width);
+        var stage = CareEngine.StageIndex(CareEngine.LevelForXp(_careState.Xp));
+        OverlayRenderer.Apply(buffer, _bufferWidth, _bufferHeight, frame,
+            StageAppearances.For(stage), x, y, scale, _roamClock.NowMs());
+    }
+
+    /// <summary>喂 token（对齐 feedPet：升级 → 进化气泡）。</summary>
+    public void FeedTokens(double tokens)
+    {
+        var before = CareEngine.LevelForXp(_careState.Xp);
+        CareEngine.FeedTokens(_careState, tokens, DateTime.Now);
+        var after = CareEngine.LevelForXp(_careState.Xp);
+        if (after > before) FlashCelebrate($"进化！{CareEngine.StageName(after)}");
+        PersistCare();
+    }
+
+    /// <summary>记录一次会话（25 XP）。</summary>
+    public void RecordMeal()
+    {
+        var before = CareEngine.LevelForXp(_careState.Xp);
+        CareEngine.RecordMeal(_careState, DateTime.Now);
+        var after = CareEngine.LevelForXp(_careState.Xp);
+        if (after > before) FlashCelebrate($"进化！{CareEngine.StageName(after)}");
+        PersistCare();
+    }
+
+    public CareState CurrentCareState => _careState;
+
+    private void PersistCare()
+    {
+        var care = _store.LoadCare();
+        care[_instance.Id] = _careState;
+        _store.SaveCare(care);
     }
 
     /// <summary>alpha hitTest：命中精灵（不透明区）才允许按下拖窗；

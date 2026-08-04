@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DesktopPet.Core.Care;
 using DesktopPet.Core.Pets;
 
 namespace DesktopPet.Core.Storage;
@@ -17,6 +18,8 @@ public interface IJsonStore
     void SavePositions(IReadOnlyDictionary<string, PetPosition> positions);
     bool LoadGlobalVisibility();
     void SaveGlobalVisibility(bool visible);
+    Dictionary<string, CareState> LoadCare();
+    void SaveCare(IReadOnlyDictionary<string, CareState> states);
 }
 
 /// <summary>%APPDATA%/DesktopPet/ 的 JSON 文件实现（迁移计划 §2 持久化决策）。
@@ -93,6 +96,29 @@ public sealed class FileJsonStore : IJsonStore
 
     public void SaveGlobalVisibility(bool visible)
         => WriteFile("pets-visible", visible ? "1" : "0");
+
+    public Dictionary<string, CareState> LoadCare()
+    {
+        var raw = ReadFile("care.json");
+        if (raw is null) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, CareState>>(raw, CareJsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public void SaveCare(IReadOnlyDictionary<string, CareState> states)
+        => WriteFile("care.json", JsonSerializer.Serialize(states, CareJsonOptions));
+
+    /// <summary>care.json 序列化：camelCase（对齐 TS ap_care 格式，迁移工具可直接读）。</summary>
+    private static readonly JsonSerializerOptions CareJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
 }
 
 /// <summary>内存实现（单元测试用）。</summary>
@@ -101,6 +127,7 @@ public sealed class InMemoryJsonStore : IJsonStore
     public PetStore? PetStore { get; set; }
     public Dictionary<string, PetPosition> Positions { get; set; } = [];
     public bool GlobalVisibility { get; set; } = true;
+    public Dictionary<string, CareState> Care { get; set; } = [];
     public int SavePetStoreCount { get; private set; }
 
     public PetStore? LoadPetStore() => PetStore;
@@ -109,4 +136,6 @@ public sealed class InMemoryJsonStore : IJsonStore
     public void SavePositions(IReadOnlyDictionary<string, PetPosition> positions) => Positions = new(positions);
     public bool LoadGlobalVisibility() => GlobalVisibility;
     public void SaveGlobalVisibility(bool visible) => GlobalVisibility = visible;
+    public Dictionary<string, CareState> LoadCare() => new(Care);
+    public void SaveCare(IReadOnlyDictionary<string, CareState> states) => Care = new(states);
 }

@@ -3,6 +3,7 @@ using System.Windows;
 using DesktopPet.App.Interop;
 using DesktopPet.App.Rendering;
 using DesktopPet.Core.Pets;
+using DesktopPet.Core.Rendering;
 using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
 
@@ -59,7 +60,7 @@ public sealed class PetWindowManager
         {
             if (!_windows.TryGetValue(instance.Id, out var window))
             {
-                window = new PetWindow(instance, _spriteLoader, OnDragFinished);
+                window = new PetWindow(instance, _spriteLoader, _store, OnDragFinished);
                 window.SetImportHandler(ImportSprite);
                 window.SetBroadcastQuickBubble(BroadcastQuickBubble);
                 window.SetClickAction("none"); // Phase 4 设置页配置 LEFT_CLICK_KEY
@@ -123,7 +124,7 @@ public sealed class PetWindowManager
             WanderPauseMaxMs = Pause.DefaultWanderPauseMaxMs,
             ReactsToActivity = false,
         };
-        var window = new PetWindow(instance, _spriteLoader, OnDragFinished);
+        var window = new PetWindow(instance, _spriteLoader, _store, OnDragFinished);
         window.SetImportHandler(ImportSprite);
         window.SetBroadcastQuickBubble(BroadcastQuickBubble);
         window.SetClickAction("none");
@@ -185,20 +186,18 @@ public sealed class PetWindowManager
         _floatingBall = new FloatingBallWindow(
             BroadcastQuickBubble,
             () => PresetPoolJson,
-            SelectedSpriteBytes,
+            SelectedSpriteSheet,
             dataDirectory);
         _floatingBall.Show();
     }
 
-    /// <summary>选中实例的精灵文件路径（浮球内活体宠物）。</summary>
-    private string? SelectedSpriteBytes()
+    /// <summary>选中实例的共享精灵（浮球内活体宠物，复用窗口缓存不重复解码）。</summary>
+    private SpriteSheet? SelectedSpriteSheet()
     {
         var store = _store.LoadPetStore();
         var selected = store is null ? null : PetStoreModel.SelectedPetInstance(store);
         if (selected is null && store is { Instances.Count: > 0 }) selected = store.Instances[0];
-        if (selected is null) return null;
-        var path = Path.Combine(_spriteLoader.SpritesDirectory, $"{selected.SpriteSlug}.png");
-        return File.Exists(path) ? path : null;
+        return selected is null ? null : _spriteLoader.TryGetCached(selected.SpriteSlug);
     }
 
     public void Shutdown()

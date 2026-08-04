@@ -19,6 +19,8 @@ public sealed class SpriteLoader
     private readonly string _manifestPath;
     private readonly HttpClient _http;
 
+    private readonly Dictionary<string, SpriteSheet> _sheetCache = new();
+
     public SpriteLoader(string dataDirectory)
     {
         _spritesDir = Path.Combine(dataDirectory, "sprites");
@@ -31,6 +33,10 @@ public sealed class SpriteLoader
 
     public string SpritesDirectory => _spritesDir;
 
+    /// <summary>同步加载已缓存的精灵（浮球等 UI 线程路径），无缓存返回 null。</summary>
+    public SpriteSheet? TryGetCached(string slug)
+        => _sheetCache.TryGetValue(slug, out var sheet) ? sheet : null;
+
     /// <summary>导入的本地精灵写入缓存目录（slug 为实例 id）。</summary>
     public void SaveLocal(string slug, byte[] bytes)
     {
@@ -39,10 +45,15 @@ public sealed class SpriteLoader
 
     public async Task<SpriteSheet?> LoadAsync(string slug, CancellationToken ct = default)
     {
+        // 共享缓存：同 slug 只解码一次（多窗口/浮球共用，内存关键）
+        if (_sheetCache.TryGetValue(slug, out var cached)) return cached;
+
         var localPath = Path.Combine(_spritesDir, $"{slug}.png");
         if (File.Exists(localPath))
         {
-            return SpriteSheet.Decode(await File.ReadAllBytesAsync(localPath, ct), slug);
+            var sheet = SpriteSheet.Decode(await File.ReadAllBytesAsync(localPath, ct), slug);
+            if (sheet is not null) _sheetCache[slug] = sheet;
+            return sheet;
         }
 
         try
@@ -55,7 +66,9 @@ public sealed class SpriteLoader
             }
             var bytes = await _http.GetByteArrayAsync(url, ct);
             await File.WriteAllBytesAsync(localPath, bytes, ct);
-            return SpriteSheet.Decode(bytes, slug);
+            var sheet = SpriteSheet.Decode(bytes, slug);
+            if (sheet is not null) _sheetCache[slug] = sheet;
+            return sheet;
         }
         catch (Exception ex)
         {

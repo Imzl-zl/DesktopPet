@@ -60,12 +60,39 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// 加载/初始化宠物 store。Phase 0：无任何数据时创建一只占位宠物以保证桌面
-    /// 可见（Phase 3 迁移工具将接管 Tauri localStorage 数据，此处逻辑届时替换）。
+    /// 加载/初始化宠物 store。Phase 3：tauri-export.json（Tauri localStorage 导出）
+    /// 存在时一次性迁移（实例 + 养成状态），完成后删除导出文件。
     /// </summary>
     private PetStore InitializeStore()
     {
         var store = _store!.LoadPetStore();
+        if (store is null)
+        {
+            var exportPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "DesktopPet", "tauri-export.json");
+            if (File.Exists(exportPath))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(exportPath));
+                    var result = TauriMigration.Migrate(doc.RootElement, DateTime.Now);
+                    if (result.HadData)
+                    {
+                        _store.SavePetStore(result.Store);
+                        _store.SaveCare(result.Care);
+                        store = result.Store;
+                        File.Delete(exportPath);
+                        System.Diagnostics.Debug.WriteLine($"Tauri migration imported {result.Store.Instances.Count} pet(s), {result.Care.Count} care state(s)");
+                    }
+                }
+                catch (Exception)
+                {
+                    // 迁移失败不阻塞启动（下次启动重试）
+                }
+            }
+        }
+        store ??= PetStoreModel.EmptyPetStore();
         store = PetStoreModel.MigrateLegacyPetStore(store, legacy: null);
         if (store.Instances.Count == 0)
         {

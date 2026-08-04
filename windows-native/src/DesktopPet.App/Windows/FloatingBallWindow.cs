@@ -24,7 +24,7 @@ public sealed class FloatingBallWindow : Window
 
     private readonly Action<string> _sendQuickBubble;
     private readonly Func<string> _readPresetPool;
-    private readonly Func<string?> _selectedSpritePath;
+    private readonly Func<SpriteSheet?> _selectedSprite;
     private readonly Image _petImage = new();
     private WriteableBitmap? _petBitmap;
     private PetRenderer? _petRenderer;
@@ -41,12 +41,12 @@ public sealed class FloatingBallWindow : Window
     public FloatingBallWindow(
         Action<string> sendQuickBubble,
         Func<string> readPresetPool,
-        Func<string?> selectedSpriteBytes,
+        Func<SpriteSheet?> selectedSprite,
         string dataDirectory)
     {
         _sendQuickBubble = sendQuickBubble;
         _readPresetPool = readPresetPool;
-        _selectedSpritePath = selectedSpriteBytes;
+        _selectedSprite = selectedSprite;
         _positionFilePath = Path.Combine(dataDirectory, "ball-pos");
 
         Width = 80;
@@ -107,9 +107,7 @@ public sealed class FloatingBallWindow : Window
 
     private void LoadBallPet()
     {
-        var path = _selectedSpritePath();
-        if (path is null) return;
-        var sheet = SpriteSheet.Decode(File.ReadAllBytes(path), "ball-pet");
+        var sheet = _selectedSprite();
         if (sheet is null) return;
         _petRenderer = new PetRenderer(sheet);
         _petRenderer.SetState("idle");

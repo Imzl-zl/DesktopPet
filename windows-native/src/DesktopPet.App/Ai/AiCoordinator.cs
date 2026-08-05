@@ -100,10 +100,13 @@ public sealed class AiCoordinator : IDisposable
     public ProvidersFileModel Providers => _providers;
     public bool AiEnabled => _settings.Ai.Enabled;
 
-    /// <summary>设置变更（App 保存后调用）：总开关切换启停 Agent；其余同步配置。</summary>
+    /// <summary>设置变更（App 保存后调用）：总开关 + 输出模式共同决定 Agent 启停；其余同步配置。</summary>
     public void ApplySettings(AppSettings settings)
     {
-        var shouldRun = settings.Ai.Enabled;
+        // 仅聊天（silent）模式 = 停 Agent：无截屏、无 vision 分析、无事件评论——
+        // 主动互动用不上屏幕感知，继续截屏只烧 token（对齐迁移计划 §5 硬约束）。
+        // 用户主动对话在 App 进程直连，不受影响。
+        var shouldRun = settings.Ai.Enabled && settings.Ai.OutputMode != "silent";
         var running = _agent is not null; // 以实际进程状态为准（启动时构造已读到旧设置）
         _settings = settings;
         if (shouldRun) _restartFailures = 0; // 设置变更重置看门狗计数
@@ -327,7 +330,7 @@ public sealed class AiCoordinator : IDisposable
         Thread.Sleep(TimeSpan.FromSeconds(delaySeconds));
         lock (_lock)
         {
-            if (_shuttingDown || !_settings.Ai.Enabled || _agent is not null) return;
+            if (_shuttingDown || !_settings.Ai.Enabled || _settings.Ai.OutputMode == "silent" || _agent is not null) return;
             if (_restartFailures > 5)
             {
                 DebugLog("watchdog: too many failures, stopping until settings change");

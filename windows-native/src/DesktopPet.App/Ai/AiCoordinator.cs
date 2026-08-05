@@ -134,6 +134,27 @@ public sealed class AiCoordinator : IDisposable
         if (_settings.Ai.Enabled) PushConfig();
     }
 
+    /// <summary>
+    /// 初始化引导完成（称呼 + 人格，App 启动 / 设置页开启 AI 两处触发共用此入口）：
+    /// 人格落盘 → 称呼写入画像 → Onboarded 标记。保存逻辑收敛一处，调用方不重复实现。
+    /// </summary>
+    public void CompleteOnboarding(string callName, string personaId)
+    {
+        var personas = PersonasFileModel.Normalize(_personas);
+        personas.SelectedId = personaId;
+        ApplyPersonas(personas);
+        SetCallName(callName);
+        _settings = AppSettings.Normalize(_settings) with { Ai = _settings.Ai with { Onboarded = true } };
+        _store.SaveSettings(_settings);
+    }
+
+    /// <summary>设置称呼（更新记忆画像并落盘；记忆开关关 = 只更新内存画像）。</summary>
+    public void SetCallName(string callName)
+    {
+        _profile = _profile with { CallName = callName.Trim() };
+        if (_settings.Ai.MemoryEnabled) _store.SaveMemoryProfile(_profile);
+    }
+
     public void ApplyProviders(ProvidersFileModel providers)
     {
         _providers = ProvidersFileModel.Normalize(providers);

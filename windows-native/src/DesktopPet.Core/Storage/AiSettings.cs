@@ -30,7 +30,8 @@ public sealed record AiSettings(
     bool DailySummary,          // 每日总结开关（默认开）
     bool SummaryImage,          // 总结图开关（默认关——云端费用+隐私，显式开启）
     bool TtsEnabled,            // 语音朗读开关（默认关；仅对话模式朗读，弹幕不朗读）
-    bool AllReply)              // 多宠物全员回应（默认关；开 = 同一事件每只宠物都生成）
+    bool AllReply,              // 多宠物全员回应（默认关；开 = 同一事件每只宠物都生成）
+    bool Onboarded = false)     // 初始化引导已完成（称呼+人格首次设置；开启 AI 后弹引导窗）
 {
     public const string FrequencyLow = "low";
     public const string FrequencyMedium = "medium";
@@ -84,7 +85,8 @@ public sealed record AiSettings(
             raw.DailySummary,
             raw.SummaryImage,
             raw.TtsEnabled,
-            raw.AllReply);
+            raw.AllReply,
+            raw.Onboarded);
     }
 }
 
@@ -114,6 +116,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         var summaryImage = defaults.SummaryImage;
         var ttsEnabled = defaults.TtsEnabled;
         var allReply = defaults.AllReply;
+        var onboarded = defaults.Onboarded;
 
         var camel = options.PropertyNamingPolicy ?? JsonNamingPolicy.CamelCase;
         while (reader.Read())
@@ -139,6 +142,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
                 case "summaryImage": summaryImage = ReadBool(ref reader); break;
                 case "ttsEnabled": ttsEnabled = ReadBool(ref reader); break;
                 case "allReply": allReply = ReadBool(ref reader); break;
+                case "onboarded": onboarded = ReadBool(ref reader); break;
                 default: reader.Skip(); break; // 未知字段容忍（前向兼容）
             }
         }
@@ -146,7 +150,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         return new AiSettings(
             enabled, screenAnalysis, outputMode, screenContextEnabled, providerId,
             memoryEnabled, activeInteraction, interactionFrequency, screenAwareness,
-            intimacyEnabled, dailySummary, summaryImage, ttsEnabled, allReply);
+            intimacyEnabled, dailySummary, summaryImage, ttsEnabled, allReply, onboarded);
     }
 
     public override void Write(Utf8JsonWriter writer, AiSettings value, JsonSerializerOptions options)
@@ -181,6 +185,8 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         JsonSerializer.Serialize(writer, value.TtsEnabled, options);
         writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("AllReply") ?? "allReply");
         JsonSerializer.Serialize(writer, value.AllReply, options);
+        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("Onboarded") ?? "onboarded");
+        JsonSerializer.Serialize(writer, value.Onboarded, options);
         writer.WriteEndObject();
     }
 

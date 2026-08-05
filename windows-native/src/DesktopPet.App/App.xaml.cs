@@ -99,6 +99,12 @@ public partial class App : Application
             _chatWindow.TtsEnabled = settings.Ai.TtsEnabled; // 朗读按钮初始状态（AI 助手页开关）
             RegisterGlobalHotkeys(); // Phase 6h：Ctrl+Alt+H/M/S/Q
 
+            // 初始化引导：AI 已开启但未设置称呼/人格 → 弹引导窗（之后设置页可改）
+            if (settings.Ai.Enabled && !settings.Ai.Onboarded)
+            {
+                ShowWelcomeOnboarding();
+            }
+
             if (e.Args.Contains("--settings"))
             {
                 _manager.OpenSettings();
@@ -194,6 +200,25 @@ public partial class App : Application
     // ---- Phase 5：AI 接线辅助 ----
 
     /// <summary>浮球菜单模式切换（danmaku/chat/silent）：立即生效 + 持久化。</summary>
+    /// <summary>初始化引导窗（App 启动触发；保存走 AiCoordinator.CompleteOnboarding 单一入口）。</summary>
+    private void ShowWelcomeOnboarding()
+    {
+        var ai = _ai;
+        if (ai is null) return;
+        var personas = ai.Personas;
+        var profile = _store.LoadMemoryProfile()
+            ?? new DesktopPet.Core.Memory.UserProfile("", [], "", "");
+        Dispatcher.BeginInvoke(() =>
+        {
+            var welcome = new DesktopPet.App.Windows.WelcomeWindow(
+                builtinPersonas: DesktopPet.Core.Personas.BuiltinPersonas.GetAll(),
+                initialCallName: profile.CallName,
+                selectedPersonaId: personas.SelectedId,
+                onComplete: (callName, personaId) => ai.CompleteOnboarding(callName, personaId));
+            welcome.Show();
+        });
+    }
+
     private void ApplyOutputModeFromBall(string mode)
     {
         var parsed = mode switch

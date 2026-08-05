@@ -855,7 +855,30 @@ public sealed class SettingsWindow : Window
 
     private void Save(Func<AppSettings, AppSettings> change)
     {
+        var before = _settings;
         _settings = AppSettings.Normalize(change(_settings));
+        // 首次开启 AI → 引导窗（称呼+人格）；完成标记随本 Save 一并落盘
+        if (_settings.Ai.Enabled && !before.Ai.Enabled && !_settings.Ai.Onboarded)
+        {
+            var ai = _ai;
+            if (ai is not null)
+            {
+                var personas = ai.Personas;
+                var profile = _store.LoadMemoryProfile()
+                    ?? new DesktopPet.Core.Memory.UserProfile("", [], "", "");
+                var welcome = new Windows.WelcomeWindow(
+                    builtinPersonas: Core.Personas.BuiltinPersonas.GetAll(),
+                    initialCallName: profile.CallName,
+                    selectedPersonaId: personas.SelectedId,
+                    onComplete: (callName, personaId) =>
+                    {
+                        ai.CompleteOnboarding(callName, personaId);
+                        _settings = _settings with { Ai = _settings.Ai with { Onboarded = true } };
+                    });
+                welcome.Owner = this;
+                welcome.ShowDialog();
+            }
+        }
         _store.SaveSettings(_settings);
         _manager.ApplySettings(_settings);
         _ai?.ApplySettings(_settings); // AI 设置同步（总开关启停 Agent / 配置下发）

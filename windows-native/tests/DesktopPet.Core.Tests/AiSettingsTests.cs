@@ -114,6 +114,7 @@ public class AiSettingsTests
             SummaryImage = true,
             TtsEnabled = true,
             AllReply = true,
+            Onboarded = true,
         };
         var json = JsonSerializer.Serialize(ai, TestJsonOptions);
         var back = JsonSerializer.Deserialize<AiSettings>(json, TestJsonOptions)!;

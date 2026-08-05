@@ -27,6 +27,7 @@ public sealed class FloatingBallWindow : Window
     private readonly Func<SpriteSheet?> _selectedSprite;
     private readonly Action _openSettings;
     private readonly Action<string>? _setOutputMode; // danmaku/chat/silent（AI 输出模式）
+    private Action? _openChat;                        // 打开对话窗（用户主动聊天入口；回调后置需可写）
     private readonly Image _petImage = new();
     private WriteableBitmap? _petBitmap;
     private PetRenderer? _petRenderer;
@@ -46,13 +47,15 @@ public sealed class FloatingBallWindow : Window
         Func<SpriteSheet?> selectedSprite,
         Action openSettings,
         string dataDirectory,
-        Action<string>? setOutputMode = null)
+        Action<string>? setOutputMode = null,
+        Action? openChat = null)
     {
         _sendQuickBubble = sendQuickBubble;
         _readPresetPool = readPresetPool;
         _selectedSprite = selectedSprite;
         _openSettings = openSettings;
         _setOutputMode = setOutputMode;
+        _openChat = openChat;
         _positionFilePath = Path.Combine(dataDirectory, "ball-pos");
 
         Width = 80;
@@ -123,6 +126,13 @@ public sealed class FloatingBallWindow : Window
         DrawBallPet();
     }
 
+    /// <summary>宠物窗精灵异步加载完成后刷新球体（启动时序：宠物窗先建、加载完成后球体才有内容；
+    /// 无球体 = 全透明窗口 = 左键点击穿透，菜单打不开）。</summary>
+    public void ReloadPet() => LoadBallPet();
+
+    /// <summary>聊天回调后置（App 启动顺序：浮球创建早于回调注册）。null = 不显示聊天按钮。</summary>
+    public void SetOpenChat(Action? openChat) => _openChat = openChat;
+
     private void AdvanceBallPet()
     {
         _petRenderer?.AdvanceFrame();
@@ -146,7 +156,16 @@ public sealed class FloatingBallWindow : Window
         const int wmLeftDown = 0x0201;
         const int wmLeftUp = 0x0202;
         const int wmRightDown = 0x0204;
+        const int wmNcHitTest = 0x0084;
+        const nint htClient = 1;
         const nint mkLeftButton = 0x0001;
+        if (msg == wmNcHitTest)
+        {
+            // WPF 透明窗口默认对透明像素返回 HTTRANSPARENT → 点击穿透 → 左键菜单/拖拽失效。
+            // 浮球仅 80x80，整体可点即可（对齐“点球开菜单”预期）。
+            handled = true;
+            return htClient;
+        }
         switch (msg)
         {
             case wmLeftDown:
@@ -299,6 +318,29 @@ public sealed class FloatingBallWindow : Window
         };
         send.Click += (_, _) => SendAndClose(_input.Text);
         stack.Children.Add(send);
+
+        // 用户主动聊天入口（Phase 6 收尾）：想聊天随时打开对话窗，与 AI 输出模式无关
+        if (_openChat is not null)
+        {
+            var chatButton = new Button
+            {
+                Content = "💬 聊天",
+                FontSize = 12,
+                Margin = new Thickness(0, 8, 0, 0),
+                Padding = new Thickness(12, 5, 12, 5),
+                Background = new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xE0)),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+            };
+            System.Windows.Automation.AutomationProperties.SetAutomationId(chatButton, "ball-chat-btn");
+            chatButton.Click += (_, _) =>
+            {
+                CloseMenu();
+                _openChat();
+            };
+            stack.Children.Add(chatButton);
+        }
 
         // AI 输出模式行（Phase 5）：弹幕 / 对话 / 静默；静默 = 停 Agent 无主动输出
         if (_setOutputMode is not null)

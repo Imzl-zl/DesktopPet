@@ -171,7 +171,7 @@ public class PipelineTests
         var req = provider.LastRequest!;
         Assert.Equal(PersonaEngine.BuildSystemPrompt(Persona()), req.SystemPrompt);
         Assert.Equal(PersonaEngine.Temperature, req.Temperature);
-        Assert.Equal(PersonaEngine.MaxTokens, req.MaxTokens);
+        Assert.Null(req.MaxTokens); // 对话路径：未配置最大输出 = 不发送（上游默认），与互动短句 120 分离
         // 历史 + 当前输入，顺序正确
         Assert.Equal(3, req.Messages.Count);
         Assert.Equal(ChatRole.User, req.Messages[0].Role);

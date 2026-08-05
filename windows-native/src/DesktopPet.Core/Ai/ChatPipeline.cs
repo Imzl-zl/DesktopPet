@@ -45,6 +45,7 @@ public sealed class ChatPipeline
         bool includeScreenContext,
         Func<string>? memoryInjector = null,    // Phase 6：记忆画像注入（空返回 = 不注入）
         Func<string>? systemPromptSuffix = null, // Phase 6c：亲密度档位语气指令（空返回 = 不追加）
+        int? maxTokens = null,                  // 对话路径：模型连接配置的最大输出（null = 不发送，上游默认）
         Action<int>? onTokensUsed = null,
         CancellationToken ct = default)
     {
@@ -78,7 +79,7 @@ public sealed class ChatPipeline
             SystemPrompt: systemPrompt,
             Messages: messages,
             Temperature: PersonaEngine.Temperature,
-            MaxTokens: PersonaEngine.MaxTokens);
+            MaxTokens: maxTokens);
 
         var result = await _scheduler.EnqueueAsync(RequestPriority.Conversation, request, ct);
         onTokensUsed?.Invoke(result.TokensUsed);

@@ -65,8 +65,12 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
             ["model"] = _config.ModelName,
             ["messages"] = messages,
             ["temperature"] = request.Temperature,
-            ["max_tokens"] = request.MaxTokens,
         };
+        // 最大输出：配置了 MaxOutputTokens 用配置值（对话可放宽长聊）；
+        // 未配置时若请求显式指定（互动/评论短句 120）则用该值；都空 = 不发送（上游默认）。
+        var maxTokens = _config.MaxOutputTokens ?? request.MaxTokens;
+        if (maxTokens is { } mt)
+            body["max_tokens"] = mt;
         // 推理模型开关（如 sensenova-6.7-flash 不带 none 时 token 全被思考耗尽）：
         // 配置了 ReasoningEffort 才发送，兼容不认此参数的普通端点。
         if (!string.IsNullOrEmpty(_config.ReasoningEffort))

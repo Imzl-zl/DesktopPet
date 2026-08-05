@@ -19,6 +19,7 @@ public sealed class PetWindowManager
 {
     private Ai.AiCoordinator? _aiCoordinator;
     private Action<string>? _setOutputMode;
+    private Action? _openChat;
     private readonly Dictionary<string, PetWindow> _windows = new();
     private readonly Dictionary<string, PetPosition> _positions;
     private readonly IJsonStore _store;
@@ -69,6 +70,7 @@ public sealed class PetWindowManager
                 window.SetBroadcastQuickBubble(BroadcastQuickBubble);
                 window.SetClickAction("none"); // Phase 4 设置页配置 LEFT_CLICK_KEY
                 window.SetQuickPresetPool(PresetPoolJson);
+                window.SpriteLoaded += () => _floatingBall?.ReloadPet(); // 精灵就绪 → 浮球球体刷新
                 _windows[instance.Id] = window;
                 PositionAndShow(window, instance, index);
             }
@@ -133,6 +135,7 @@ public sealed class PetWindowManager
         window.SetBroadcastQuickBubble(BroadcastQuickBubble);
         window.SetClickAction("none");
         window.SetQuickPresetPool(PresetPoolJson);
+        window.SpriteLoaded += () => _floatingBall?.ReloadPet();
         _windows[instance.Id] = window;
         window.ShowAt(physicalX, physicalY);
         return window;
@@ -205,6 +208,13 @@ public sealed class PetWindowManager
     /// <summary>注入浮球 AI 输出模式切换回调（danmaku/chat/silent）。</summary>
     public void SetOutputModeHandler(Action<string>? handler) => _setOutputMode = handler;
 
+    /// <summary>对话窗打开回调（浮球“💬 聊天”按钮）。浮球可能已创建（回调后置），需同步更新。</summary>
+    public void SetOpenChatHandler(Action? handler)
+    {
+        _openChat = handler;
+        _floatingBall?.SetOpenChat(handler);
+    }
+
     /// <summary>应用设置到所有宠物窗口（对齐 Tauri 版 listen/emit 语义）。</summary>
     public void ApplySettings(AppSettings settings)
     {
@@ -237,7 +247,8 @@ public sealed class PetWindowManager
             SelectedSpriteSheet,
             OpenSettings,
             dataDirectory,
-            _setOutputMode);
+            _setOutputMode,
+            _openChat);
         _floatingBall.Show();
     }
 

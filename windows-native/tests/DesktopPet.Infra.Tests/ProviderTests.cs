@@ -149,6 +149,44 @@ public class ProviderTests
     }
 
     [Fact]
+    public async Task CompleteAsync_SendsConfiguredMaxOutputTokens()
+    {
+        // 模型支持大输出（如 sensenova 64k）时，用户配置 MaxOutputTokens 覆盖短句默认
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse(
+                """{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":3}}""")),
+        };
+        var creds = new InMemoryCredentialStore();
+        creds.Set("openai-key", "sk-test");
+        var provider = new OpenAiCompatibleModelProvider(
+            Config with { MaxOutputTokens = 4096 }, creds, handler, timeout: TimeSpan.FromSeconds(30));
+
+        await provider.CompleteAsync(
+            new ChatRequest("sys", [new ChatMessage(ChatRole.User, "你好")], MaxTokens: 120),
+            CancellationToken.None);
+
+        Assert.Equal(4096, BodyOf(handler).GetProperty("max_tokens").GetInt32());
+    }
+
+    [Fact]
+    public async Task CompleteAsync_UsesDefaultMaxTokensWhenNotConfigured()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse(
+                """{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":3}}""")),
+        };
+        var provider = MakeProvider(handler);
+
+        await provider.CompleteAsync(
+            new ChatRequest("sys", [new ChatMessage(ChatRole.User, "你好")], MaxTokens: 120),
+            CancellationToken.None);
+
+        Assert.Equal(120, BodyOf(handler).GetProperty("max_tokens").GetInt32());
+    }
+
+    [Fact]
     public async Task CompleteAsync_VisionMessage_UsesContentArray()
     {
         var handler = new MockHandler

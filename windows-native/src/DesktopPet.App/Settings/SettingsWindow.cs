@@ -978,6 +978,8 @@ public sealed class SettingsWindow : Window
         var baseBox = new TextBox { Text = cfg?.BaseUrl ?? "", FontSize = 12, Height = 24 };
         var modelBox = new TextBox { Text = cfg?.ModelName ?? "", FontSize = 12, Height = 24 };
         var keyBox = new TextBox { Text = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? "" : "（已配置，留空不修改）", FontSize = 12, Height = 24 };
+        var maxTokensBox = new TextBox { Text = cfg?.MaxOutputTokens?.ToString() ?? "", FontSize = 12, Height = 24 };
+        var contextBox = new TextBox { Text = cfg?.ContextWindowTokens?.ToString() ?? "", FontSize = 12, Height = 24 };
         var reasoningCombo = new ComboBox { Margin = new Thickness(0, 0, 0, 6) };
         reasoningCombo.Items.Add("关闭思考（推荐，响应更快）");
         reasoningCombo.Items.Add("跟随模型默认");
@@ -990,6 +992,10 @@ public sealed class SettingsWindow : Window
         form.Children.Add(modelBox);
         form.Children.Add(new TextBlock { Text = "API Key（存 Windows 凭据管理器，不落明文）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
         form.Children.Add(keyBox);
+        form.Children.Add(new TextBlock { Text = "最大输出 token（留空 = 短句默认；国产模型一般不用填）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
+        form.Children.Add(maxTokensBox);
+        form.Children.Add(new TextBlock { Text = "上下文长度 token（留空 = 会话记住最近 5 轮；如 256000）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
+        form.Children.Add(contextBox);
         form.Children.Add(new TextBlock { Text = "思考模式", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
         form.Children.Add(reasoningCombo);
         form.Children.Add(new TextBlock { Text = " ", FontSize = 4 });
@@ -999,7 +1005,7 @@ public sealed class SettingsWindow : Window
         {
             Title = "模型连接",
             Width = 420,
-            Height = 330,
+            Height = 440,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             Background = new SolidColorBrush(Color.FromRgb(0xF7, 0xF8, 0xFA)),
@@ -1016,6 +1022,9 @@ public sealed class SettingsWindow : Window
             var keyRef = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? "model-key" : cfg.ApiKeyRef;
             if (keyBox.Text.Length > 0 && keyBox.Text != "（已配置，留空不修改）")
                 creds.Set(keyRef, keyBox.Text);
+            // 数字字段：留空/非法 = null（走默认），填了才生效
+            var maxTokens = int.TryParse(maxTokensBox.Text.Trim(), out var mt) && mt > 0 ? (int?)mt : null;
+            var contextTokens = int.TryParse(contextBox.Text.Trim(), out var ct) && ct > 0 ? (int?)ct : null;
             var newCfg = new Core.Scheduling.ProviderConfig(
                 Id: cfg?.Id ?? "model",
                 Name: model,
@@ -1024,7 +1033,9 @@ public sealed class SettingsWindow : Window
                 ModelName: model,
                 Capabilities: cfg?.Capabilities ?? (Core.Scheduling.ModelCapabilities.Chat | Core.Scheduling.ModelCapabilities.Vision),
                 IsDefault: cfg?.IsDefault ?? true,
-                ReasoningEffort: reasoningCombo.SelectedIndex == 0 ? "none" : null);
+                ReasoningEffort: reasoningCombo.SelectedIndex == 0 ? "none" : null,
+                MaxOutputTokens: maxTokens,
+                ContextWindowTokens: contextTokens);
             var models = providers.Models.ToList();
             var idx = models.FindIndex(m => m.Id == newCfg.Id);
             if (idx >= 0) models[idx] = newCfg;

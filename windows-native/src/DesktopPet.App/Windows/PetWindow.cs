@@ -52,6 +52,9 @@ public sealed class PetWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly QuickBubbleController _quickBubble;
     private readonly SystemRoamClock _roamClock = new();
+
+    /// <summary>精灵加载完成（PetWindowManager 用于刷新浮球球体）。</summary>
+    public event Action? SpriteLoaded;
     private string _clickAction = "none"; // ap_left_click_action：none/self/all
     private string? _quickPresetPool;
     private int _quickBubbleDurationSeconds = 4;
@@ -456,6 +459,7 @@ public sealed class PetWindow : Window
                 _animationTimer.Interval = TimeSpan.FromMilliseconds(1000.0 / _renderer.Fps);
                 DrawFrame(0);
                 RestartAnimation();
+                SpriteLoaded?.Invoke(); // 浮球球体刷新（启动时序：浮球创建早于精灵缓存就绪）
             }
         }
         catch (Exception)

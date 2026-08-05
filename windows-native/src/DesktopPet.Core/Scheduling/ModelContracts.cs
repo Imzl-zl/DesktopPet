@@ -77,7 +77,7 @@ public sealed record ChatRequest(
     string SystemPrompt,
     IReadOnlyList<ChatMessage> Messages,
     double Temperature = 0.7,
-    int MaxTokens = 120);
+    int? MaxTokens = null); // null = 不发送 max_tokens（上游默认）；桌宠互动/评论路径显式传 120
 
 public sealed record ChatResult(string Text, int TokensUsed);
 
@@ -128,7 +128,9 @@ public sealed record ProviderConfig(
     [property: JsonConverter(typeof(ModelCapabilitiesJsonConverter))]
     ModelCapabilities Capabilities, // 能力标记，UI 按能力显示（属性级 converter：优先于 Options 集合）
     bool IsDefault,
-    string? ReasoningEffort = null); // 推理模型开关（如 "none" 关闭思考；空 = 不发送）
+    string? ReasoningEffort = null, // 推理模型开关（如 "none" 关闭思考；空 = 不发送）
+    int? MaxOutputTokens = null,    // 最大输出 token（空 = 桌宠短句默认 120；如模型支持可填大值）
+    int? ContextWindowTokens = null); // 模型上下文长度（空 = L1 会话窗口按最近 5 轮截断）
 
 /// <summary>
 /// 生图连接配置（架构文档 §3.4：providers.json 的 image 段，复用凭据引用机制）。

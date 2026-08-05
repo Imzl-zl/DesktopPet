@@ -87,8 +87,14 @@ public partial class App : Application
                 _manager.OpenSettings();
                 _manager.NavigateSettingsToAi();
             };
+            _chatWindow.RestartRequested += () => _ai?.ClearChatHistory(); // 重开 = 清 L1 会话窗口
             _manager.SetAiCoordinator(_ai);
             _manager.SetOutputModeHandler(ApplyOutputModeFromBall);
+            _manager.SetOpenChatHandler(() =>
+            {
+                if (!_chatWindow.IsVisible) _chatWindow.Show();
+                _chatWindow.Activate();
+            });
             _ai.ApplySettings(settings); // 应用已保存 AI 设置（默认关 = 不起 Agent）
             _chatWindow.TtsEnabled = settings.Ai.TtsEnabled; // 朗读按钮初始状态（AI 助手页开关）
             RegisterGlobalHotkeys(); // Phase 6h：Ctrl+Alt+H/M/S/Q

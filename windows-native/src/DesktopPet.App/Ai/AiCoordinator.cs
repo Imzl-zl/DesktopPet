@@ -59,12 +59,10 @@ public sealed class AiCoordinator : IDisposable
     private readonly PetInteractionDispatcher _dispatcher = new();
     private InteractionEngine _interaction;             // 主动互动（频率/感知随设置更新）
     private DateOnly? _lastDiaryDate;                   // 日记最近生成日期
-    // L1 会话窗口（简洁版分层记忆）：默认最近 5 轮（10 条消息）作多轮上下文，
-    // 超出自然截断不压缩——长期记忆由 L2 画像（memory.json）承担，避免上下文膨胀。
-    // 模型连接配置了 ContextWindowTokens 时按预算估算（25% 留给 system+输入+输出），
-    // 未配置保持固定轮数。
-    private const int ChatHistoryMaxTurns = 5;
-    private readonly List<ChatMessage> _chatHistory = new();
+    // L1/L2 分层会话记忆（简洁版）：L1 最近消息按 token 预算保留（预算 = 模型上下文 50%，
+    // 256k 配置下几百轮不触发）；L2 真超预算时最早轮次压缩进滚动摘要注入，不静默丢弃；
+    // 摘要可合并进 L3 画像（RecordChatSuccess）。
+    private readonly ConversationMemory _conversation = new();
     // 语音输出：SAPI 离线合成（默认；Edge TTS 对 SChannel 风控不可用，见 EdgeTtsProvider 注释）
     private readonly ITtsProvider _tts = new SapiTtsProvider();
     private readonly MediaPlayer _ttsPlayer = new();
@@ -181,7 +179,7 @@ public sealed class AiCoordinator : IDisposable
             Func<string>? suffixFactory = _settings.Ai.IntimacyEnabled
                 ? () => _intimacy.BuildIntimacyDirective()
                 : null;
-            var result = await _pipeline.RunAsync(text, BuildChatHistory(), withScreenContext,
+            var result = await _pipeline.RunAsync(text, _conversation.BuildContext(CurrentContextTokens()), withScreenContext,
                 memoryInjector: memoryInjector,
                 systemPromptSuffix: suffixFactory,
                 maxTokens: CurrentMaxOutputTokens());
@@ -195,11 +193,8 @@ public sealed class AiCoordinator : IDisposable
                 }));
                 return;
             }
-            // L1 会话窗口维护：成功后追加本轮，超限裁剪（只保留最近 N 轮）
-            _chatHistory.Add(new ChatMessage(ChatRole.User, text));
-            _chatHistory.Add(new ChatMessage(ChatRole.Assistant, result.Text!));
-            if (_chatHistory.Count > ChatHistoryMaxTurns * 2)
-                _chatHistory.RemoveRange(0, _chatHistory.Count - ChatHistoryMaxTurns * 2);
+            // L1 会话窗口维护：成功后追加本轮（预算裁剪与 L2 摘要由 ConversationMemory 负责）
+            _conversation.Append(text, result.Text!);
             OnUiThread(() => _chatWindow.AppendAssistantAsync(result.Text!));
             if (result.TokensUsed > 0) RecordTokens(result.TokensUsed);
             RecordChatSuccess(text, result.TokensUsed);   // Phase 6：亲密度 + 画像更新
@@ -475,6 +470,9 @@ public sealed class AiCoordinator : IDisposable
             if (_settings.Ai.MemoryEnabled)
             {
                 _profile = MergeProfile(_profile, userText);
+                // L2 会话摘要合并进 L3 画像（“总结存记忆”：超预算压缩的会话内容落画像，不丢）
+                if (_conversation.Summary.Length > 0)
+                    _profile = _profile with { Summary = _conversation.Summary };
                 _store.SaveMemoryProfile(_profile);
             }
         }
@@ -657,33 +655,14 @@ public sealed class AiCoordinator : IDisposable
         => _providers.Models.FirstOrDefault(m => m.Id == _settings.Ai.ProviderId)?.MaxOutputTokens
            ?? _providers.Models.FirstOrDefault()?.MaxOutputTokens;
 
-    /// <summary>重开对话（ChatWindow“从这里重新开始”）：清空 L1 会话窗口；记忆/亲密度保留。</summary>
-    public void ClearChatHistory() => _chatHistory.Clear();
+    /// <summary>重开对话（ChatWindow“从这里重新开始”）：清空 L1/L2 会话记忆；记忆画像/亲密度保留。</summary>
+    public void ClearChatHistory() => _conversation.Clear();
 
-    /// <summary>
-    /// L1 会话窗口：默认最近 5 轮；配置了模型上下文长度时按 token 预算估算截断
-    /// （1 汉字 ≈ 1.5 token 粗算；预算 = 上下文的 25%，留足 system/输入/输出）。
-    /// 从最新轮次往回累计，超预算即停。
-    /// </summary>
-    private IReadOnlyList<ChatMessage> BuildChatHistory()
-    {
-        var ctx = _providers.Models.FirstOrDefault(m => m.Id == _settings.Ai.ProviderId)?.ContextWindowTokens
-                  ?? _providers.Models.FirstOrDefault()?.ContextWindowTokens;
-        if (ctx is null or <= 0) return _chatHistory.ToList(); // 未配置：固定轮数
-
-        var budget = ctx.Value / 4;
-        var result = new List<ChatMessage>();
-        var approxTokens = 0;
-        for (var i = _chatHistory.Count - 1; i >= 0; i--)
-        {
-            var message = _chatHistory[i];
-            var approx = (message.Content?.Length ?? 0) * 3 / 2;
-            if (result.Count > 0 && approxTokens + approx > budget) break;
-            approxTokens += approx;
-            result.Insert(0, message);
-        }
-        return result;
-    }
+    /// <summary>当前选中模型连接的上下文长度（未配置 = 默认 32k 估算）。</summary>
+    private int CurrentContextTokens()
+        => _providers.Models.FirstOrDefault(m => m.Id == _settings.Ai.ProviderId)?.ContextWindowTokens
+           ?? _providers.Models.FirstOrDefault()?.ContextWindowTokens
+           ?? ConversationMemory.DefaultContextTokens;
 
     public void Speak(string text)
     {

@@ -634,7 +634,7 @@ public sealed class SettingsWindow : Window
             ("bubble", "气泡", "宠物头上气泡文字（默认，不打断工作）"),
             ("danmaku", "弹幕", "全屏滚动弹幕（Win2D GPU）"),
             ("chat", "对话", "回复出现在对话气泡窗口"),
-            ("silent", "静默", "无主动输出，仅应答对话"),
+            ("silent", "仅聊天", "不主动说话，只在你找它聊天时回应"),
         })
         {
             var radio = new RadioButton

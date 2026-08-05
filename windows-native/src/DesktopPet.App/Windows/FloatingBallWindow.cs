@@ -355,7 +355,7 @@ public sealed class FloatingBallWindow : Window
                 Margin = new Thickness(0, 0, 6, 0),
             };
             modeRow.Children.Add(label);
-            foreach (var (id, name) in new[] { ("bubble", "气泡"), ("danmaku", "弹幕"), ("chat", "对话"), ("silent", "静默") })
+            foreach (var (id, name) in new[] { ("bubble", "气泡"), ("danmaku", "弹幕"), ("chat", "对话"), ("silent", "仅聊天") })
             {
                 var modeButton = new Button
                 {

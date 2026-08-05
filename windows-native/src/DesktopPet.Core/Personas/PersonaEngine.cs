@@ -19,7 +19,16 @@ public static class PersonaEngine
     /// <summary>配合 50 字约束的回复上限（ai-personas.md §1）。</summary>
     public const int MaxTokens = 120;
 
-    /// <summary>拼接最终 System Prompt：Base 在前（约束优先），人格在后（性格差异）。</summary>
+    /// <summary>拼接最终 System Prompt：Base 在前（约束优先），人格在后（性格差异）；
+    /// 有示例对话时追加（模仿语气，Phase 6e）。</summary>
     public static string BuildSystemPrompt(Persona persona)
-        => BasePrompt + "\n\n" + persona.Prompt;
+    {
+        var prompt = BasePrompt + "\n\n" + persona.Prompt;
+        if (persona.ExampleDialogs is { Length: > 0 })
+        {
+            prompt += "\n\n参考以下对话风格示例（模仿其中的语气与表达方式，不要照抄内容）：\n"
+                + string.Join("\n", persona.ExampleDialogs);
+        }
+        return prompt;
+    }
 }

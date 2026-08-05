@@ -70,9 +70,11 @@ public class PipeRpcTests
 
         var big = new string('A', 256 * 1024);
         var payload = JsonSerializer.SerializeToElement(new { image = big });
+        // 消息 > 管道缓冲（64KB）：必须对端先读、本端边写边消费，否则写完再读必死锁。
+        var receiveTask = server.ReceiveAsync(CancellationToken.None);
         await client.SendAsync(new RpcMessage(RpcType.Config, payload), CancellationToken.None);
 
-        var received = await server.ReceiveAsync(CancellationToken.None);
+        var received = await receiveTask;
         Assert.Equal(big, received.Payload!.Value.GetProperty("image").GetString());
 
         // 再收一条确认帧边界未错位

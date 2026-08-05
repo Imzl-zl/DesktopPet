@@ -43,6 +43,8 @@ public sealed class ChatPipeline
         string userInput,
         IReadOnlyList<ChatMessage> history,
         bool includeScreenContext,
+        Func<string>? memoryInjector = null,    // Phase 6：记忆画像注入（空返回 = 不注入）
+        Func<string>? systemPromptSuffix = null, // Phase 6c：亲密度档位语气指令（空返回 = 不追加）
         Action<int>? onTokensUsed = null,
         CancellationToken ct = default)
     {
@@ -52,6 +54,12 @@ public sealed class ChatPipeline
 
         var persona = _personaResolver();
         var messages = new List<ChatMessage>(history);
+        // ③ 记忆注入（架构文档 §4）：人格拼接后、屏幕上下文前；记忆开关关 = 不传 injector
+        if (memoryInjector is not null)
+        {
+            var memory = memoryInjector();
+            if (memory.Length > 0) messages.Add(new ChatMessage(ChatRole.System, memory));
+        }
         if (includeScreenContext)
         {
             var context = ScreenContextFormatter.Format(_eventLog.Recent(), _options.ScreenContextMaxEvents);
@@ -59,8 +67,15 @@ public sealed class ChatPipeline
         }
         messages.Add(new ChatMessage(ChatRole.User, text));
 
+        var systemPrompt = PersonaEngine.BuildSystemPrompt(persona);
+        if (systemPromptSuffix is { } suffixFactory)
+        {
+            var suffix = suffixFactory();
+            if (suffix.Length > 0) systemPrompt += "\n\n" + suffix;
+        }
+
         var request = new ChatRequest(
-            SystemPrompt: PersonaEngine.BuildSystemPrompt(persona),
+            SystemPrompt: systemPrompt,
             Messages: messages,
             Temperature: PersonaEngine.Temperature,
             MaxTokens: PersonaEngine.MaxTokens);

@@ -31,12 +31,27 @@ public sealed class WindowsCredentialStore : ICredentialStore
             if (cred.CredentialBlobSize == 0 || cred.CredentialBlob == IntPtr.Zero) return null;
             var bytes = new byte[cred.CredentialBlobSize];
             Marshal.Copy(cred.CredentialBlob, bytes, 0, bytes.Length);
-            return System.Text.Encoding.UTF8.GetString(bytes);
+            return DecodeBlob(bytes);
         }
         finally
         {
             CredNative.CredFree(ptr);
         }
+    }
+
+    /// <summary>
+    /// 凭据 blob 解码：cmdkey 等工具写入的是 UTF-16LE（含 \0 间隔），
+    /// 本应用 Set 写入的是 UTF-8。检测 \0 特征后选择解码，避免 apiKey
+    /// 变成含 NUL 的乱码（曾导致 Authorization 头被网关 400 拒绝）。
+    /// </summary>
+    public static string DecodeBlob(byte[] bytes)
+    {
+        var isUtf16 = bytes.Length >= 2
+            && bytes[^1] == 0
+            && Enumerable.Range(0, bytes.Length / 2).All(i => bytes[i * 2 + 1] == 0);
+        return isUtf16
+            ? System.Text.Encoding.Unicode.GetString(bytes)
+            : System.Text.Encoding.UTF8.GetString(bytes);
     }
 
     public void Set(string key, string value)

@@ -29,3 +29,6 @@ landing/node_modules/
 
 # Zhanggui orchestration state
 .tasks/
+
+# Local secrets / temp credentials (contains API keys)
+windows-native/测试.txt

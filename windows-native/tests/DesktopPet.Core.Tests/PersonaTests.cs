@@ -100,6 +100,55 @@ public class PersonaTests
             < built.IndexOf(persona.Prompt, StringComparison.Ordinal));
     }
 
+    // ---- Phase 6e：示例对话注入 ----
+
+    [Fact]
+    public void BuildSystemPrompt_AppendsExampleDialogs()
+    {
+        var persona = new Persona("custom-ex", "我的", "测试", "你是我的专属宠物。", Builtin: false,
+            ExampleDialogs: ["用户：今天好累\n宠物：辛苦了宝贝，抱抱~", "用户：在干嘛\n宠物：在想你呀"]);
+        var built = PersonaEngine.BuildSystemPrompt(persona);
+        Assert.Contains("示例", built);
+        Assert.Contains("辛苦了宝贝，抱抱~", built);
+        Assert.Contains("在想你呀", built);
+    }
+
+    [Fact]
+    public void BuildSystemPrompt_NoExamples_MatchesLegacyOutput()
+    {
+        var persona = new Persona("custom-plain", "我的", "测试", "你是我的专属宠物。", Builtin: false);
+        Assert.Equal(
+            PersonaEngine.BasePrompt + "\n\n" + persona.Prompt,
+            PersonaEngine.BuildSystemPrompt(persona));
+    }
+
+    [Fact]
+    public void PersonasFileModel_Normalize_KeepsExampleDialogs()
+    {
+        var raw = new PersonasFileModel
+        {
+            SelectedId = "custom-ex",
+            CustomPersonas =
+            [
+                new Persona("custom-ex", "我的", "测试", "你是我的专属宠物。", Builtin: false,
+                    ExampleDialogs: ["用户：hi\n宠物：嗨", "用户：bye\n宠物：再见"]),
+            ],
+        };
+        var normalized = PersonasFileModel.Normalize(raw);
+        var persona = normalized.CustomPersonas.Single();
+        Assert.NotNull(persona.ExampleDialogs);
+        Assert.Equal(2, persona.ExampleDialogs!.Length);
+        Assert.Equal("用户：hi\n宠物：嗨", persona.ExampleDialogs[0]);
+    }
+
+    [Fact]
+    public void EditBuiltinAsCustom_CarriesNoExamples()
+    {
+        var copy = PersonasFileModel.EditBuiltinAsCustom(BuiltinPersonas.GetById("warm-guy")!, "新 prompt");
+        Assert.False(copy.Builtin);
+        Assert.Null(copy.ExampleDialogs);
+    }
+
     [Fact]
     public void BasePrompt_ContainsSceneConstraints()
     {

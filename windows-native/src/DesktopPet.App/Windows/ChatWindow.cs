@@ -24,6 +24,8 @@ public sealed class ChatWindow : Window
     };
     private readonly Button _sendButton = new() { Content = "发送", Width = 56, Height = 28 };
     private readonly Button _personaButton = new() { Height = 28, FontSize = 12 };
+    private readonly Button _restartButton = new() { Content = "重新开始", Height = 28, FontSize = 11 };
+    private readonly Button _ttsButton = new() { Content = "🔇 朗读", Height = 28, FontSize = 11 };
     private readonly CheckBox _screenContextCheck = new() { Content = "屏幕上下文", FontSize = 12 };
     private readonly TextBlock _statusDot = new() { Text = "●", FontSize = 10, Foreground = new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xE0)) };
     private readonly DispatcherTimer _typewriterTimer;
@@ -36,6 +38,9 @@ public sealed class ChatWindow : Window
 
     /// <summary>切换人格（App 接线：写 personas.json selectedId）。</summary>
     public event Action<string>? PersonaSwitchRequested;
+
+    /// <summary>Phase 6e：从这里重新开始（清空对话上下文；记忆/亲密度不受影响）。</summary>
+    public event Action? RestartRequested;
 
     private string _currentPersonaName = "";
     public string CurrentPersonaName
@@ -54,6 +59,13 @@ public sealed class ChatWindow : Window
         set => _screenContextCheck.IsChecked = value;
     }
 
+    /// <summary>Phase 6g：朗读开关状态（AI 助手页语音开关，App 注入）。</summary>
+    public bool TtsEnabled
+    {
+        get => _ttsButton.Content.ToString()?.Contains("🔊") == true;
+        set => _ttsButton.Content = value ? "🔊 朗读" : "🔇 朗读";
+    }
+
     public ChatWindow()
     {
         Title = "DesktopPet 对话";
@@ -68,11 +80,14 @@ public sealed class ChatWindow : Window
         Background = new SolidColorBrush(Color.FromArgb(0xF2, 0xFA, 0xF7, 0xF2)); // Lumen 浅色
         WindowStyle = WindowStyle.ToolWindow;
 
-        // 顶部状态条：状态点 + 人格切换
+        // 顶部状态条：状态点 + 人格切换 + 重新开始 + 朗读
         var statusBar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(12, 8, 12, 4) };
         statusBar.Children.Add(_statusDot);
         statusBar.Children.Add(_personaButton);
         statusBar.Children.Add(_screenContextCheck);
+        statusBar.Children.Add(new TextBlock { Text = " ", FontSize = 11 });
+        statusBar.Children.Add(_restartButton);
+        statusBar.Children.Add(_ttsButton);
 
         _scroll.Content = _messages;
         _scroll.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
@@ -99,6 +114,12 @@ public sealed class ChatWindow : Window
             }
         };
         _personaButton.Click += (_, _) => PersonaSwitchRequested?.Invoke(_currentPersonaName);
+        _restartButton.Click += (_, _) =>
+        {
+            ClearMessages();
+            RestartRequested?.Invoke(); // App 层可扩展（当前上下文即窗口内消息，无需额外状态）
+        };
+        _ttsButton.Click += (_, _) => TtsEnabled = !TtsEnabled; // 会话内快捷开关（持久化开关在 AI 助手页）
 
         _typewriterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
         _typewriterTimer.Tick += (_, _) => TypewriterStep();
@@ -108,6 +129,16 @@ public sealed class ChatWindow : Window
     {
         _typewriterTimer.Stop(); // 窗口销毁后不再驱动打字机
         base.OnClosed(e);
+    }
+
+    /// <summary>清空全部消息（"从这里重新开始"；记忆/亲密度保留）。</summary>
+    public void ClearMessages()
+    {
+        _typewriterTimer.Stop();
+        _typingBlock = null;
+        _messages.Children.Clear();
+        _pendingAssistantText = "";
+        _typewriterIndex = 0;
     }
 
     private void Submit()

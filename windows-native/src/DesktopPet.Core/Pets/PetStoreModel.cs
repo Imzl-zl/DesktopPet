@@ -16,6 +16,7 @@ public sealed record PetInstance
     public double WanderPauseMinMs { get; init; }
     public double WanderPauseMaxMs { get; init; }
     public bool ReactsToActivity { get; init; }
+    public string? PersonaId { get; init; } = null;   // Phase 6d：每宠物独立人格覆盖（空 = 跟随全局）
 }
 
 public sealed record PetStore
@@ -40,6 +41,7 @@ public sealed record PetInstancePatch
     public double? WanderPauseMinMs { get; init; }
     public double? WanderPauseMaxMs { get; init; }
     public bool? ReactsToActivity { get; init; }
+    public string? PersonaId { get; init; }   // Phase 6d：null = 不修改
 }
 
 /// <summary>
@@ -72,6 +74,7 @@ public static class PetStoreModel
         public double? WanderPauseMinMs { get; init; }
         public double? WanderPauseMaxMs { get; init; }
         public bool? ReactsToActivity { get; init; }
+        public string? PersonaId { get; init; }
 
         public static RawPetInstance FromInstance(PetInstance value) => new()
         {
@@ -86,6 +89,7 @@ public static class PetStoreModel
             WanderPauseMinMs = value.WanderPauseMinMs,
             WanderPauseMaxMs = value.WanderPauseMaxMs,
             ReactsToActivity = value.ReactsToActivity,
+            PersonaId = value.PersonaId,
         };
     }
 
@@ -111,6 +115,7 @@ public static class PetStoreModel
             WanderPauseMinMs = wanderPause.MinMs,
             WanderPauseMaxMs = wanderPause.MaxMs,
             ReactsToActivity = value.ReactsToActivity == true,
+            PersonaId = value.PersonaId,
         };
     }
 
@@ -172,6 +177,7 @@ public static class PetStoreModel
             WanderPauseMinMs = ReadNumber("wanderPauseMinMs"),
             WanderPauseMaxMs = ReadNumber("wanderPauseMaxMs"),
             ReactsToActivity = ReadBool("reactsToActivity"),
+            PersonaId = ReadString("personaId"),
         };
     }
 
@@ -265,6 +271,7 @@ public static class PetStoreModel
             WanderPauseMinMs = patch.WanderPauseMinMs ?? current.WanderPauseMinMs,
             WanderPauseMaxMs = patch.WanderPauseMaxMs ?? current.WanderPauseMaxMs,
             ReactsToActivity = patch.ReactsToActivity ?? current.ReactsToActivity,
+            PersonaId = patch.PersonaId ?? current.PersonaId,
         };
         var updated = Normalize(merged) ?? throw new InvalidOperationException("invalid pet instance update");
         var instances = store.Instances.ToList();

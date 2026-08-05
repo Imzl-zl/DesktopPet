@@ -1,24 +1,32 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
+using System.Windows.Media;
 using DesktopPet.App.Windows;
 using DesktopPet.Core.Ai;
 using DesktopPet.Core.Care;
+using DesktopPet.Core.Interaction;
+using DesktopPet.Core.Memory;
 using DesktopPet.Core.Personas;
 using DesktopPet.Core.Scheduling;
 using DesktopPet.Core.Storage;
+using DesktopPet.Core.Summary;
 using DesktopPet.Infra.PipeRpc;
 using DesktopPet.Infra.Providers;
+using DesktopPet.Infra.Tts;
 
 namespace DesktopPet.App.Ai;
 
 /// <summary>
-/// AI 编排器（Phase 5 接线核心）：
+/// AI 编排器（Phase 5 接线核心 + Phase 6 陪伴增强）：
 /// · AI 总开关：开 = 启 Agent 进程（PetAgent.exe）+ 管道连接 + 配置下发；关 = 停进程（无后台/无网络）
 /// · 看门狗：Agent 崩溃自动重启（总开关仍开时）
 /// · 分析事件 → ModeService 路由（弹幕/对话/静默）
 /// · 用户对话在 App 进程直连 provider（架构 §4：不走管道），token 记账 → CareEngine
-/// · 屏幕事件日志（App 侧维护，对话屏幕上下文用）
+/// · 屏幕事件日志（App 侧维护，对话屏幕上下文 + 主动互动事件驱动用）
+/// · Phase 6：记忆画像注入/更新（记忆开关）、亲密度记账与语气指令（亲密度开关）、
+///   主动互动（定时 + 事件驱动，多宠物并行分派）、每日总结 + 总结图（开关组）、
+///   对话朗读（Edge TTS，语音开关 + 仅对话模式）
 /// </summary>
 public sealed class AiCoordinator : IDisposable
 {
@@ -45,6 +53,18 @@ public sealed class AiCoordinator : IDisposable
     private ChatPipeline? _pipeline;
     private readonly WindowsCredentialStore _credentials = new();
 
+    // Phase 6：陪伴增强状态
+    private UserProfile _profile;                       // 记忆画像（记忆开关关 = 空画像）
+    private IntimacyEngine _intimacy;                   // 亲密度（0-100 双线）
+    private readonly PetInteractionDispatcher _dispatcher = new();
+    private InteractionEngine _interaction;             // 主动互动（频率/感知随设置更新）
+    private DateOnly? _lastDiaryDate;                   // 日记最近生成日期
+    // 语音输出：SAPI 离线合成（默认；Edge TTS 对 SChannel 风控不可用，见 EdgeTtsProvider 注释）
+    private readonly ITtsProvider _tts = new SapiTtsProvider();
+    private readonly MediaPlayer _ttsPlayer = new();
+    private IImageProvider? _imageProvider;             // 总结图（providers.json image 段）
+    private System.Threading.Timer? _tickTimer;         // 30s 周期：主动互动 + 每日总结
+
     public AiCoordinator(
         FileJsonStore store,
         ModeService modeService,
@@ -60,6 +80,16 @@ public sealed class AiCoordinator : IDisposable
         _settings = AppSettings.Normalize(store.LoadSettings() ?? AppSettings.Defaults(Core.I18n.I18nService.Detect()));
         _personas = PersonasFileModel.Normalize(store.LoadPersonasFile() ?? new PersonasFileModel());
         _providers = store.LoadProvidersFile() ?? new ProvidersFileModel();
+        _profile = MemoryProfileExtractor.Normalize(store.LoadMemoryProfile());
+        _intimacy = new IntimacyEngine(store.LoadIntimacy() ?? IntimacyState.Defaults);
+        _lastDiaryDate = store.LoadDiaryLastGenerated();
+        _imageProvider = BuildImageProvider(_providers);
+        _interaction = new InteractionEngine(
+            new InteractionEngineState(null, null),
+            _settings.Ai.InteractionFrequency,
+            _settings.Ai.ScreenAwareness);
+        _interaction.SetEnabled(_settings.Ai.ActiveInteraction);
+        _tickTimer = new System.Threading.Timer(Tick, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 
     public PersonasFileModel Personas => _personas;
@@ -73,6 +103,10 @@ public sealed class AiCoordinator : IDisposable
         var running = _agent is not null; // 以实际进程状态为准（启动时构造已读到旧设置）
         _settings = settings;
         if (shouldRun) _restartFailures = 0; // 设置变更重置看门狗计数
+        _interaction.SetEnabled(settings.Ai.ActiveInteraction);
+        _interaction.UpdateFrequency(settings.Ai.InteractionFrequency);
+        _interaction.UpdateScreenAwareness(settings.Ai.ScreenAwareness);
+        _chatWindow.TtsEnabled = settings.Ai.TtsEnabled; // 语音开关同步到对话窗按钮
         _modeService.SetMode(settings.Ai.OutputMode switch
         {
             "danmaku" => OutputMode.Danmaku,
@@ -97,6 +131,7 @@ public sealed class AiCoordinator : IDisposable
     {
         _providers = ProvidersFileModel.Normalize(providers);
         _store.SaveProvidersFile(_providers);
+        _imageProvider = BuildImageProvider(_providers); // 生图连接变更立即生效（总结图）
         RebuildChatPipeline();
         if (_settings.Ai.Enabled) PushConfig();
     }
@@ -111,7 +146,16 @@ public sealed class AiCoordinator : IDisposable
         }
         try
         {
-            var result = await _pipeline.RunAsync(text, [], withScreenContext);
+            // Phase 6：记忆注入（开关开 + 有画像）+ 亲密度语气指令（开关开）
+            Func<string>? memoryInjector = _settings.Ai.MemoryEnabled
+                ? () => MemoryProfileExtractor.Inject(_profile)
+                : null;
+            Func<string>? suffixFactory = _settings.Ai.IntimacyEnabled
+                ? () => _intimacy.BuildIntimacyDirective()
+                : null;
+            var result = await _pipeline.RunAsync(text, [], withScreenContext,
+                memoryInjector: memoryInjector,
+                systemPromptSuffix: suffixFactory);
             if (!result.Ok)
             {
                 OnUiThread(() => _chatWindow.AppendAssistantAsync(result.Error switch
@@ -124,6 +168,8 @@ public sealed class AiCoordinator : IDisposable
             }
             OnUiThread(() => _chatWindow.AppendAssistantAsync(result.Text!));
             if (result.TokensUsed > 0) RecordTokens(result.TokensUsed);
+            RecordChatSuccess(text, result.TokensUsed);   // Phase 6：亲密度 + 画像更新
+            Speak(result.Text!);                          // Phase 6：语音开关 + 对话模式
         }
         catch (ProviderException ex)
         {
@@ -365,7 +411,8 @@ public sealed class AiCoordinator : IDisposable
         if (!_settings.Ai.Enabled || provider is null) return;
 
         var model = new OpenAiCompatibleModelProvider(provider, _credentials);
-        _chatScheduler = new ModelRequestScheduler(model, concurrency: 1);
+        // 并发闸 3（架构 §3.3）：对话 P0 / 主动互动 P1 / 每日总结 P2 共用——多宠物并行独立请求不被串行化
+        _chatScheduler = new ModelRequestScheduler(model, concurrency: 3);
         _pipeline = new ChatPipeline(_chatScheduler, () => _personas.ResolveSelected(), _eventLog);
     }
 
@@ -378,9 +425,262 @@ public sealed class AiCoordinator : IDisposable
         _recordTokens(first.Key, first.Value, tokens);
     }
 
+    // ---- Phase 6：陪伴增强 ----
+
+    /// <summary>对话成功后：亲密度记账（开关开）+ 画像更新（记忆开关开）+ 持久化。</summary>
+    private void RecordChatSuccess(string userText, int tokensUsed)
+    {
+        try
+        {
+            if (_settings.Ai.IntimacyEnabled)
+            {
+                _intimacy.RecordConversation(tokensUsed, DateTime.Now);
+                _store.SaveIntimacy(_intimacy.State);
+            }
+            if (_settings.Ai.MemoryEnabled)
+            {
+                _profile = MergeProfile(_profile, userText);
+                _store.SaveMemoryProfile(_profile);
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog("RecordChatSuccess error: " + ex.Message);
+        }
+    }
+
+    /// <summary>画像合并：新轮次提取（称呼/作息优先新值，话题并集 top3，摘要滚动追加 ≤200 字）。</summary>
+    private static UserProfile MergeProfile(UserProfile current, string userText)
+    {
+        var extracted = MemoryProfileExtractor.Extract(
+            [(new ChatMessage(ChatRole.User, userText), DateTime.Now)]);
+        var topics = current.Topics
+            .Concat(extracted.Topics)
+            .Distinct(StringComparer.Ordinal)
+            .Take(3)
+            .ToArray();
+        var summary = string.IsNullOrEmpty(extracted.Summary)
+            ? current.Summary
+            : string.IsNullOrEmpty(current.Summary)
+                ? extracted.Summary
+                : current.Summary + "；" + extracted.Summary;
+        if (summary.Length > 200) summary = summary[..200] + "…";
+        return new UserProfile(
+            extracted.CallName.Length > 0 ? extracted.CallName : current.CallName,
+            topics,
+            extracted.Routine.Length > 0 ? extracted.Routine : current.Routine,
+            summary);
+    }
+
+    /// <summary>周期 tick（30s）：每日总结检查 + 主动互动。AI 总开关关 = 全部失效。</summary>
+    private void Tick(object? state)
+    {
+        if (_shuttingDown || !_settings.Ai.Enabled) return;
+        TryDailySummary();
+        TryProactiveInteraction();
+    }
+
+    /// <summary>主动互动：定时/事件触发 → 多宠物分派 → 并行独立请求（P1）→ 当前模式输出。</summary>
+    private void TryProactiveInteraction()
+    {
+        if (!_settings.Ai.ActiveInteraction) return;
+        var now = DateTime.Now;
+        if (!_interaction.TryNextTrigger(now, _eventLog.Recent(), out var trigger) || trigger is null) return;
+        DebugLog($"[p6] interaction triggered: {trigger.Reason} at {now:HH:mm:ss}");
+
+        var petIds = (_store.LoadPetStore()?.Instances ?? [])
+            .Where(i => i.Visible)
+            .Select(i => i.Id)
+            .ToArray();
+        if (petIds.Length == 0) return;
+
+        // 多宠物分派：round-robin 竞争 1-2 只，或全员回应（设置页开关；同一事件各自表达 = 并行独立请求）
+        var speakers = _dispatcher.SelectSpeakers(petIds, allReply: _settings.Ai.AllReply);
+        _ = Task.Run(async () =>
+        {
+            var tasks = speakers.Select(petId => GenerateInteractionLineAsync(petId, trigger));
+            var lines = await Task.WhenAll(tasks); // 并行独立请求：一次等待而非 N 倍延迟
+            foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
+            {
+                DebugLog($"[p6] route output: {line[..Math.Min(20, line.Length)]}");
+                OnUiThread(() => _modeService.RouteOutput(new AiOutput(line!, FromAnalysis: true)));
+            }
+        });
+    }
+
+    /// <summary>单只宠物的主动互动台词（P1 优先级，8s 超时；失败跳过本轮）。
+    /// 记忆注入（"隔天主动提起"）+ 亲密度指令 + 每宠物独立人格（PersonaId 覆盖全局）。</summary>
+    private async Task<string?> GenerateInteractionLineAsync(string petId, InteractionTrigger trigger)
+    {
+        try
+        {
+            if (_chatScheduler is null) return null;
+            var persona = ResolvePetPersona(petId);
+            var petName = (_store.LoadPetStore()?.Instances ?? [])
+                .FirstOrDefault(i => i.Id == petId)?.Name ?? petId;
+            var systemPrompt = PersonaEngine.BuildSystemPrompt(persona)
+                + $"\n\n你是宠物「{petName}」，现在用户没有主动找你。";
+            if (_settings.Ai.MemoryEnabled)
+            {
+                var memory = MemoryProfileExtractor.Inject(_profile);
+                if (memory.Length > 0) systemPrompt += "\n\n" + memory;
+            }
+            if (_settings.Ai.IntimacyEnabled)
+                systemPrompt += "\n\n" + _intimacy.BuildIntimacyDirective();
+            var request = new ChatRequest(
+                systemPrompt,
+                [new ChatMessage(ChatRole.User, trigger.PromptContext + "（请用一句简短的话主动说，不超过 30 字）")],
+                PersonaEngine.Temperature,
+                PersonaEngine.MaxTokens);
+            var result = await _chatScheduler.EnqueueAsync(
+                RequestPriority.Interactive, request, CancellationToken.None);
+            return result.Text;
+        }
+        catch (Exception ex)
+        {
+            DebugLog("interaction line failed: " + ex.Message);
+            return null; // 互动失败静默跳过（下轮轮换补偿）
+        }
+    }
+
+    /// <summary>宠物人格解析：实例 PersonaId 覆盖全局（内置/自定义）；空 = 全局人格。</summary>
+    private Persona ResolvePetPersona(string petId)
+    {
+        var global = _personas.ResolveSelected();
+        var personaId = (_store.LoadPetStore()?.Instances ?? [])
+            .FirstOrDefault(i => i.Id == petId)?.PersonaId;
+        if (string.IsNullOrEmpty(personaId)) return global;
+        var builtin = BuiltinPersonas.GetById(personaId);
+        if (builtin is not null) return builtin;
+        return _personas.CustomPersonas.FirstOrDefault(p => p.Id == personaId) ?? global;
+    }
+
+    /// <summary>每日总结：次日补昨日（全局一份）；总结图开关开 + 有生图连接时生成，失败不影响文本。</summary>
+    private void TryDailySummary()
+    {
+        if (!_settings.Ai.DailySummary) return;
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var due = DailySummaryTrigger.GetDueDate(_lastDiaryDate, today);
+        if (due is null) return;
+        var dueDay = due.Value; // lambda 捕获不做 null 提升，先解包
+        _lastDiaryDate = today; // 先标记：失败当日不重复尝试
+        _store.SaveDiaryLastGenerated(today);
+        _ = Task.Run(() => GenerateDailySummaryAsync(dueDay));
+    }
+
+    private async Task GenerateDailySummaryAsync(DateOnly day)
+    {
+        try
+        {
+            if (_chatScheduler is null) return;
+            var petName = FirstPetName();
+            var data = new DailySummaryData(
+                day,
+                _profile.Summary,
+                ScreenContextFormatter.Format(_eventLog.Recent(), 4),
+                InferMood(),
+                petName);
+            var request = new ChatRequest(
+                SummaryPromptBuilder.Build(data),
+                [new ChatMessage(ChatRole.User, "请生成今天的总结")],
+                Temperature: 0.8,
+                MaxTokens: 300);
+            var result = await _chatScheduler.EnqueueAsync(
+                RequestPriority.Background, request, CancellationToken.None);
+
+            var text = result.Text ?? "";
+            var txtPath = DiaryStore.TextPath(_store.DirectoryPath, day);
+            Directory.CreateDirectory(Path.GetDirectoryName(txtPath)!);
+            File.WriteAllText(txtPath, text);
+
+            if (_settings.Ai.SummaryImage && _imageProvider is not null)
+            {
+                try
+                {
+                    var image = await _imageProvider.GenerateAsync(
+                        new ImageGenRequest(ImagePromptBuilder.Build(text, petName)), CancellationToken.None);
+                    File.WriteAllBytes(DiaryStore.ImagePath(_store.DirectoryPath, day), image.PngBytes);
+                }
+                catch (Exception ex)
+                {
+                    DebugLog("summary image failed (text kept): " + ex.Message); // 降级：文本照常
+                }
+            }
+
+            OnUiThread(() => _modeService.RouteOutput(new AiOutput("今天的总结出炉啦~（日记已保存）", FromAnalysis: true)));
+        }
+        catch (Exception ex)
+        {
+            DebugLog("daily summary failed: " + ex.Message);
+        }
+    }
+
+    /// <summary>朗读（语音开关 + 仅对话模式；Edge TTS MP3 → 临时文件 → MediaPlayer）。</summary>
+    public void Speak(string text)
+    {
+        if (!_settings.Ai.TtsEnabled || _settings.Ai.OutputMode != "chat") return;
+        if (string.IsNullOrWhiteSpace(text)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var stream = await _tts.SynthesizeAsync(
+                    text, new TtsVoice("zh-CN-XiaoxiaoNeural", "zh-CN"), CancellationToken.None);
+                var bytes = ((MemoryStream)stream).ToArray();
+                var tmp = Path.Combine(Path.GetTempPath(), $"desktoppet-tts-{Guid.NewGuid():N}.wav");
+                File.WriteAllBytes(tmp, bytes);
+                OnUiThread(() =>
+                {
+                    _ttsPlayer.MediaEnded += (_, _) =>
+                    {
+                        try { File.Delete(tmp); } catch (Exception) { }
+                    };
+                    _ttsPlayer.Open(new Uri(tmp));
+                    _ttsPlayer.Play();
+                });
+            }
+            catch (Exception ex)
+            {
+                DebugLog("tts failed: " + ex.Message); // 朗读失败不影响对话
+            }
+        });
+    }
+
+    /// <summary>总结图心情推断：从 CareState 饥饿度推导（简单规则，不引入新状态）。</summary>
+    private string InferMood()
+    {
+        var state = _store.LoadCare().Values.FirstOrDefault();
+        if (state is null) return "平和";
+        var hunger = CareEngine.HungerAt(state, DateTime.Now);
+        return hunger is Hunger.Hungry or Hunger.Starving
+            ? "有点饿（但见到你就开心）"
+            : state.Xp >= 100 ? "元气满满" : "平和";
+    }
+
+    private string FirstPetName()
+        => (_store.LoadPetStore()?.Instances.FirstOrDefault()?.Name) ?? "桌宠";
+
+    private static IImageProvider? BuildImageProvider(ProvidersFileModel providers)
+    {
+        if (providers.Image is null) return null;
+        try
+        {
+            // 生图超时 120s：云端 T2I（DALL·E/agnes 等）通常需 20-60s，默认 30s 会误超时。
+            return new OpenAiCompatibleImageProvider(
+                providers.Image, new WindowsCredentialStore(), timeout: TimeSpan.FromSeconds(120));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     public void Dispose()
     {
         _shuttingDown = true;
+        _tickTimer?.Dispose();
+        _tickTimer = null;
+        _ttsPlayer.Close();
         StopAgent();
         _chatScheduler?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
         _chatScheduler = null;

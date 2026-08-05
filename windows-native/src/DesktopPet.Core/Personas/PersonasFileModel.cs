@@ -15,7 +15,7 @@ public sealed class PersonasFileModel
 
     /// <summary>
     /// 归一化：丢弃无效自定义条目（id/name/prompt 空白）；
-    /// selectedId 未知时回退内置默认（暖男）。
+    /// selectedId 未知时回退内置默认（暖男）。示例对话去空行保留。
     /// </summary>
     public static PersonasFileModel Normalize(PersonasFileModel raw)
     {
@@ -23,6 +23,14 @@ public sealed class PersonasFileModel
             .Where(p => !string.IsNullOrWhiteSpace(p.Id)
                         && !string.IsNullOrWhiteSpace(p.Name)
                         && !string.IsNullOrWhiteSpace(p.Prompt))
+            .Select(p => p with
+            {
+                ExampleDialogs = (p.ExampleDialogs ?? [])
+                    .Select(d => d.Trim())
+                    .Where(d => d.Length > 0)
+                    .Take(10)   // 上限 10 段，防滥用
+                    .ToArray(),
+            })
             .ToList();
 
         var selected = raw.SelectedId;

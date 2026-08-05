@@ -14,7 +14,10 @@ public class AgentConfigBuilderTests
     private static AppSettings SettingsWith(bool enabled, bool analysis, string providerId = "")
         => AppSettings.Defaults(AppLang.En) with { Ai = new AiSettings(
             Enabled: enabled, ScreenAnalysis: analysis, OutputMode: "silent",
-            ScreenContextEnabled: false, ProviderId: providerId) };
+            ScreenContextEnabled: false, ProviderId: providerId,
+            MemoryEnabled: true, ActiveInteraction: true, InteractionFrequency: "medium",
+            ScreenAwareness: true, IntimacyEnabled: true, DailySummary: true,
+            SummaryImage: false, TtsEnabled: false, AllReply: false) };
 
     private static ProvidersFileModel ProvidersWith(params ProviderConfig[] configs)
         => new() { Models = configs.ToList() };

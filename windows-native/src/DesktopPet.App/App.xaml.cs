@@ -1,6 +1,8 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows;
+using System.Windows.Interop;
 using DesktopPet.App.Ai;
 using DesktopPet.App.Bench;
 using DesktopPet.App.Rendering;
@@ -10,6 +12,7 @@ using DesktopPet.Core.Care;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
+using DesktopPet.Infra.Hotkey;
 
 namespace DesktopPet.App;
 
@@ -24,7 +27,9 @@ public partial class App : Application
     private AiCoordinator? _ai;
     private ModeService? _modeService;
     private ChatWindow? _chatWindow;
-
+    private HotkeyManager? _hotkeys;
+    private HwndSource? _hotkeySource;
+    private Window? _hotkeyHost;
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -84,6 +89,8 @@ public partial class App : Application
             _manager.SetAiCoordinator(_ai);
             _manager.SetOutputModeHandler(ApplyOutputModeFromBall);
             _ai.ApplySettings(settings); // 应用已保存 AI 设置（默认关 = 不起 Agent）
+            _chatWindow.TtsEnabled = settings.Ai.TtsEnabled; // 朗读按钮初始状态（AI 助手页开关）
+            RegisterGlobalHotkeys(); // Phase 6h：Ctrl+Alt+H/M/S/Q
 
             if (e.Args.Contains("--settings"))
             {
@@ -165,6 +172,9 @@ public partial class App : Application
         _modeService?.Shutdown();
         _chatWindow?.Close();
         _tray?.Dispose();
+        _hotkeys?.Dispose();
+        if (_hotkeySource is not null) _hotkeySource.RemoveHook(HotkeyHook);
+        _hotkeyHost?.Close();
         _manager?.Shutdown();
         if (_ownsMutex)
         {
@@ -201,6 +211,72 @@ public partial class App : Application
         var states = _store!.LoadCare();
         states[petId] = care;
         _store.SaveCare(states);
+    }
+
+    // ---- Phase 6h：全局快捷键 ----
+
+    /// <summary>注册 Ctrl+Alt+H/M/S/Q（RegisterHotKey P/Invoke；透明隐藏窗口承载 HwndSource）。</summary>
+    private void RegisterGlobalHotkeys()
+    {
+        var host = new Window
+        {
+            Width = 0,
+            Height = 0,
+            WindowStyle = WindowStyle.None,
+            ShowInTaskbar = false,
+            AllowsTransparency = true,
+            Opacity = 0,
+            ShowActivated = false,
+        };
+        host.SourceInitialized += (_, _) =>
+        {
+            var hwnd = new WindowInteropHelper(host).Handle;
+            _hotkeySource = HwndSource.FromHwnd(hwnd);
+            _hotkeySource.AddHook(HotkeyHook);
+            _hotkeys = new HotkeyManager(hwnd);
+            _hotkeys.Register(HotkeyAction.TogglePets, HotkeyManager.ModControlAlt, (uint)'H');
+            _hotkeys.Register(HotkeyAction.ToggleMode, HotkeyManager.ModControlAlt, (uint)'M');
+            _hotkeys.Register(HotkeyAction.OpenSettings, HotkeyManager.ModControlAlt, (uint)'S');
+            _hotkeys.Register(HotkeyAction.Quit, HotkeyManager.ModControlAlt, (uint)'Q');
+        };
+        host.Show(); // 透明不可见，仅承载消息钩子
+        _hotkeyHost = host;
+    }
+
+    private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != Win32HotkeyRegistration.WM_HOTKEY) return IntPtr.Zero;
+        var action = _hotkeys?.Resolve(wParam.ToInt32());
+        if (action is null) return IntPtr.Zero;
+        handled = true;
+        switch (action)
+        {
+            case HotkeyAction.TogglePets:
+                _manager?.SetGlobalVisible(!(_manager?.GloballyVisible ?? true));
+                break;
+            case HotkeyAction.ToggleMode:
+                CycleOutputMode();
+                break;
+            case HotkeyAction.OpenSettings:
+                _manager?.OpenSettings();
+                break;
+            case HotkeyAction.Quit:
+                Shutdown();
+                break;
+        }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>Ctrl+Alt+M：弹幕 → 对话 → 静默 循环切换（立即生效 + 持久化）。</summary>
+    private void CycleOutputMode()
+    {
+        var next = _modeService?.Mode switch
+        {
+            OutputMode.Danmaku => "chat",
+            OutputMode.Chat => "silent",
+            _ => "danmaku",
+        };
+        ApplyOutputModeFromBall(next);
     }
 
     /// <summary>定位 AgentHost 进程：打包并排目录优先，开发期向上找 repo 构建产物。</summary>

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DesktopPet.Core.Ai;
 using DesktopPet.Core.Care;
+using DesktopPet.Core.Memory;
 using DesktopPet.Core.Personas;
 using DesktopPet.Core.Scheduling;
 using DesktopPet.Core.Pets;
@@ -25,6 +26,12 @@ public interface IJsonStore
     void SaveCare(IReadOnlyDictionary<string, CareState> states);
     AppSettings? LoadSettings();
     void SaveSettings(AppSettings settings);
+    UserProfile? LoadMemoryProfile();   // Phase 6b：记忆画像（memory.json；开关关 = 不调用 Save）
+    void SaveMemoryProfile(UserProfile profile);
+    IntimacyState? LoadIntimacy();      // Phase 6c：亲密度（intimacy.json）
+    void SaveIntimacy(IntimacyState state);
+    DateOnly? LoadDiaryLastGenerated(); // Phase 6f：日记元数据（diary-meta.json）
+    void SaveDiaryLastGenerated(DateOnly day);
     PersonasFileModel? LoadPersonasFile();
     void SavePersonasFile(PersonasFileModel personas);
     ProvidersFileModel? LoadProvidersFile();
@@ -143,6 +150,68 @@ public sealed class FileJsonStore : IJsonStore
     public void SaveSettings(AppSettings settings)
         => WriteFile("app-settings.json", JsonSerializer.Serialize(AppSettings.Normalize(settings), SettingsJsonOptions));
 
+    public UserProfile? LoadMemoryProfile()
+    {
+        var raw = ReadFile("memory.json");
+        if (raw is null) return null;
+        try
+        {
+            var profile = JsonSerializer.Deserialize<UserProfile>(raw, SettingsJsonOptions);
+            return profile is null ? null : MemoryProfileExtractor.Normalize(profile);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    public void SaveMemoryProfile(UserProfile profile)
+        => WriteFile("memory.json", JsonSerializer.Serialize(MemoryProfileExtractor.Normalize(profile), SettingsJsonOptions));
+
+    public IntimacyState? LoadIntimacy()
+    {
+        var raw = ReadFile("intimacy.json");
+        if (raw is null) return null;
+        try
+        {
+            var state = JsonSerializer.Deserialize<IntimacyState>(raw, SettingsJsonOptions);
+            return state is null ? null : NormalizeIntimacy(state);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    public void SaveIntimacy(IntimacyState state)
+        => WriteFile("intimacy.json", JsonSerializer.Serialize(NormalizeIntimacy(state), SettingsJsonOptions));
+
+    private static IntimacyState NormalizeIntimacy(IntimacyState state)
+    {
+        var value = Math.Clamp(state.Value, 0, 100);
+        var last = state.LastInteractionDate == default ? DateTime.Today : state.LastInteractionDate;
+        return new IntimacyState(value, last);
+    }
+
+    public DateOnly? LoadDiaryLastGenerated()
+    {
+        var raw = ReadFile("diary-meta.json");
+        if (raw is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            if (!doc.RootElement.TryGetProperty("lastGenerated", out var p)) return null;
+            return DateOnly.TryParse(p.GetString(), out var day) ? day : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    public void SaveDiaryLastGenerated(DateOnly day)
+        => WriteFile("diary-meta.json", JsonSerializer.Serialize(new { lastGenerated = day.ToString("yyyy-MM-dd") }));
+
     public PersonasFileModel? LoadPersonasFile()
     {
         var raw = ReadFile("personas.json");
@@ -205,6 +274,15 @@ public sealed class InMemoryJsonStore : IJsonStore
     public AppSettings? Settings { get; set; }
     public AppSettings? LoadSettings() => Settings;
     public void SaveSettings(AppSettings settings) => Settings = settings;
+    public UserProfile? MemoryProfile { get; set; }
+    public UserProfile? LoadMemoryProfile() => MemoryProfile;
+    public void SaveMemoryProfile(UserProfile profile) => MemoryProfile = profile;
+    public IntimacyState? Intimacy { get; set; }
+    public IntimacyState? LoadIntimacy() => Intimacy;
+    public void SaveIntimacy(IntimacyState state) => Intimacy = state;
+    public DateOnly? DiaryLastGenerated { get; set; }
+    public DateOnly? LoadDiaryLastGenerated() => DiaryLastGenerated;
+    public void SaveDiaryLastGenerated(DateOnly day) => DiaryLastGenerated = day;
     public PersonasFileModel? Personas { get; set; }
     public PersonasFileModel? LoadPersonasFile() => Personas;
     public void SavePersonasFile(PersonasFileModel personas) => Personas = personas;

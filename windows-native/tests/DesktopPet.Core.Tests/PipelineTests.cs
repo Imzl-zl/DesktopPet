@@ -30,7 +30,10 @@ public class PipelineTests
     {
         var raw = AppSettings.Defaults(AppLang.En) with { Ai = new AiSettings(
             Enabled: true, ScreenAnalysis: true, OutputMode: "banana",
-            ScreenContextEnabled: true, ProviderId: "p1") };
+            ScreenContextEnabled: true, ProviderId: "p1",
+            MemoryEnabled: true, ActiveInteraction: true, InteractionFrequency: "medium",
+            ScreenAwareness: true, IntimacyEnabled: true, DailySummary: true,
+            SummaryImage: false, TtsEnabled: false, AllReply: false) };
         var n = AppSettings.Normalize(raw);
         Assert.Equal("silent", n.Ai.OutputMode);
         Assert.True(n.Ai.Enabled);
@@ -46,7 +49,10 @@ public class PipelineTests
         {
             var raw = AppSettings.Defaults(AppLang.En) with { Ai = new AiSettings(
                 Enabled: true, ScreenAnalysis: false, OutputMode: mode,
-                ScreenContextEnabled: false, ProviderId: "") };
+                ScreenContextEnabled: false, ProviderId: "",
+                MemoryEnabled: true, ActiveInteraction: true, InteractionFrequency: "medium",
+                ScreenAwareness: true, IntimacyEnabled: true, DailySummary: true,
+                SummaryImage: false, TtsEnabled: false, AllReply: false) };
             Assert.Equal(mode, AppSettings.Normalize(raw).Ai.OutputMode);
         }
     }
@@ -185,6 +191,65 @@ public class PipelineTests
         var req = provider.LastRequest!;
         Assert.Contains("IDE", req.Messages[^2].Content); // 上下文消息在用户输入前
         Assert.Equal("我在干嘛", req.Messages[^1].Content);
+    }
+
+    [Fact]
+    public async Task Pipeline_MemoryInjectedBeforeScreenContext()
+    {
+        // Phase 6：记忆注入（管道第③步，架构文档 §4）——位于屏幕上下文之前、用户输入之前
+        var log = new ScreenEventLog();
+        log.Add(new ScreenEvent(new DateTime(2026, 8, 5, 9, 0, 0), ScreenEventKind.Coding, "IDE"));
+        var (pipeline, provider) = MakePipeline(log: log);
+
+        await pipeline.RunAsync("在忙吗", [new ChatMessage(ChatRole.Assistant, "嗨~")], includeScreenContext: true,
+            memoryInjector: () => "[关于用户的记忆]\n称呼：小美");
+
+        var req = provider.LastRequest!;
+        Assert.Equal(4, req.Messages.Count);
+        Assert.Equal(ChatRole.Assistant, req.Messages[0].Role);   // 历史对话在前
+        Assert.Equal(ChatRole.System, req.Messages[1].Role);      // 记忆随后
+        Assert.Contains("小美", req.Messages[1].Content);
+        Assert.Contains("IDE", req.Messages[2].Content);          // 屏幕上下文再后
+        Assert.Equal("在忙吗", req.Messages[^1].Content);          // 用户输入最后
+    }
+
+    [Fact]
+    public async Task Pipeline_MemoryEmpty_NotInjected()
+    {
+        var (pipeline, provider) = MakePipeline();
+
+        await pipeline.RunAsync("在忙吗", [], includeScreenContext: false,
+            memoryInjector: () => "");
+
+        var req = provider.LastRequest!;
+        Assert.Single(req.Messages); // 只有用户输入，无记忆 System 消息
+        Assert.Equal(ChatRole.User, req.Messages[0].Role);
+    }
+
+    [Fact]
+    public async Task Pipeline_SystemPromptSuffix_AppendedForIntimacy()
+    {
+        // Phase 6c：亲密度档位指令追加到 SystemPrompt（开关关 = 空串不追加）
+        var (pipeline, provider) = MakePipeline();
+
+        await pipeline.RunAsync("在忙吗", [], includeScreenContext: false,
+            systemPromptSuffix: () => "你们已经非常亲密：使用最亲昵的称呼（如宝贝）。");
+
+        var req = provider.LastRequest!;
+        Assert.StartsWith(PersonaEngine.BuildSystemPrompt(Persona()), req.SystemPrompt);
+        Assert.EndsWith("你们已经非常亲密：使用最亲昵的称呼（如宝贝）。", req.SystemPrompt);
+    }
+
+    [Fact]
+    public async Task Pipeline_SystemPromptSuffix_Empty_Unchanged()
+    {
+        var (pipeline, provider) = MakePipeline();
+
+        await pipeline.RunAsync("在忙吗", [], includeScreenContext: false,
+            systemPromptSuffix: () => "");
+
+        var req = provider.LastRequest!;
+        Assert.Equal(PersonaEngine.BuildSystemPrompt(Persona()), req.SystemPrompt);
     }
 
     [Fact]

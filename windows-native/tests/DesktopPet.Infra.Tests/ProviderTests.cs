@@ -2,7 +2,6 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using DesktopPet.Core.Scheduling;
-using DesktopPet.Core.Scheduling;
 using DesktopPet.Infra.Providers;
 
 namespace DesktopPet.Infra.Tests;
@@ -109,6 +108,44 @@ public class ProviderTests
         Assert.Equal("sys-prompt", messages[0].GetProperty("content").GetString());
         Assert.Equal("user", messages[1].GetProperty("role").GetString());
         Assert.Equal("你好", messages[1].GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SendsReasoningEffortWhenConfigured()
+    {
+        // 推理模型（如 sensenova-6.7-flash）：不带 none 时 token 全被思考耗尽
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse(
+                """{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":3}}""")),
+        };
+        var creds = new InMemoryCredentialStore();
+        creds.Set("openai-key", "sk-test");
+        var provider = new OpenAiCompatibleModelProvider(
+            Config with { ReasoningEffort = "none" }, creds, handler, timeout: TimeSpan.FromSeconds(30));
+
+        await provider.CompleteAsync(
+            new ChatRequest("sys", [new ChatMessage(ChatRole.User, "你好")]),
+            CancellationToken.None);
+
+        Assert.Equal("none", BodyOf(handler).GetProperty("reasoning_effort").GetString());
+    }
+
+    [Fact]
+    public async Task CompleteAsync_OmitsReasoningEffortByDefault()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse(
+                """{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":3}}""")),
+        };
+        var provider = MakeProvider(handler);
+
+        await provider.CompleteAsync(
+            new ChatRequest("sys", [new ChatMessage(ChatRole.User, "你好")]),
+            CancellationToken.None);
+
+        Assert.False(BodyOf(handler).TryGetProperty("reasoning_effort", out _));
     }
 
     [Fact]

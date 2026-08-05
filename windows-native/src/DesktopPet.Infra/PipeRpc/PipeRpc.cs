@@ -75,9 +75,12 @@ public sealed class PipeRpcServer : IAsyncDisposable
 
     public PipeRpcServer(string pipeName)
     {
+        // 显式缓冲（64KB）：默认构造下 Windows 阻塞写会挂起直到对端读取，
+        // 且大消息（>缓冲）写完再读必然死锁；显式缓冲 + 对端并行读是协议前提。
         _pipe = new NamedPipeServerStream(
             pipeName, PipeDirection.InOut, maxNumberOfServerInstances: 1,
-            PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
+            inBufferSize: 64 * 1024, outBufferSize: 64 * 1024);
     }
 
     public async Task WaitForConnectionAsync(CancellationToken ct)

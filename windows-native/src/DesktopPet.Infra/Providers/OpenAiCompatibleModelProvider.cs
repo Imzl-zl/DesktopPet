@@ -67,12 +67,19 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
             ["temperature"] = request.Temperature,
             ["max_tokens"] = request.MaxTokens,
         };
+        // 推理模型开关（如 sensenova-6.7-flash 不带 none 时 token 全被思考耗尽）：
+        // 配置了 ReasoningEffort 才发送，兼容不认此参数的普通端点。
+        if (!string.IsNullOrEmpty(_config.ReasoningEffort))
+            body["reasoning_effort"] = _config.ReasoningEffort;
 
         using var httpReq = new HttpRequestMessage(HttpMethod.Post, JoinUrl(_config.BaseUrl, "chat/completions"))
         {
             Content = JsonContent.Create(body, options: JsonOpts),
         };
         ApplyAuth(httpReq);
+        // 部分网关/CDN 要求 UA（如 newapi.myovo.cc.cd）；统一带上应用标识。
+        if (httpReq.Headers.UserAgent.Count == 0)
+            httpReq.Headers.UserAgent.ParseAdd("DesktopPet/1.0");
 
         HttpResponseMessage resp;
         try
@@ -97,7 +104,8 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
             }
             if (!resp.IsSuccessStatusCode)
             {
-                throw new ProviderException("http", $"模型服务返回 {(int)resp.StatusCode}（{_config.Name}）");
+                var errBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                throw new ProviderException("http", $"模型服务返回 {(int)resp.StatusCode}（{_config.Name}）: {errBody}");
             }
 
             JsonDocument doc;

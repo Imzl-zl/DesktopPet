@@ -26,6 +26,44 @@ public class PetStoreTests
     };
 
     [Fact]
+    public void PersonaId_RoundTripsThroughParseAndSerialize()
+    {
+        // Phase 6d：每宠物独立人格覆盖（空 = 跟随全局；旧 JSON 无 personaId 兼容）
+        var store = PetStoreModel.CreatePetInstance(
+            PetStoreModel.EmptyPetStore(),
+            Pet("pet-a", "cat", "Miso") with { PersonaId = "puppy" });
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            store, new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+            });
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var parsed = PetStoreModel.ParsePetStore(doc.RootElement);
+
+        Assert.NotNull(parsed);
+        Assert.Equal("puppy", parsed.Instances[0].PersonaId);
+
+        // 旧 JSON 无 personaId → null（跟随全局）
+        var legacyJson = "{\"version\":1,\"selectedId\":\"pet-a\",\"instances\":[{\"id\":\"pet-a\",\"name\":\"Miso\",\"spriteSlug\":\"cat\"}]}";
+        using var legacyDoc = System.Text.Json.JsonDocument.Parse(legacyJson);
+        var legacy = PetStoreModel.ParsePetStore(legacyDoc.RootElement);
+        Assert.Null(legacy!.Instances[0].PersonaId);
+    }
+
+    [Fact]
+    public void PersonaId_PatchUpdatesInstance()
+    {
+        var store = PetStoreModel.CreatePetInstance(
+            PetStoreModel.EmptyPetStore(),
+            Pet("pet-a", "cat", "Miso"));
+        Assert.Null(store.Instances[0].PersonaId);
+
+        var updated = PetStoreModel.UpdatePetInstance(store, "pet-a", new PetInstancePatch { PersonaId = "wolf-cub" });
+        Assert.Equal("wolf-cub", updated.Instances[0].PersonaId);
+    }
+
+    [Fact]
     public void MigratesTheLegacySelectedPetIntoOneNormalDesktopInstance()
     {
         var store = PetStoreModel.MigrateLegacyPetStore(null, new LegacyPet("cat", "Miso"));

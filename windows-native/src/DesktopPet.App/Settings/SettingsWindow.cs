@@ -208,6 +208,36 @@ public sealed class SettingsWindow : Window
         visibleToggle.Unchecked += (_, _) => UpdateInstance(instance.Id, new PetInstancePatch { Visible = false });
         info.Children.Add(visibleToggle);
 
+        // Phase 6d：每宠物独立人格覆盖（空 = 跟随全局；设置页 AI 助手页为全局主入口）
+        var personaRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        personaRow.Children.Add(new TextBlock
+        {
+            Text = "人格：",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var personaCombo = new ComboBox { Width = 140, Height = 26, FontSize = 12 };
+        var allPersonas = _ai?.Personas.MergeWithBuiltins() ?? [];
+        personaCombo.Items.Add("跟随全局");
+        foreach (var p in allPersonas) personaCombo.Items.Add(p.Name);
+        var currentIndex = instance.PersonaId is null ? 0
+            : allPersonas.Select((p, i) => (p, i)).FirstOrDefault(x => x.p.Id == instance.PersonaId).i + 1;
+        personaCombo.SelectedIndex = currentIndex >= 0 && currentIndex < personaCombo.Items.Count ? currentIndex : 0;
+        personaCombo.SelectionChanged += (_, _) =>
+        {
+            if (personaCombo.SelectedIndex <= 0)
+            {
+                UpdateInstance(instance.Id, new PetInstancePatch { PersonaId = null });
+            }
+            else
+            {
+                var picked = allPersonas[personaCombo.SelectedIndex - 1];
+                UpdateInstance(instance.Id, new PetInstancePatch { PersonaId = picked.Id });
+            }
+        };
+        personaRow.Children.Add(personaCombo);
+        info.Children.Add(personaRow);
+
         var remove = new Button
         {
             Content = "移除",
@@ -542,6 +572,112 @@ public sealed class SettingsWindow : Window
             Save(s => s with { Ai = s.Ai with { ScreenContextEnabled = contextToggle.IsChecked == true } });
         stack.Children.Add(Card(contextToggle));
 
+        // ---- Phase 6：陪伴功能开关组（AI 总开关 → 各功能独立开关）----
+        stack.Children.Add(Card(new TextBlock
+        {
+            Text = "陪伴功能（记忆 / 主动互动 / 亲密度 / 每日总结 / 语音）",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+        }));
+
+        // 记忆开关（默认开）
+        var memoryToggle = new CheckBox
+        {
+            Content = "记忆（记住你的称呼/作息/话题；关 = 不记录不注入）",
+            IsChecked = ai.MemoryEnabled,
+        };
+        memoryToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { MemoryEnabled = memoryToggle.IsChecked == true } });
+        stack.Children.Add(Card(memoryToggle));
+
+        // 主动互动开关 + 频率档
+        var interactionPanel = new StackPanel();
+        var interactionToggle = new CheckBox
+        {
+            Content = "主动互动（定时问候 + 屏幕事件评论）",
+            IsChecked = ai.ActiveInteraction,
+        };
+        interactionToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { ActiveInteraction = interactionToggle.IsChecked == true } });
+        interactionPanel.Children.Add(interactionToggle);
+        var freqRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(24, 6, 0, 0) };
+        freqRow.Children.Add(new TextBlock { Text = "频率：", FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+        foreach (var (id, name) in new[] { ("low", "少"), ("medium", "中"), ("high", "多") })
+        {
+            var radio = new RadioButton
+            {
+                Content = name,
+                GroupName = "interaction-frequency",
+                IsChecked = ai.InteractionFrequency == id,
+                FontSize = 12,
+                Margin = new Thickness(0, 0, 12, 0),
+            };
+            radio.Click += (_, _) =>
+                Save(s => s with { Ai = s.Ai with { InteractionFrequency = id } });
+            freqRow.Children.Add(radio);
+        }
+        interactionPanel.Children.Add(freqRow);
+        var allReplyToggle = new CheckBox
+        {
+            Content = "全员回应（同一事件每只宠物都发表评论，并行生成）",
+            IsChecked = ai.AllReply,
+            Margin = new Thickness(24, 6, 0, 0),
+        };
+        allReplyToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { AllReply = allReplyToggle.IsChecked == true } });
+        interactionPanel.Children.Add(allReplyToggle);
+        stack.Children.Add(Card(interactionPanel));
+
+        // 屏幕感知开关（默认开）
+        var awarenessToggle = new CheckBox
+        {
+            Content = "屏幕感知（从截屏推断你在做什么；关 = 仅定时问候）",
+            IsChecked = ai.ScreenAwareness,
+        };
+        awarenessToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { ScreenAwareness = awarenessToggle.IsChecked == true } });
+        stack.Children.Add(Card(awarenessToggle));
+
+        // 亲密度开关（默认开）
+        var intimacyToggle = new CheckBox
+        {
+            Content = "亲密度（随互动成长，称呼/语气分档；关 = 固定人格基础档）",
+            IsChecked = ai.IntimacyEnabled,
+        };
+        intimacyToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { IntimacyEnabled = intimacyToggle.IsChecked == true } });
+        stack.Children.Add(Card(intimacyToggle));
+
+        // 每日总结开关（默认开）
+        var summaryToggle = new CheckBox
+        {
+            Content = "每日总结（每天结束生成\"你的一天\"日记）",
+            IsChecked = ai.DailySummary,
+        };
+        summaryToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { DailySummary = summaryToggle.IsChecked == true } });
+        stack.Children.Add(Card(summaryToggle));
+
+        // 总结图开关（默认关：云端费用+隐私）
+        var imageToggle = new CheckBox
+        {
+            Content = "总结图（默认关：用生图模型给日记配插图，需配置生图连接）",
+            IsChecked = ai.SummaryImage,
+        };
+        imageToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { SummaryImage = imageToggle.IsChecked == true } });
+        stack.Children.Add(Card(imageToggle));
+
+        // 语音朗读开关（默认关：不打扰）
+        var ttsToggle = new CheckBox
+        {
+            Content = "语音朗读（对话模式朗读回复，Edge TTS；弹幕模式不朗读）",
+            IsChecked = ai.TtsEnabled,
+        };
+        ttsToggle.Click += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { TtsEnabled = ttsToggle.IsChecked == true } });
+        stack.Children.Add(Card(ttsToggle));
+
         // 人格卡片网格
         var personaPanel = new StackPanel();
         personaPanel.Children.Add(new TextBlock
@@ -584,6 +720,19 @@ public sealed class SettingsWindow : Window
                 Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
                 TextWrapping = TextWrapping.Wrap,
             });
+            if (!persona.Builtin)
+            {
+                var editLink = new TextBlock
+                {
+                    Text = "✎ 编辑",
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x8A, 0x65)),
+                    Cursor = System.Windows.Input.Cursors.Hand,
+                    Margin = new Thickness(0, 4, 0, 0),
+                };
+                editLink.MouseLeftButtonUp += (_, _) => ShowPersonaEditor(persona);
+                inner.Children.Add(editLink);
+            }
             card.Child = inner;
             var personaId = persona.Id;
             card.MouseLeftButtonUp += (_, _) =>
@@ -596,6 +745,21 @@ public sealed class SettingsWindow : Window
             grid.Children.Add(card);
         }
         personaPanel.Children.Add(grid);
+
+        // Phase 6e：新建/编辑人格（含示例对话输入，C.AI"示例 > 描述"经验）
+        var manageRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+        var newPersonaButton = new Button { Content = "＋ 新建人格", Width = 100, Height = 28, FontSize = 12, Margin = new Thickness(0, 0, 8, 0) };
+        newPersonaButton.Click += (_, _) => ShowPersonaEditor(null);
+        manageRow.Children.Add(newPersonaButton);
+        var editHint = new TextBlock
+        {
+            Text = "点击自定义人格的 ✎ 可编辑（内置人格编辑会复制为自定义）",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        manageRow.Children.Add(editHint);
+        personaPanel.Children.Add(manageRow);
         stack.Children.Add(Card(personaPanel));
 
         // 模型连接
@@ -640,6 +804,23 @@ public sealed class SettingsWindow : Window
                 Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x92, 0xA0)),
             });
         }
+
+        // Phase 6f：生图连接（总结图）+ 日记查看入口
+        var extraRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var imageConnButton = new Button
+        {
+            Content = "⚙ 生图连接" + (providers.Image is null ? "（未配置）" : "（已配置）"),
+            Width = 160,
+            Height = 28,
+            FontSize = 12,
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        imageConnButton.Click += (_, _) => ShowImageConnectionEditor();
+        extraRow.Children.Add(imageConnButton);
+        var diaryButton = new Button { Content = "📔 日记", Width = 100, Height = 28, FontSize = 12 };
+        diaryButton.Click += (_, _) => ShowDiaryViewer();
+        extraRow.Children.Add(diaryButton);
+        providerPanel.Children.Add(extraRow);
         stack.Children.Add(Card(providerPanel));
 
         return PageScroller(stack);
@@ -651,6 +832,236 @@ public sealed class SettingsWindow : Window
         _store.SaveSettings(_settings);
         _manager.ApplySettings(_settings);
         _ai?.ApplySettings(_settings); // AI 设置同步（总开关启停 Agent / 配置下发）
+    }
+
+    // ---- Phase 6e：人格编辑/新建（含示例对话输入）----
+
+    private void ShowPersonaEditor(Core.Personas.Persona? existing)
+    {
+        if (_ai is null) return;
+        var isBuiltinEdit = existing?.Builtin == true;
+        var copyId = isBuiltinEdit ? "custom-" + Guid.NewGuid().ToString("N")[..8] : existing!.Id;
+
+        var nameBox = new TextBox { Text = existing?.Name ?? "", FontSize = 12, Height = 24 };
+        var descBox = new TextBox { Text = existing?.Description ?? "", FontSize = 12, Height = 24 };
+        var promptBox = new TextBox
+        {
+            Text = existing?.Prompt ?? "",
+            FontSize = 12,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 90,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+        var exampleBox = new TextBox
+        {
+            Text = existing?.ExampleDialogs is { Length: > 0 } ? string.Join("\n", existing.ExampleDialogs) : "",
+            FontSize = 12,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 70,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+
+        var form = new StackPanel { Margin = new Thickness(16) };
+        form.Children.Add(new TextBlock { Text = "人格名称（必填，≤12 字）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)) });
+        form.Children.Add(nameBox);
+        form.Children.Add(new TextBlock { Text = "一句话描述（选填）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
+        form.Children.Add(descBox);
+        form.Children.Add(new TextBlock { Text = "人格提示词（必填，决定性格）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
+        form.Children.Add(promptBox);
+        form.Children.Add(new TextBlock
+        {
+            Text = "示例对话（选填，每行一段：\"用户：…\" 和 \"宠物：…\" 成对写，风格示例 > 描述）",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
+            Margin = new Thickness(0, 8, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        form.Children.Add(exampleBox);
+
+        var window = new Window
+        {
+            Title = isBuiltinEdit ? "复制内置人格并编辑" : (existing is null ? "新建人格" : "编辑人格"),
+            Width = 420,
+            Height = 460,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            Background = new SolidColorBrush(Color.FromRgb(0xF7, 0xF8, 0xFA)),
+        };
+        var saveButton = new Button { Content = "保存", Width = 100, Height = 30, FontSize = 12 };
+        saveButton.Click += (_, _) =>
+        {
+            var name = nameBox.Text.Trim();
+            var prompt = promptBox.Text.Trim();
+            if (name.Length == 0 || prompt.Length == 0)
+            {
+                MessageBox.Show(window, "名称和提示词不能为空", "DesktopPet");
+                return;
+            }
+            if (name.Length > 12) name = name[..12];
+            var examples = exampleBox.Text
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(l => l.Length > 0)
+                .Take(10)
+                .ToArray();
+            var persona = new Core.Personas.Persona(
+                copyId, name, descBox.Text.Trim(), prompt, Builtin: false,
+                ExampleDialogs: examples.Length > 0 ? examples : null);
+            var file = _ai.Personas;
+            var list = file.CustomPersonas.Where(p => p.Id != copyId).ToList();
+            list.Add(persona);
+            file.CustomPersonas = list;
+            file.SelectedId = copyId; // 保存后即选中，立即生效
+            _ai.ApplyPersonas(file);
+            window.Close();
+            ShowPage("ai"); // 重建页面：新卡片出现 + 选中态更新
+        };
+        form.Children.Add(new TextBlock { Text = " ", FontSize = 4 });
+        form.Children.Add(saveButton);
+        window.Content = form;
+        window.ShowDialog();
+    }
+
+    // ---- Phase 6f：生图连接（providers.json image 段）----
+
+    private void ShowImageConnectionEditor()
+    {
+        if (_ai is null) return;
+        var providers = _ai.Providers;
+        var cfg = providers.Image;
+        var creds = new Infra.Providers.WindowsCredentialStore();
+
+        var baseBox = new TextBox { Text = cfg?.BaseUrl ?? "", FontSize = 12, Height = 24 };
+        var modelBox = new TextBox { Text = cfg?.ModelName ?? "", FontSize = 12, Height = 24 };
+        var keyBox = new TextBox { Text = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? "" : "（已配置，留空不修改）", FontSize = 12, Height = 24 };
+
+        var form = new StackPanel { Margin = new Thickness(16) };
+        form.Children.Add(new TextBlock { Text = "生图 BaseUrl（OpenAI 兼容，如 https://api.openai.com/v1）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)) });
+        form.Children.Add(baseBox);
+        form.Children.Add(new TextBlock { Text = "生图模型（如 gpt-image-1 / qwen-image）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
+        form.Children.Add(modelBox);
+        form.Children.Add(new TextBlock { Text = "API Key（存 Windows 凭据管理器，不落明文 JSON）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
+        form.Children.Add(keyBox);
+        form.Children.Add(new TextBlock { Text = " ", FontSize = 4 });
+
+        var saveButton = new Button { Content = "保存生图连接", Width = 120, Height = 30, FontSize = 12 };
+        var window = new Window
+        {
+            Title = "生图连接（总结图）",
+            Width = 420,
+            Height = 300,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            Background = new SolidColorBrush(Color.FromRgb(0xF7, 0xF8, 0xFA)),
+        };
+        saveButton.Click += (_, _) =>
+        {
+            var baseUrl = baseBox.Text.Trim();
+            var model = modelBox.Text.Trim();
+            if (baseUrl.Length == 0 || model.Length == 0)
+            {
+                MessageBox.Show(window, "BaseUrl 和模型名不能为空", "DesktopPet");
+                return;
+            }
+            const string keyRef = "image-key";
+            if (keyBox.Text.Length > 0 && keyBox.Text != "（已配置，留空不修改）")
+                creds.Set(keyRef, keyBox.Text);
+            providers.Image = new Core.Scheduling.ImageGenConfig(baseUrl, keyRef, model);
+            _ai.ApplyProviders(providers);
+            window.Close();
+            ShowPage("ai");
+        };
+        form.Children.Add(saveButton);
+        window.Content = form;
+        window.ShowDialog();
+    }
+
+    // ---- Phase 6f：日记查看（文本 + 总结图）----
+
+    private void ShowDiaryViewer()
+    {
+        var diaryDir = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "DesktopPet", "diary");
+        var files = Directory.Exists(diaryDir)
+            ? Directory.GetFiles(diaryDir, "*.txt").OrderByDescending(f => f).ToList()
+            : [];
+
+        var form = new StackPanel { Margin = new Thickness(16) };
+        if (files.Count == 0)
+        {
+            form.Children.Add(new TextBlock
+            {
+                Text = "还没有日记。每天结束时自动生成\"你的一天\"（需开启每日总结 + 模型连接）。",
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
+            });
+        }
+        else
+        {
+            foreach (var file in files)
+            {
+                var day = System.IO.Path.GetFileNameWithoutExtension(file);
+                var png = System.IO.Path.Combine(diaryDir, day + ".png");
+                var item = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(0xFF, 0xFF, 0xFF)),
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Thickness(10),
+                    Margin = new Thickness(0, 0, 0, 8),
+                };
+                var inner = new StackPanel();
+                inner.Children.Add(new TextBlock { Text = day, FontSize = 12, FontWeight = FontWeights.SemiBold });
+                try
+                {
+                    var text = File.ReadAllText(file);
+                    inner.Children.Add(new TextBlock
+                    {
+                        Text = text.Length > 200 ? text[..200] + "…" : text,
+                        FontSize = 11,
+                        TextWrapping = TextWrapping.Wrap,
+                        Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
+                        Margin = new Thickness(0, 4, 0, 0),
+                    });
+                }
+                catch (Exception) { }
+                if (File.Exists(png))
+                {
+                    try
+                    {
+                        var bitmap = new BitmapImage();
+                        bitmap.BeginInit();
+                        bitmap.UriSource = new Uri(png);
+                        bitmap.EndInit();
+                        inner.Children.Add(new Image
+                        {
+                            Source = bitmap,
+                            MaxWidth = 320,
+                            Margin = new Thickness(0, 8, 0, 0),
+                            Stretch = Stretch.Uniform,
+                        });
+                    }
+                    catch (Exception) { } // 图损坏不阻塞文本
+                }
+                item.Child = inner;
+                form.Children.Add(item);
+            }
+        }
+
+        var window = new Window
+        {
+            Title = "宠物日记",
+            Width = 420,
+            Height = 480,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            Background = new SolidColorBrush(Color.FromRgb(0xF7, 0xF8, 0xFA)),
+        };
+        var scroll = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        window.Content = scroll;
+        window.ShowDialog();
     }
 
     private void SaveRoam(Core.Roaming.RoamConfig roam)

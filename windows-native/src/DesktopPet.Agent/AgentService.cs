@@ -145,7 +145,8 @@ public sealed class AgentService : IAsyncDisposable
                 ApiKeyRef: _config.ProviderApiKeyRef ?? "",
                 ModelName: _config.ProviderModel,
                 Capabilities: ModelCapabilities.Chat | ModelCapabilities.Vision,
-                IsDefault: false);
+                IsDefault: false,
+                ReasoningEffort: _config.ProviderReasoningEffort); // 推理模型必须关闭思考，否则 token 全被消耗
             model = new OpenAiCompatibleModelProvider(pc, _credentials);
         }
 

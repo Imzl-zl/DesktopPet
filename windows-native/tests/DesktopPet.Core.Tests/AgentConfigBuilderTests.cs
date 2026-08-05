@@ -80,6 +80,16 @@ public class AgentConfigBuilderTests
         Assert.Null(cfg.ProviderBaseUrl); // 只检测不评论（Agent 降级 Unknown 事件）
     }
 
+    [Fact]
+    public void Build_ForwardsReasoningEffort()
+    {
+        // 推理模型（如 sensenova）：Agent 分析请求必须带 reasoning_effort=none，
+        // 否则 120 token 预算被思考耗尽 → 评论降级为空（“看到你的屏幕有变化”）
+        var providers = ProvidersWith(Ollama with { ReasoningEffort = "none" });
+        var cfg = AgentConfigBuilder.Build(SettingsWith(true, true), new PersonasFileModel(), providers);
+        Assert.Equal("none", cfg.ProviderReasoningEffort);
+    }
+
     // ---- personas.json 持久化 ----
 
     [Fact]

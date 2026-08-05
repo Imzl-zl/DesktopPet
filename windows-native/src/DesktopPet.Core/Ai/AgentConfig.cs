@@ -10,6 +10,7 @@ public sealed record AgentConfig(
     string? ProviderBaseUrl,           // null/空 = 无模型连接（只做变化检测，评论降级为空）
     string? ProviderModel,
     string? ProviderApiKeyRef,
+    string? ProviderReasoningEffort,   // 推理模型开关（如 "none"；空 = 不发送，token 可能被思考耗尽）
     int MinAnalysisIntervalSeconds)    // 云端分析限频（默认 5）
 {
     public static AgentConfig Defaults => new(
@@ -18,5 +19,6 @@ public sealed record AgentConfig(
         ProviderBaseUrl: null,
         ProviderModel: null,
         ProviderApiKeyRef: null,
+        ProviderReasoningEffort: null,
         MinAnalysisIntervalSeconds: 5);
 }

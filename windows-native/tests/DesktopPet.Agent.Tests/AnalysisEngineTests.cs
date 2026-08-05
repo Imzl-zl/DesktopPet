@@ -47,6 +47,7 @@ public class AnalysisEngineTests
         => new(capture, model, () => config ?? new AgentConfig(
             ScreenAnalysis: true, AnalysisPersonaPrompt: null,
             ProviderBaseUrl: null, ProviderModel: null, ProviderApiKeyRef: null,
+            ProviderReasoningEffort: null,
             MinAnalysisIntervalSeconds: 5));
 
     private static readonly DateTime T0 = new(2026, 8, 5, 10, 0, 0);
@@ -58,6 +59,7 @@ public class AnalysisEngineTests
         var engine = MakeEngine(source, config: new AgentConfig(
             ScreenAnalysis: false, AnalysisPersonaPrompt: null,
             ProviderBaseUrl: null, ProviderModel: null, ProviderApiKeyRef: null,
+            ProviderReasoningEffort: null,
             MinAnalysisIntervalSeconds: 5));
 
         var result = await engine.TickAsync(T0, CancellationToken.None);
@@ -152,7 +154,7 @@ public class AnalysisEngineTests
         };
         var source = new OfflineFrameSource(frames);
         var engine = new AnalysisEngine(source, model,
-            () => new AgentConfig(true, null, null, null, null, MinAnalysisIntervalSeconds: 0),
+            () => new AgentConfig(true, null, null, null, null, null, MinAnalysisIntervalSeconds: 0),
             captureInterval: TimeSpan.FromMilliseconds(5));
 
         var events = new List<ScreenEvent>();

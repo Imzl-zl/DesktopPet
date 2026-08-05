@@ -23,6 +23,7 @@ public static class AgentConfigBuilder
             ProviderBaseUrl: provider?.BaseUrl,
             ProviderModel: provider?.ModelName,
             ProviderApiKeyRef: string.IsNullOrEmpty(provider?.ApiKeyRef) ? null : provider.ApiKeyRef,
+            ProviderReasoningEffort: provider?.ReasoningEffort,
             MinAnalysisIntervalSeconds: 5);
     }
 

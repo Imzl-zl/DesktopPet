@@ -395,6 +395,7 @@ public sealed class AiCoordinator : IDisposable
             var text = string.IsNullOrWhiteSpace(summary)
                 ? "（看到你的屏幕有变化~）"
                 : summary;
+            DebugLog($"[p6] screen event kind={kind} summary={text}");
             OnUiThread(() => _modeService.RouteOutput(new AiOutput(text, FromAnalysis: true)));
         }
         catch (Exception ex)

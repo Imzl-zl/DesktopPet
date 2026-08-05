@@ -529,6 +529,93 @@ public sealed class SettingsWindow : Window
             },
         }));
 
+        // 模型连接（AI 第一配置项：小白用户打开 AI 页即见，不用滚动）
+        var providers = _ai?.Providers ?? new Core.Scheduling.ProvidersFileModel();
+        var providerPanel = new StackPanel();
+        providerPanel.Children.Add(new TextBlock
+        {
+            Text = "模型连接（OpenAI 兼容：云端 / 本地 Ollama 通吃）",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
+        if (providers.Models.Count == 0)
+        {
+            providerPanel.Children.Add(new TextBlock
+            {
+                Text = "未配置模型连接。对话不可用；屏幕分析仅做变化检测（无评论）。",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
+                TextWrapping = TextWrapping.Wrap,
+            });
+            var emptyEditButton = new Button
+            {
+                Content = "✏ 配置模型连接",
+                Width = 140,
+                Height = 28,
+                FontSize = 12,
+                Margin = new Thickness(0, 8, 0, 0),
+            };
+            emptyEditButton.Click += (_, _) => ShowModelConnectionEditor();
+            providerPanel.Children.Add(emptyEditButton);
+        }
+        else
+        {
+            var combo = new ComboBox { Margin = new Thickness(0, 0, 0, 6) };
+            var selectedProvider = providers.Models.FirstOrDefault(p => p.Id == ai.ProviderId) ?? providers.Models[0];
+            foreach (var p in providers.Models)
+            {
+                combo.Items.Add(p.Name + "（" + p.ModelName + "）");
+            }
+            combo.SelectedIndex = providers.Models.IndexOf(selectedProvider);
+            combo.SelectionChanged += (_, _) =>
+            {
+                var picked = providers.Models[Math.Max(0, combo.SelectedIndex)];
+                Save(s => s with { Ai = s.Ai with { ProviderId = picked.Id } });
+            };
+            // 模型下拉 + 编辑按钮同行（小白用户：不用滚动就能看到配置入口）
+            var comboRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+            combo.Width = 300;
+            comboRow.Children.Add(combo);
+            var editConnButton = new Button
+            {
+                Content = "✏ 编辑",
+                Width = 64,
+                Height = 26,
+                FontSize = 12,
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            editConnButton.Click += (_, _) => ShowModelConnectionEditor();
+            comboRow.Children.Add(editConnButton);
+            providerPanel.Children.Add(comboRow);
+            providerPanel.Children.Add(new TextBlock
+            {
+                Text = selectedProvider.BaseUrl + "　模型连接可在设置中直接修改（接口地址/模型/Key）",
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x92, 0xA0)),
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+
+        // Phase 6f：生图连接（总结图）+ 日记查看入口
+        var extraRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var imageConnButton = new Button
+        {
+            Content = "⚙ 生图连接" + (providers.Image is null ? "（未配置）" : "（已配置）"),
+            Width = 160,
+            Height = 28,
+            FontSize = 12,
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        imageConnButton.Click += (_, _) => ShowImageConnectionEditor();
+        extraRow.Children.Add(imageConnButton);
+        var diaryButton = new Button { Content = "📔 日记", Width = 100, Height = 28, FontSize = 12 };
+        diaryButton.Click += (_, _) => ShowDiaryViewer();
+        extraRow.Children.Add(diaryButton);
+        providerPanel.Children.Add(extraRow);
+        stack.Children.Add(Card(providerPanel));
+
         // 分析开关
         var analysisToggle = new CheckBox
         {
@@ -762,67 +849,6 @@ public sealed class SettingsWindow : Window
         personaPanel.Children.Add(manageRow);
         stack.Children.Add(Card(personaPanel));
 
-        // 模型连接
-        var providers = _ai?.Providers ?? new Core.Scheduling.ProvidersFileModel();
-        var providerPanel = new StackPanel();
-        providerPanel.Children.Add(new TextBlock
-        {
-            Text = "模型连接（OpenAI 兼容：云端 / 本地 Ollama 通吃）",
-            FontSize = 13,
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 8),
-        });
-        if (providers.Models.Count == 0)
-        {
-            providerPanel.Children.Add(new TextBlock
-            {
-                Text = "未配置模型连接。对话不可用；屏幕分析仅做变化检测（无评论）。",
-                FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
-        else
-        {
-            var combo = new ComboBox { Margin = new Thickness(0, 0, 0, 6) };
-            var selectedProvider = providers.Models.FirstOrDefault(p => p.Id == ai.ProviderId) ?? providers.Models[0];
-            foreach (var p in providers.Models)
-            {
-                combo.Items.Add(p.Name + "（" + p.ModelName + "）");
-            }
-            combo.SelectedIndex = providers.Models.IndexOf(selectedProvider);
-            combo.SelectionChanged += (_, _) =>
-            {
-                var picked = providers.Models[Math.Max(0, combo.SelectedIndex)];
-                Save(s => s with { Ai = s.Ai with { ProviderId = picked.Id } });
-            };
-            providerPanel.Children.Add(combo);
-            providerPanel.Children.Add(new TextBlock
-            {
-                Text = selectedProvider.BaseUrl,
-                FontSize = 10,
-                Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x92, 0xA0)),
-            });
-        }
-
-        // Phase 6f：生图连接（总结图）+ 日记查看入口
-        var extraRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-        var imageConnButton = new Button
-        {
-            Content = "⚙ 生图连接" + (providers.Image is null ? "（未配置）" : "（已配置）"),
-            Width = 160,
-            Height = 28,
-            FontSize = 12,
-            Margin = new Thickness(0, 0, 8, 0),
-        };
-        imageConnButton.Click += (_, _) => ShowImageConnectionEditor();
-        extraRow.Children.Add(imageConnButton);
-        var diaryButton = new Button { Content = "📔 日记", Width = 100, Height = 28, FontSize = 12 };
-        diaryButton.Click += (_, _) => ShowDiaryViewer();
-        extraRow.Children.Add(diaryButton);
-        providerPanel.Children.Add(extraRow);
-        stack.Children.Add(Card(providerPanel));
-
         return PageScroller(stack);
     }
 
@@ -918,6 +944,98 @@ public sealed class SettingsWindow : Window
             ShowPage("ai"); // 重建页面：新卡片出现 + 选中态更新
         };
         form.Children.Add(new TextBlock { Text = " ", FontSize = 4 });
+        form.Children.Add(saveButton);
+        window.Content = form;
+        window.ShowDialog();
+    }
+
+    // ---- Phase 6 收尾：模型连接编辑（小白用户：全在设置里填，不手改 providers.json）----
+
+    private void ShowModelConnectionEditor()
+    {
+        try
+        {
+            ShowModelConnectionEditorCore();
+        }
+        catch (Exception ex)
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "desktoppet-ai.log"),
+                $"[conn-editor] EXCEPTION: {ex}" + System.Environment.NewLine);
+            MessageBox.Show(this, "模型连接编辑器打开失败：" + ex.Message, "DesktopPet");
+        }
+    }
+
+    private void ShowModelConnectionEditorCore()
+    {
+        if (_ai is null) return;
+        var providers = _ai.Providers;
+        var cfg = providers.Models.FirstOrDefault(m => m.Id == _settings.Ai.ProviderId)
+                  ?? providers.Models.FirstOrDefault();
+        var creds = new Infra.Providers.WindowsCredentialStore();
+
+        var baseBox = new TextBox { Text = cfg?.BaseUrl ?? "", FontSize = 12, Height = 24 };
+        var modelBox = new TextBox { Text = cfg?.ModelName ?? "", FontSize = 12, Height = 24 };
+        var keyBox = new TextBox { Text = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? "" : "（已配置，留空不修改）", FontSize = 12, Height = 24 };
+        var reasoningCombo = new ComboBox { Margin = new Thickness(0, 0, 0, 6) };
+        reasoningCombo.Items.Add("关闭思考（推荐，响应更快）");
+        reasoningCombo.Items.Add("跟随模型默认");
+        reasoningCombo.SelectedIndex = string.IsNullOrEmpty(cfg?.ReasoningEffort) ? 1 : 0;
+
+        var form = new StackPanel { Margin = new Thickness(16) };
+        form.Children.Add(new TextBlock { Text = "接口地址（OpenAI 兼容，如 https://api.openai.com/v1）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)) });
+        form.Children.Add(baseBox);
+        form.Children.Add(new TextBlock { Text = "模型名（如 gpt-4o / sensenova-6.7-flash-lite）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
+        form.Children.Add(modelBox);
+        form.Children.Add(new TextBlock { Text = "API Key（存 Windows 凭据管理器，不落明文）", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
+        form.Children.Add(keyBox);
+        form.Children.Add(new TextBlock { Text = "思考模式", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 8, 0, 0) });
+        form.Children.Add(reasoningCombo);
+        form.Children.Add(new TextBlock { Text = " ", FontSize = 4 });
+
+        var saveButton = new Button { Content = "保存模型连接", Width = 120, Height = 30, FontSize = 12 };
+        var window = new Window
+        {
+            Title = "模型连接",
+            Width = 420,
+            Height = 330,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            Background = new SolidColorBrush(Color.FromRgb(0xF7, 0xF8, 0xFA)),
+        };
+        saveButton.Click += (_, _) =>
+        {
+            var baseUrl = baseBox.Text.Trim();
+            var model = modelBox.Text.Trim();
+            if (baseUrl.Length == 0 || model.Length == 0)
+            {
+                MessageBox.Show(window, "接口地址和模型名不能为空", "DesktopPet");
+                return;
+            }
+            var keyRef = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? "model-key" : cfg.ApiKeyRef;
+            if (keyBox.Text.Length > 0 && keyBox.Text != "（已配置，留空不修改）")
+                creds.Set(keyRef, keyBox.Text);
+            var newCfg = new Core.Scheduling.ProviderConfig(
+                Id: cfg?.Id ?? "model",
+                Name: model,
+                BaseUrl: baseUrl,
+                ApiKeyRef: keyRef,
+                ModelName: model,
+                Capabilities: cfg?.Capabilities ?? (Core.Scheduling.ModelCapabilities.Chat | Core.Scheduling.ModelCapabilities.Vision),
+                IsDefault: cfg?.IsDefault ?? true,
+                ReasoningEffort: reasoningCombo.SelectedIndex == 0 ? "none" : null);
+            var models = providers.Models.ToList();
+            var idx = models.FindIndex(m => m.Id == newCfg.Id);
+            if (idx >= 0) models[idx] = newCfg;
+            else models.Add(newCfg);
+            providers.Models = models;
+            _ai.ApplyProviders(providers);
+            // 新建场景：当前选中 id 不存在 → 指向新连接，AI 立即可用
+            if (providers.Models.All(m => m.Id != _settings.Ai.ProviderId))
+                Save(s => s with { Ai = s.Ai with { ProviderId = newCfg.Id } });
+            window.Close();
+            ShowPage("ai");
+        };
         form.Children.Add(saveButton);
         window.Content = form;
         window.ShowDialog();

@@ -410,8 +410,8 @@ public sealed class SettingsWindow : Window
         var mode = new WrapPanel();
         foreach (var (value, label) in new[]
         {
-            (RoamMode.Stay, "Stay"), (RoamMode.Wander, "Wander"),
-            (RoamMode.Cursor, "Follow cursor"), (RoamMode.Climb, "Climb windows"),
+            (RoamMode.Stay, "待着不动"), (RoamMode.Wander, "四处闲逛"),
+            (RoamMode.Cursor, "跟着鼠标"), (RoamMode.Climb, "爬窗口边缘"),
         })
         {
             var radio = new RadioButton { Content = label, IsChecked = roam.Mode == value, Margin = new Thickness(0, 0, 16, 0) };

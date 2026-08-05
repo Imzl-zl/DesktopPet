@@ -111,6 +111,7 @@ public sealed class AiCoordinator : IDisposable
         {
             "danmaku" => OutputMode.Danmaku,
             "chat" => OutputMode.Chat,
+            "bubble" => OutputMode.Bubble,
             _ => OutputMode.Silent,
         });
         if (shouldRun && !running) StartAgent();

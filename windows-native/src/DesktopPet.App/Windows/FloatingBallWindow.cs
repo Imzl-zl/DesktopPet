@@ -134,6 +134,7 @@ public sealed class FloatingBallWindow : Window
         if (_petBitmap is null || _petRenderer is null) return;
         var buffer = new byte[_petBitmap.PixelWidth * _petBitmap.PixelHeight * 4];
         _petRenderer.DrawFrame(buffer, _petBitmap.PixelWidth, _petBitmap.PixelHeight);
+        PixelBuffer.RgbaToBgra(buffer); // Core 输出 RGBA，WriteableBitmap 是 Bgra32
         _petBitmap.WritePixels(new Int32Rect(0, 0, _petBitmap.PixelWidth, _petBitmap.PixelHeight), buffer, _petBitmap.PixelWidth * 4, 0);
     }
 
@@ -312,7 +313,7 @@ public sealed class FloatingBallWindow : Window
                 Margin = new Thickness(0, 0, 6, 0),
             };
             modeRow.Children.Add(label);
-            foreach (var (id, name) in new[] { ("danmaku", "弹幕"), ("chat", "对话"), ("silent", "静默") })
+            foreach (var (id, name) in new[] { ("bubble", "气泡"), ("danmaku", "弹幕"), ("chat", "对话"), ("silent", "静默") })
             {
                 var modeButton = new Button
                 {

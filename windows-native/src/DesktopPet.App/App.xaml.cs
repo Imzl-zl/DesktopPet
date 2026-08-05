@@ -74,7 +74,8 @@ public partial class App : Application
                 {
                     if (!_chatWindow.IsVisible) _chatWindow.Show();
                     _chatWindow.AppendAssistantAsync(output.Text);
-                });
+                },
+                routeToBubble: text => _manager.BroadcastQuickBubble(text)); // 宠物头上气泡（全员）
             _ai = new AiCoordinator(_store, _modeService, _chatWindow, RecordTokens, ResolveAgentHostPath());
             _chatWindow.SendRequested += async (text, ctx) =>
             {
@@ -193,6 +194,7 @@ public partial class App : Application
         {
             "danmaku" => OutputMode.Danmaku,
             "chat" => OutputMode.Chat,
+            "bubble" => OutputMode.Bubble,
             _ => OutputMode.Silent,
         };
         _modeService?.SetMode(parsed);

@@ -20,13 +20,13 @@ public class PipelineTests
         var d = AppSettings.Defaults(AppLang.En).Ai;
         Assert.False(d.Enabled);              // AI 总开关默认关 = 纯桌宠
         Assert.False(d.ScreenAnalysis);       // 分析开关默认关（隐私）
-        Assert.Equal("silent", d.OutputMode); // 输出模式默认静默
+        Assert.Equal("bubble", d.OutputMode); // 输出模式默认气泡（不打断工作，用户主动对话才用对话框）
         Assert.False(d.ScreenContextEnabled); // 屏幕上下文默认关（隐私）
         Assert.Equal("", d.ProviderId);
     }
 
     [Fact]
-    public void AiSettings_Normalize_OutputModeFallsBackToSilent()
+    public void AiSettings_Normalize_OutputModeFallsBackToBubble()
     {
         var raw = AppSettings.Defaults(AppLang.En) with { Ai = new AiSettings(
             Enabled: true, ScreenAnalysis: true, OutputMode: "banana",
@@ -35,7 +35,7 @@ public class PipelineTests
             ScreenAwareness: true, IntimacyEnabled: true, DailySummary: true,
             SummaryImage: false, TtsEnabled: false, AllReply: false) };
         var n = AppSettings.Normalize(raw);
-        Assert.Equal("silent", n.Ai.OutputMode);
+        Assert.Equal("bubble", n.Ai.OutputMode);
         Assert.True(n.Ai.Enabled);
         Assert.True(n.Ai.ScreenAnalysis);
         Assert.True(n.Ai.ScreenContextEnabled);
@@ -45,7 +45,7 @@ public class PipelineTests
     [Fact]
     public void AiSettings_Normalize_KeepsValidModes()
     {
-        foreach (var mode in new[] { "danmaku", "chat", "silent" })
+        foreach (var mode in new[] { "bubble", "danmaku", "chat", "silent" })
         {
             var raw = AppSettings.Defaults(AppLang.En) with { Ai = new AiSettings(
                 Enabled: true, ScreenAnalysis: false, OutputMode: mode,
@@ -64,7 +64,7 @@ public class PipelineTests
         var raw = AppSettings.Defaults(AppLang.En) with { Ai = null! };
         var n = AppSettings.Normalize(raw);
         Assert.False(n.Ai.Enabled);
-        Assert.Equal("silent", n.Ai.OutputMode);
+        Assert.Equal("bubble", n.Ai.OutputMode);
     }
 
     // ---- ScreenContextFormatter ----

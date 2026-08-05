@@ -631,6 +631,7 @@ public sealed class SettingsWindow : Window
         modePanel.Children.Add(new TextBlock { Text = "AI 主动输出模式", FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
         foreach (var (id, name, desc) in new[]
         {
+            ("bubble", "气泡", "宠物头上气泡文字（默认，不打断工作）"),
             ("danmaku", "弹幕", "全屏滚动弹幕（Win2D GPU）"),
             ("chat", "对话", "回复出现在对话气泡窗口"),
             ("silent", "静默", "无主动输出，仅应答对话"),
@@ -1228,6 +1229,7 @@ public sealed class PetPreviewCard : FrameworkElement
         if (_bitmap is null || _renderer is null) return;
         var buffer = new byte[96 * 96 * 4];
         _renderer.DrawFrame(buffer, 96, 96);
+        PixelBuffer.RgbaToBgra(buffer); // Core 输出 RGBA，WriteableBitmap 是 Bgra32
         _bitmap.WritePixels(new Int32Rect(0, 0, 96, 96), buffer, 96 * 4, 0);
     }
 

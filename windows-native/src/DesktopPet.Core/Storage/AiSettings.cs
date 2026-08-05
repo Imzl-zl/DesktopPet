@@ -35,11 +35,12 @@ public sealed record AiSettings(
     public const string FrequencyLow = "low";
     public const string FrequencyMedium = "medium";
     public const string FrequencyHigh = "high";
+    public const string OutputModeBubble = "bubble"; // 默认：宠物头上气泡（不打断工作）
 
     public static AiSettings Defaults => new(
         Enabled: false,
         ScreenAnalysis: false,
-        OutputMode: "silent",
+        OutputMode: OutputModeBubble,
         ScreenContextEnabled: false,
         ProviderId: "",
         MemoryEnabled: true,
@@ -59,7 +60,9 @@ public sealed record AiSettings(
         {
             "danmaku" => "danmaku",
             "chat" => "chat",
-            _ => "silent",
+            "silent" => "silent",
+            OutputModeBubble => OutputModeBubble,
+            _ => OutputModeBubble,
         };
         var frequency = raw.InteractionFrequency switch
         {

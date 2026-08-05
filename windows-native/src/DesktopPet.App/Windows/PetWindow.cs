@@ -654,6 +654,7 @@ public sealed class PetWindow : Window
         {
             DrawPlaceholderFrame(buffer, frameIndex);
         }
+        PixelBuffer.RgbaToBgra(buffer); // Core 输出 RGBA，WriteableBitmap 是 Bgra32（防 R/B 错位）
         _bitmap.WritePixels(
             new Int32Rect(0, 0, _bufferWidth, _bufferHeight),
             buffer, _bufferWidth * 4, 0);

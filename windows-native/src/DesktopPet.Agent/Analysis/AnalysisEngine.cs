@@ -129,7 +129,7 @@ public sealed class AnalysisEngine
                 Messages:
                 [
                     new ChatMessage(ChatRole.User,
-                        "这是当前屏幕的截图。用一句话简短评论用户在做什么（50 字内，口语化，按你的人格）。",
+                        "这是当前屏幕的截图。用一句话简短评论用户在做什么（30 字内，口语化，按你的人格）",
                         ImageDataUrl: frame.ToDataUrl()),
                 ],
                 Temperature: PersonaEngine.Temperature,

@@ -6,8 +6,10 @@ using System.Windows.Media.Animation;
 namespace DesktopPet.App.Windows;
 
 /// <summary>
-/// 宠物气泡（对齐 bubble.ts 的 BubbleRenderer）：单行胶囊、文本变化交叉淡入
+/// 宠物气泡（对齐 bubble.ts 的 BubbleRenderer）：多行自适应胶囊、文本变化交叉淡入
 /// （150ms ease，Lumen 动效规范）、重复文本 no-op、headroom 定位在宠物头顶。
+/// 长文本自动换行显示全（AI 评论可达 50 字；单行截断会让互动台词看不全），
+/// 宽度上限 320 防挡屏，行数由内容撑开（桌宠短句最多 3-4 行）。
 /// </summary>
 public sealed class BubbleView : Border
 {
@@ -15,8 +17,8 @@ public sealed class BubbleView : Border
     {
         FontSize = 13,
         Foreground = new SolidColorBrush(Color.FromRgb(0x1B, 0x1F, 0x26)),
-        TextTrimming = TextTrimming.CharacterEllipsis,
-        MaxWidth = 240,
+        TextWrapping = TextWrapping.Wrap, // 长文本换行显示全（对齐 TS 后体验修正）
+        MaxWidth = 320,
     };
 
     private string? _shownText;

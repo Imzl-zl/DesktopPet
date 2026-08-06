@@ -14,6 +14,16 @@ public class ImageProviderTests
 {
     private sealed class MockHandler : HttpMessageHandler
     {
+        public MockHandler()
+        {
+            Client = new HttpClient(this, disposeHandler: false)
+            {
+                Timeout = Timeout.InfiniteTimeSpan,
+            };
+        }
+
+        public HttpClient Client { get; }
+
         public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> Handler { get; set; }
             = static (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
 
@@ -47,7 +57,8 @@ public class ImageProviderTests
     {
         var creds = new InMemoryCredentialStore();
         if (apiKey is not null) creds.Set("openai-key", apiKey);
-        return new OpenAiCompatibleImageProvider(Config, creds, handler, timeout: TimeSpan.FromSeconds(30));
+        return new OpenAiCompatibleImageProvider(
+            Config, creds, handler.Client, requestTimeout: TimeSpan.FromSeconds(30));
     }
 
     private static JsonElement BodyOf(MockHandler handler, int index = 0)

@@ -2,18 +2,25 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using DesktopPet.App.Hotkeys;
+using DesktopPet.App.Diagnostics;
+using DesktopPet.App.Localization;
 using DesktopPet.App.Rendering;
 using DesktopPet.App.Windows;
 using DesktopPet.Core.Care;
+using DesktopPet.Core.Hotkeys;
 using DesktopPet.Core.I18n;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Rendering;
 using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
+using DesktopPet.Infra.Diagnostics;
+using DesktopPet.Infra.Providers;
 
 namespace DesktopPet.App.Settings;
 
@@ -46,15 +53,40 @@ public sealed class SettingsWindow : Window
     private readonly SpriteFrameBitmapSourceCache _frameSourceCache = new();
 
     private readonly Ai.AiCoordinator? _ai;
+    private readonly Func<HotkeySettings, HotkeySettingsUpdateResult>? _applyHotkeys;
+    private readonly Func<AppLang, CancellationToken, Task<LanguageChangeResult>>? _changeLanguage;
+    private readonly Func<int?> _agentProcessId;
+    private readonly DiagnosticExporter? _diagnosticExporter;
+    private readonly Func<CancellationToken, Task<FactoryResetResult>>? _factoryReset;
+    private readonly IAppLogger _logger;
+    private SpritePreviewWindow? _spritePreview;
+    private ProcessMetricsMonitor? _metricsMonitor;
+    private DispatcherTimer? _metricsTimer;
 
-    public SettingsWindow(IJsonStore store, PetWindowManager manager, SpriteLoader spriteLoader, I18nService i18n,
-        Ai.AiCoordinator? ai = null)
+    public SettingsWindow(
+        IJsonStore store,
+        PetWindowManager manager,
+        SpriteLoader spriteLoader,
+        I18nService i18n,
+        Ai.AiCoordinator? ai = null,
+        Func<HotkeySettings, HotkeySettingsUpdateResult>? applyHotkeys = null,
+        Func<AppLang, CancellationToken, Task<LanguageChangeResult>>? changeLanguage = null,
+        Func<int?>? agentProcessId = null,
+        DiagnosticExporter? diagnosticExporter = null,
+        Func<CancellationToken, Task<FactoryResetResult>>? factoryReset = null,
+        IAppLogger? logger = null)
     {
         _store = store;
         _manager = manager;
         _spriteLoader = spriteLoader;
         _i18n = i18n;
         _ai = ai;
+        _applyHotkeys = applyHotkeys;
+        _changeLanguage = changeLanguage;
+        _agentProcessId = agentProcessId ?? (() => null);
+        _diagnosticExporter = diagnosticExporter;
+        _factoryReset = factoryReset;
+        _logger = logger ?? NullAppLogger.Instance;
         _settings = AppSettings.Normalize(store.LoadSettings() ?? AppSettings.Defaults(i18n.Lang));
 
         Title = "DesktopPet";
@@ -76,6 +108,7 @@ public sealed class SettingsWindow : Window
 
         Content = root;
         ShowPage("pets");
+        WpfLocalizer.ApplyNew(this, _i18n);
 
         // 共享预览 timer：驱动所有宠物卡片的实时动画（3fps）
         _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000.0 / 3) };
@@ -107,6 +140,7 @@ public sealed class SettingsWindow : Window
             "roam" => "M12,3 L15,9 L21,12 L15,15 L12,21 L9,15 L3,12 L9,9 Z M10,10 L14,14",
             "actions" => "M13,2 L4,14 H11 L10,22 L19,10 H12 Z",
             "ai" => "M12,3 L14,9 L20,11 L14,14 L12,20 L10,14 L4,11 L10,9 Z M18,3 L18.8,5.2 L21,6 L18.8,6.8 L18,9 L17.2,6.8 L15,6 L17.2,5.2 Z",
+            "hotkeys" => "M6,5 H18 A3,3 0 0 1 21,8 V16 A3,3 0 0 1 18,19 H6 A3,3 0 0 1 3,16 V8 A3,3 0 0 1 6,5 Z M7,10 H9 M11,10 H13 M15,10 H17 M7,14 H13 M15,14 H17",
             "language" => "M12,3 A9,9 0 1 1 12,21 A9,9 0 1 1 12,3 M3,12 H21 M12,3 C15,6 15,18 12,21 M12,3 C9,6 9,18 12,21",
             _ => "M12,3 A9,9 0 1 1 12,21 A9,9 0 1 1 12,3 M12,10 V16 M12,7 L12.1,7",
         };
@@ -162,6 +196,7 @@ public sealed class SettingsWindow : Window
             ("bubble", "气泡"),
             ("roam", "漫游"),
             ("ai", "AI 助手"),
+            ("hotkeys", "快捷键"),
             ("language", "语言"),
             ("about", "关于"),
         };
@@ -207,12 +242,37 @@ public sealed class SettingsWindow : Window
         if (!IsVisible) Show();
     }
 
+    /// <summary>
+    /// 外部路径（浮球/热键切换输出模式等）改动设置后刷新：重读 store 防旧快照回滚。
+    /// 修复：原实现 _settings 为构造时快照，外部改模式后设置页任意保存会回滚旧值。
+    /// </summary>
+    public void ApplyLocalization()
+    {
+        WpfLocalizer.RefreshTracked(this, _i18n);
+        if (IsVisible) ShowPage(_currentPage);
+        foreach (Window owned in OwnedWindows)
+        {
+            if (owned is SpritePreviewWindow preview) preview.ApplyLocalization(_i18n);
+            else WpfLocalizer.RefreshTracked(owned, _i18n);
+        }
+    }
+
+    public void ApplySettingsSnapshot(AppSettings settings)
+        => _settings = AppSettings.Normalize(settings);
+
+    public void RefreshFromStore()
+    {
+        _settings = AppSettings.Normalize(_store.LoadSettings() ?? AppSettings.Defaults(_i18n.Lang));
+        if (IsVisible) ShowPage(_currentPage); // 重建当前页显示新值（动作页会话内选择保留）
+    }
+
     private void ShowPage(string id)
     {
         _currentPage = id;
         UpdateNavSelection(id);
         StopClipHover(); // 离开动作页 → 停止 hover 预览 timer（避免泄漏）
-        _contentHost.Content = id switch
+        StopDiagnostics();
+        var content = id switch
         {
             "pets" => BuildPetsPage(),
             "actions" => BuildActionsPage(),
@@ -220,9 +280,12 @@ public sealed class SettingsWindow : Window
             "bubble" => BuildBubblePage(),
             "roam" => BuildRoamPage(),
             "ai" => BuildAiPage(),
+            "hotkeys" => BuildHotkeysPage(),
             "language" => BuildLanguagePage(),
             _ => BuildAboutPage(),
         };
+        _contentHost.Content = content;
+        WpfLocalizer.ApplyNew(content, _i18n);
     }
 
     // ---- 页面骨架 ----
@@ -336,7 +399,7 @@ public sealed class SettingsWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             FontSize = 13,
         };
-        System.Windows.Automation.AutomationProperties.SetName(picker, "动作宠物选择器");
+        WpfLocalizer.SetFormattedAutomationName(picker, "动作宠物选择器", _i18n);
         foreach (var pet in store.Instances)
         {
             picker.Items.Add(pet.Name);
@@ -445,7 +508,7 @@ public sealed class SettingsWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 10, 0, 0),
         };
-        System.Windows.Automation.AutomationProperties.SetName(interval, "待机动作间隔");
+        WpfLocalizer.SetFormattedAutomationName(interval, "待机动作间隔", _i18n);
         var intervalValue = new TextBlock
         {
             Text = $"{_actionsDraft.IdleIntervalSeconds}s",
@@ -494,7 +557,10 @@ public sealed class SettingsWindow : Window
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 4, 0, 0),
             };
-            System.Windows.Automation.AutomationProperties.SetName(duration, property == "click" ? "点击动作时长" : "庆祝时长");
+            WpfLocalizer.SetFormattedAutomationName(
+                duration,
+                property == "click" ? "点击动作时长" : "庆祝时长",
+                _i18n);
             var durationValue = new TextBlock
             {
                 Text = $"{(property == "click" ? _actionsDraft.ClickDurationSeconds : _actionsDraft.CelebrateDurationSeconds)}s",
@@ -513,12 +579,20 @@ public sealed class SettingsWindow : Window
                 SaveActions(_actionsPetId ?? "");
             });
             var block = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
-            block.Children.Add(new TextBlock
+            var durationLabel = new TextBlock
             {
-                Text = $"{label}（{tip}，{PetAnimationResolver.MinDurationSeconds}-{PetAnimationResolver.MaxDurationSeconds} 秒）",
                 FontSize = 12,
                 Foreground = Brush("TextPrimaryBrush"),
-            });
+            };
+            WpfLocalizer.SetFormattedText(
+                durationLabel,
+                "{0}（{1}，{2}-{3} 秒）",
+                _i18n,
+                WpfLocalizer.Localize(label),
+                WpfLocalizer.Localize(tip),
+                PetAnimationResolver.MinDurationSeconds,
+                PetAnimationResolver.MaxDurationSeconds);
+            block.Children.Add(durationLabel);
             block.Children.Add(Row(duration, durationValue));
             triggerCard.Children.Add(block);
         }
@@ -533,13 +607,16 @@ public sealed class SettingsWindow : Window
         })
         {
             var block = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
-            block.Children.Add(new TextBlock
+            var triggerLabel = new TextBlock
             {
-                Text = $"{label} — {tip}",
                 FontSize = 12,
                 Foreground = Brush("TextPrimaryBrush"),
                 Margin = new Thickness(0, 0, 0, 6),
-            });
+            };
+            WpfLocalizer.SetFormattedText(triggerLabel, "{0} — {1}", _i18n,
+                WpfLocalizer.Localize(label),
+                WpfLocalizer.Localize(tip));
+            block.Children.Add(triggerLabel);
             var reset = new Button
             {
                 Content = "恢复默认",
@@ -656,7 +733,11 @@ public sealed class SettingsWindow : Window
                 Content = inner,
             };
             var clipIndex = i;
-            System.Windows.Automation.AutomationProperties.SetName(cellButton, $"动作格子 #{clipIndex}");
+            WpfLocalizer.SetFormattedAutomationName(
+                cellButton,
+                "动作格子 #{0}",
+                _i18n,
+                clipIndex);
             cellButton.Click += (_, _) => ToggleClip(trigger, clipIndex, multiple);
             cellButton.MouseEnter += (_, _) => StartClipHover(image, clipIndex);
             cellButton.MouseLeave += (_, _) => StopClipHover();
@@ -839,32 +920,39 @@ public sealed class SettingsWindow : Window
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var identity = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        identity.Children.Add(new TextBlock
+        var petNameText = new TextBlock
         {
-            Text = instance.Name,
             FontSize = 15,
             FontWeight = FontWeights.SemiBold,
             Foreground = Brush("TextPrimaryBrush"),
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxWidth = 180,
             VerticalAlignment = VerticalAlignment.Center,
-        });
+        };
+        WpfLocalizer.SetDynamicText(petNameText, instance.Name);
+        identity.Children.Add(petNameText);
         var care = _store.LoadCare().GetValueOrDefault(instance.Id);
         var level = CareEngine.DisplayLevel(care?.Xp ?? 0);
         var stage = CareEngine.StageName(CareEngine.LevelForXp(care?.Xp ?? 0));
+        var stageText = new TextBlock
+        {
+            FontSize = 10.5,
+            Foreground = Brush("SuccessBrush"),
+            FontWeight = FontWeights.SemiBold,
+        };
+        WpfLocalizer.SetFormattedText(
+            stageText,
+            "{0} · Lv {1}",
+            _i18n,
+            WpfLocalizer.Localize(stage),
+            level);
         identity.Children.Add(new Border
         {
             Background = Brush("SuccessSoftBrush"),
             CornerRadius = new CornerRadius(7),
             Padding = new Thickness(7, 2, 7, 2),
             Margin = new Thickness(8, 0, 0, 0),
-            Child = new TextBlock
-            {
-                Text = $"{stage} · Lv {level}",
-                FontSize = 10.5,
-                Foreground = Brush("SuccessBrush"),
-                FontWeight = FontWeights.SemiBold,
-            },
+            Child = stageText,
         });
         header.Children.Add(identity);
 
@@ -889,7 +977,7 @@ public sealed class SettingsWindow : Window
             ToolTip = "移除这只宠物",
             VerticalAlignment = VerticalAlignment.Center,
         };
-        System.Windows.Automation.AutomationProperties.SetName(remove, "移除宠物");
+        WpfLocalizer.SetFormattedAutomationName(remove, "移除宠物", _i18n);
         remove.Click += (_, _) => RemoveInstance(instance.Id);
         Grid.SetColumn(remove, 1);
         header.Children.Add(remove);
@@ -930,8 +1018,13 @@ public sealed class SettingsWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
         };
         var allPersonas = _ai?.Personas.MergeWithBuiltins() ?? [];
-        personaCombo.Items.Add("跟随全局");
-        foreach (var personaItem in allPersonas) personaCombo.Items.Add(personaItem.Name);
+        personaCombo.Items.Add(_i18n.T("跟随全局"));
+        foreach (var personaItem in allPersonas)
+        {
+            personaCombo.Items.Add(personaItem.Builtin
+                ? _i18n.T(personaItem.Name)
+                : personaItem.Name);
+        }
         var currentIndex = instance.PersonaId is null ? 0
             : allPersonas.Select((item, index) => (item, index))
                 .Where(x => x.item.Id == instance.PersonaId)
@@ -965,7 +1058,16 @@ public sealed class SettingsWindow : Window
     {
         var store = _store.LoadPetStore() ?? PetStoreModel.EmptyPetStore();
         store = PetStoreModel.UpdatePetInstance(store, id, patch);
-        _store.SavePetStore(store);
+        try
+        {
+            _store.SavePetStore(store);
+        }
+        catch (JsonStoreException ex)
+        {
+            PersistenceErrorPresenter.Report(ex, this);
+            ShowPage("pets");
+            return;
+        }
         _manager.Reconcile(store, _manager.GloballyVisible);
         var updated = PetStoreModel.PetInstanceById(store, id);
         if (updated is not null) _manager.ApplyInstance(updated); // 动作配置即时生效（无需重建窗口）
@@ -973,10 +1075,31 @@ public sealed class SettingsWindow : Window
 
     private void RemoveInstance(string id)
     {
-        var store = _store.LoadPetStore() ?? PetStoreModel.EmptyPetStore();
-        store = PetStoreModel.RemovePetInstance(store, id);
-        _store.SavePetStore(store);
-        _manager.Reconcile(store, _manager.GloballyVisible);
+        var current = _store.LoadPetStore() ?? PetStoreModel.EmptyPetStore();
+        var removed = PetStoreModel.PetInstanceById(current, id);
+        var next = PetStoreModel.RemovePetInstance(current, id);
+        try
+        {
+            _store.SavePetStore(next);
+        }
+        catch (JsonStoreException ex)
+        {
+            PersistenceErrorPresenter.Report(ex, this);
+            return;
+        }
+        _manager.Reconcile(next, _manager.GloballyVisible);
+        if (removed is not null
+            && next.Instances.All(instance => instance.SpriteSlug != removed.SpriteSlug))
+        {
+            try { _spriteLoader.DeleteLocal(removed.SpriteSlug); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                MessageBox.Show(
+                    this,
+                    _i18n.Format("宠物已移除，但精灵缓存清理失败：{0}", ex.Message),
+                    "DesktopPet");
+            }
+        }
         ShowPage("pets");
     }
 
@@ -984,8 +1107,8 @@ public sealed class SettingsWindow : Window
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Filter = "精灵图 (PNG/WebP)|*.png;*.webp",
-            Title = "导入宠物精灵图",
+            Filter = _i18n.T("精灵图 (PNG/WebP)|*.png;*.webp"),
+            Title = _i18n.T("导入宠物精灵图"),
         };
         if (dialog.ShowDialog(this) != true) return;
         try
@@ -994,23 +1117,34 @@ public sealed class SettingsWindow : Window
             var sheet = SpriteSheet.Decode(bytes, Path.GetFileName(dialog.FileName));
             if (sheet is null)
             {
-                MessageBox.Show(this, "无法解析精灵图（需要带透明通道的 PNG/WebP）", "DesktopPet");
+                MessageBox.Show(this, _i18n.T("无法解析精灵图（需要带透明通道的 PNG/WebP）"), "DesktopPet");
                 return;
             }
-            var preview = new SpritePreviewWindow(sheet, bytes, Path.GetFileNameWithoutExtension(dialog.FileName))
+            _spritePreview = new SpritePreviewWindow(
+                sheet,
+                bytes,
+                Path.GetFileNameWithoutExtension(dialog.FileName),
+                _i18n)
             {
                 Owner = this,
             };
-            if (preview.ShowDialog() == true)
+            try
             {
-                var (payload, name) = preview.ImportPayload;
-                _manager.ImportSprite(payload, name);
-                ShowPage("pets");
+                if (_spritePreview.ShowDialog() == true)
+                {
+                    var (payload, name) = _spritePreview.ImportPayload;
+                    _manager.ImportSprite(payload, name);
+                    ShowPage("pets");
+                }
+            }
+            finally
+            {
+                _spritePreview = null;
             }
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"导入失败：{ex.Message}", "DesktopPet");
+            MessageBox.Show(this, _i18n.Format("导入失败：{0}", ex.Message), "DesktopPet");
         }
     }
 
@@ -1166,7 +1300,7 @@ public sealed class SettingsWindow : Window
             FontFamily = new FontFamily("Consolas"),
             FontSize = 12,
         };
-        System.Windows.Automation.AutomationProperties.SetName(chatter, "闲谈台词池");
+        WpfLocalizer.SetFormattedAutomationName(chatter, "闲谈台词池", _i18n);
         chatter.LostFocus += (_, _) => Save(s => s with
         {
             IdleChatterLines = chatter.Text.Split('\n')
@@ -1183,7 +1317,7 @@ public sealed class SettingsWindow : Window
             FontFamily = new FontFamily("Consolas"),
             FontSize = 12,
         };
-        System.Windows.Automation.AutomationProperties.SetName(hungry, "饥饿台词池");
+        WpfLocalizer.SetFormattedAutomationName(hungry, "饥饿台词池", _i18n);
         hungry.LostFocus += (_, _) => Save(s => s with
         {
             HungryLines = hungry.Text.Split('\n')
@@ -1348,6 +1482,216 @@ public sealed class SettingsWindow : Window
         return PageScroller(stack, PageHeader("漫游", "宠物在桌面上的活动方式"));
     }
 
+    // ---- 快捷键页 ----
+
+    private UIElement BuildHotkeysPage()
+    {
+        var draft = _settings.Hotkeys;
+        var editors = new Dictionary<HotkeyAction, TextBox>();
+        var bindings = new StackPanel();
+        var actions = new[]
+        {
+            (HotkeyAction.TogglePets, "显示或隐藏宠物"),
+            (HotkeyAction.ToggleMode, "切换输出模式"),
+            (HotkeyAction.OpenSettings, "打开设置"),
+            (HotkeyAction.Quit, "退出应用"),
+        };
+
+        foreach (var (action, label) in actions)
+        {
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(190) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var title = new TextBlock
+            {
+                Text = label,
+                FontSize = 13,
+                Foreground = Brush("TextPrimaryBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            row.Children.Add(title);
+
+            var editor = new TextBox
+            {
+                Text = FormatHotkey(draft.Get(action)),
+                IsReadOnly = true,
+                Height = 30,
+                Margin = new Thickness(8, 0, 8, 0),
+                VerticalContentAlignment = VerticalAlignment.Center,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+            };
+            WpfLocalizer.SetFormattedAutomationName(
+                editor,
+                "{0}快捷键",
+                _i18n,
+                WpfLocalizer.Localize(label));
+            editor.PreviewKeyDown += (_, e) =>
+            {
+                var key = e.Key == Key.System ? e.SystemKey : e.Key;
+                if (IsModifierKey(key))
+                {
+                    e.Handled = true;
+                    return;
+                }
+                var virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
+                if (virtualKey == 0)
+                {
+                    e.Handled = true;
+                    return;
+                }
+                var gesture = new HotkeyGesture(ReadHotkeyModifiers(), virtualKey);
+                draft = SetHotkey(draft, action, gesture);
+                editor.Text = FormatHotkey(gesture);
+                editor.BorderBrush = Brush("StrokeBrush");
+                e.Handled = true;
+            };
+            Grid.SetColumn(editor, 1);
+            row.Children.Add(editor);
+            editors[action] = editor;
+
+            var capture = new Button
+            {
+                Content = "录入",
+                Style = AppStyle("ButtonDefaultStyle"),
+                Height = 30,
+                MinWidth = 58,
+                Margin = new Thickness(0, 0, 6, 0),
+            };
+            WpfLocalizer.SetFormattedToolTip(
+                capture,
+                "录入{0}快捷键",
+                _i18n,
+                WpfLocalizer.Localize(label));
+            capture.Click += (_, _) =>
+            {
+                editor.Focus();
+                Keyboard.Focus(editor);
+            };
+            Grid.SetColumn(capture, 2);
+            row.Children.Add(capture);
+
+            var clear = new Button
+            {
+                Content = "×",
+                Style = AppStyle("ButtonGhostStyle"),
+                Width = 30,
+                Height = 30,
+                FontSize = 16,
+            };
+            WpfLocalizer.SetFormattedToolTip(
+                clear,
+                "清除{0}快捷键",
+                _i18n,
+                WpfLocalizer.Localize(label));
+            WpfLocalizer.SetFormattedAutomationName(
+                clear,
+                "清除{0}快捷键",
+                _i18n,
+                WpfLocalizer.Localize(label));
+            clear.Click += (_, _) =>
+            {
+                draft = SetHotkey(draft, action, null);
+                editor.Text = _i18n.T("未绑定");
+                editor.BorderBrush = Brush("StrokeBrush");
+            };
+            Grid.SetColumn(clear, 3);
+            row.Children.Add(clear);
+            bindings.Children.Add(row);
+        }
+
+        var status = new TextBlock
+        {
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+            Visibility = Visibility.Collapsed,
+        };
+        var apply = new Button
+        {
+            Content = "应用快捷键",
+            Style = AppStyle("ButtonPrimaryStyle"),
+            Width = 120,
+            Height = 32,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+        apply.Click += (_, _) =>
+        {
+            foreach (var editor in editors.Values) editor.BorderBrush = Brush("StrokeBrush");
+            if (_applyHotkeys is null)
+            {
+                status.Text = _i18n.T("快捷键服务尚未初始化");
+                status.Foreground = Brush("DangerBrush");
+                status.Visibility = Visibility.Visible;
+                return;
+            }
+
+            var result = _applyHotkeys(draft);
+            status.Text = _i18n.T(result.Message);
+            status.Foreground = result.Success ? Brush("SuccessBrush") : Brush("DangerBrush");
+            status.Visibility = Visibility.Visible;
+            foreach (var issue in result.RuntimeResult.ValidationIssues)
+            {
+                if (editors.TryGetValue(issue.Action, out var editor))
+                    editor.BorderBrush = Brush("DangerBrush");
+                if (issue.ConflictingAction is { } conflicting
+                    && editors.TryGetValue(conflicting, out var conflictingEditor))
+                    conflictingEditor.BorderBrush = Brush("DangerBrush");
+            }
+            if (result.Success && result.Settings is not null)
+                _settings = result.Settings;
+        };
+
+        bindings.Children.Add(apply);
+        bindings.Children.Add(status);
+        var stack = new StackPanel();
+        stack.Children.Add(SectionCard("全局快捷键", bindings, margin: 0));
+        return PageScroller(stack, PageHeader("快捷键", "全局操作绑定"));
+    }
+
+    private static HotkeySettings SetHotkey(
+        HotkeySettings settings,
+        HotkeyAction action,
+        HotkeyGesture? gesture)
+        => action switch
+        {
+            HotkeyAction.TogglePets => settings with { TogglePets = gesture },
+            HotkeyAction.ToggleMode => settings with { ToggleMode = gesture },
+            HotkeyAction.OpenSettings => settings with { OpenSettings = gesture },
+            HotkeyAction.Quit => settings with { Quit = gesture },
+            _ => settings,
+        };
+
+    private static HotkeyModifiers ReadHotkeyModifiers()
+    {
+        var current = Keyboard.Modifiers;
+        var modifiers = HotkeyModifiers.None;
+        if ((current & ModifierKeys.Control) != 0) modifiers |= HotkeyModifiers.Control;
+        if ((current & ModifierKeys.Alt) != 0) modifiers |= HotkeyModifiers.Alt;
+        if ((current & ModifierKeys.Shift) != 0) modifiers |= HotkeyModifiers.Shift;
+        if ((current & ModifierKeys.Windows) != 0) modifiers |= HotkeyModifiers.Windows;
+        return modifiers;
+    }
+
+    private static bool IsModifierKey(Key key)
+        => key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt
+            or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin;
+
+    private string FormatHotkey(HotkeyGesture? gesture)
+    {
+        if (gesture is null) return _i18n.T("未绑定");
+        var parts = new List<string>();
+        if ((gesture.Modifiers & HotkeyModifiers.Control) != 0) parts.Add("Ctrl");
+        if ((gesture.Modifiers & HotkeyModifiers.Alt) != 0) parts.Add("Alt");
+        if ((gesture.Modifiers & HotkeyModifiers.Shift) != 0) parts.Add("Shift");
+        if ((gesture.Modifiers & HotkeyModifiers.Windows) != 0) parts.Add("Win");
+        parts.Add(KeyInterop.KeyFromVirtualKey((int)gesture.VirtualKey).ToString());
+        return string.Join(" + ", parts);
+    }
+
     // ---- 语言页 ----
 
     private UIElement BuildLanguagePage()
@@ -1361,7 +1705,28 @@ public sealed class SettingsWindow : Window
         })
         {
             var radio = new RadioButton { Content = label, IsChecked = _settings.Lang == value, Margin = new Thickness(0, 0, 20, 0) };
-            radio.Checked += (_, _) => Save(s => s with { Lang = value });
+            radio.Checked += async (_, _) =>
+            {
+                if (_settings.Lang == value) return;
+                if (_changeLanguage is null)
+                {
+                    Save(settings => settings with { Lang = value });
+                    if (_settings.Lang == value)
+                    {
+                        _i18n.SetLang(value);
+                        ApplyLocalization();
+                    }
+                    return;
+                }
+                var result = await _changeLanguage(value, CancellationToken.None);
+                if (result.PersistenceError is not null)
+                {
+                    PersistenceErrorPresenter.Report(result.PersistenceError, this);
+                    ShowPage("language");
+                    return;
+                }
+                if (result.Settings is not null) _settings = result.Settings;
+            };
             lang.Children.Add(radio);
         }
         stack.Children.Add(SectionCard("语言 / Language", lang, margin: 0));
@@ -1370,6 +1735,26 @@ public sealed class SettingsWindow : Window
     }
 
     // ---- 关于页 ----
+
+    private string DescribeFactoryResetFailure(FactoryResetException error)
+    {
+        var stage = error.Stage switch
+        {
+            "stage-data" => _i18n.T("暂存应用数据"),
+            "delete-credentials" => _i18n.T("删除 API 凭据"),
+            "delete-data" => _i18n.T("删除应用数据"),
+            "delete-residual-data" => _i18n.T("清理残留数据"),
+            _ => error.Stage,
+        };
+        var recovery = error.RollbackComplete
+            ? _i18n.T("原数据已保留")
+            : error.Stage == "delete-credentials" && error.ResidualPath is null
+                ? _i18n.T("应用数据已恢复，但部分 API 凭据可能已删除；请重新启动后重试")
+                : _i18n.T("部分数据可能已暂存，请保留现场并重试");
+        return _i18n.Format("恢复出厂失败：{0}；{1}", stage, recovery);
+    }
+
+    private TextBlock? _metricsText;
 
     private UIElement BuildAboutPage()
     {
@@ -1385,14 +1770,19 @@ public sealed class SettingsWindow : Window
             FontSize = 15,
             FontWeight = FontWeights.SemiBold,
         });
-        aboutStack.Children.Add(new TextBlock
+        var versionText = new TextBlock
         {
-            Text = $"版本 {typeof(SettingsWindow).Assembly.GetName().Version}\n.NET 8 + WPF · Lumen 2.0",
             FontSize = 12,
             LineHeight = 20,
             Foreground = Brush("TextSecondaryBrush"),
             Margin = new Thickness(0, 6, 0, 0),
-        });
+        };
+        WpfLocalizer.SetFormattedText(
+            versionText,
+            "版本 {0}\n.NET 8 + WPF · Lumen 2.0",
+            _i18n,
+            typeof(SettingsWindow).Assembly.GetName().Version);
+        aboutStack.Children.Add(versionText);
         stack.Children.Add(Card(aboutStack));
 
         var statsStack = new StackPanel();
@@ -1405,10 +1795,176 @@ public sealed class SettingsWindow : Window
         });
         statsStack.Children.Add(StatRow("宠物数量", store.Instances.Count.ToString()));
         statsStack.Children.Add(StatRow("总养成 XP", $"{totalXp:0}"));
-        statsStack.Children.Add(StatRow("数据目录", $"{Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)}\\DesktopPet"));
+        statsStack.Children.Add(StatRow("数据目录", AppDataPaths.ForCurrentUser().Root));
         stack.Children.Add(Card(statsStack, margin: 0));
 
-        return PageScroller(stack, PageHeader("关于", "版本与统计"));
+        var diagnosticsStack = new StackPanel();
+        diagnosticsStack.Children.Add(new TextBlock
+        {
+            Text = "运行诊断",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 8),
+        });
+        _metricsText = new TextBlock
+        {
+            Text = _i18n.T("正在采样..."),
+            FontSize = 12,
+            LineHeight = 20,
+            Foreground = Brush("TextSecondaryBrush"),
+        };
+        diagnosticsStack.Children.Add(_metricsText);
+        if (_diagnosticExporter is not null)
+        {
+            var exportStatus = new TextBlock
+            {
+                FontSize = 12,
+                Foreground = Brush("TextSecondaryBrush"),
+                Margin = new Thickness(0, 8, 0, 0),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            var export = new Button
+            {
+                Content = "导出诊断日志",
+                Style = AppStyle("ButtonDefaultStyle"),
+            };
+            export.Margin = new Thickness(0, 12, 0, 0);
+            export.Click += async (_, _) =>
+            {
+                var dialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    Title = _i18n.T("导出诊断日志"),
+                    Filter = _i18n.T("ZIP 文件 (*.zip)|*.zip"),
+                    FileName = $"DesktopPet-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip",
+                    DefaultExt = ".zip",
+                    AddExtension = true,
+                };
+                if (dialog.ShowDialog(this) != true) return;
+                export.IsEnabled = false;
+                exportStatus.Text = _i18n.T("正在导出诊断日志...");
+                try
+                {
+                    await Task.Run(() => _diagnosticExporter.Export(dialog.FileName));
+                    exportStatus.Text = _i18n.T("诊断日志已导出");
+                    exportStatus.Foreground = Brush("SuccessBrush");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    exportStatus.Text = _i18n.Format("导出失败：{0}", ex.Message);
+                    exportStatus.Foreground = Brush("DangerBrush");
+                }
+                finally
+                {
+                    if (IsLoaded) export.IsEnabled = true;
+                }
+            };
+            diagnosticsStack.Children.Add(export);
+            diagnosticsStack.Children.Add(exportStatus);
+        }
+        if (_factoryReset is not null)
+        {
+            var resetStatus = new TextBlock
+            {
+                FontSize = 12,
+                Foreground = Brush("TextSecondaryBrush"),
+                Margin = new Thickness(0, 8, 0, 0),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            var reset = new Button
+            {
+                Content = "恢复出厂设置",
+                Style = AppStyle("ButtonDangerStyle"),
+                Margin = new Thickness(0, 16, 0, 0),
+            };
+            reset.Click += async (_, _) =>
+            {
+                var answer = MessageBox.Show(
+                    this,
+                    _i18n.T("恢复出厂设置将删除设置、宠物、日记、日志和 API 凭据，且无法撤销。确定继续吗？"),
+                    _i18n.T("确认恢复出厂设置"),
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning,
+                    MessageBoxResult.No);
+                if (answer != MessageBoxResult.Yes) return;
+
+                reset.IsEnabled = false;
+                resetStatus.Text = _i18n.T("正在停止服务并清理数据...");
+                try
+                {
+                    await _factoryReset(CancellationToken.None);
+                    resetStatus.Text = _i18n.T("恢复出厂设置已完成，应用正在重启");
+                }
+                catch (FactoryResetException ex)
+                {
+                    resetStatus.Text = DescribeFactoryResetFailure(ex);
+                    resetStatus.Foreground = Brush("DangerBrush");
+                    reset.IsEnabled = true;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    resetStatus.Text = _i18n.Format("恢复出厂失败：{0}", ex.Message);
+                    resetStatus.Foreground = Brush("DangerBrush");
+                    reset.IsEnabled = true;
+                }
+            };
+            diagnosticsStack.Children.Add(reset);
+            diagnosticsStack.Children.Add(resetStatus);
+        }
+        stack.Children.Add(Card(diagnosticsStack));
+        StartDiagnostics();
+
+        return PageScroller(stack, PageHeader("关于", "版本、统计与诊断"));
+    }
+
+    private void StartDiagnostics()
+    {
+        IReadOnlyList<ProcessSnapshot> Capture()
+        {
+            var snapshots = new List<ProcessSnapshot>();
+            var app = ProcessMetricsMonitor.CaptureProcess("PetApp", Environment.ProcessId);
+            if (app is not null) snapshots.Add(app);
+            var agentId = _agentProcessId();
+            if (agentId is { } pid && pid != Environment.ProcessId)
+            {
+                var agent = ProcessMetricsMonitor.CaptureProcess("PetAgent", pid);
+                if (agent is not null) snapshots.Add(agent);
+            }
+            return snapshots;
+        }
+
+        _metricsMonitor = new ProcessMetricsMonitor(Capture);
+        _metricsMonitor.Start();
+        _metricsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _metricsTimer.Tick += MetricsTimerOnTick;
+        _metricsTimer.Start();
+    }
+
+    private void MetricsTimerOnTick(object? sender, EventArgs e)
+    {
+        if (_metricsMonitor is null || _metricsText is null) return;
+        var metrics = _metricsMonitor.Sample();
+        var rows = metrics.Select(metric => _i18n.Format(
+            "{0}：CPU {1}% · 内存 {2} MB",
+            metric.Name,
+            metric.CpuPercent.ToString("0.0", System.Globalization.CultureInfo.CurrentCulture),
+            (metric.WorkingSetBytes / 1024d / 1024d).ToString("0.0", System.Globalization.CultureInfo.CurrentCulture)))
+            .ToList();
+        if (metrics.All(metric => metric.Name != "PetAgent"))
+            rows.Add(_i18n.T("PetAgent：未运行"));
+        _metricsText.Text = string.Join(Environment.NewLine, rows);
+    }
+
+    private void StopDiagnostics()
+    {
+        if (_metricsTimer is not null)
+        {
+            _metricsTimer.Stop();
+            _metricsTimer.Tick -= MetricsTimerOnTick;
+            _metricsTimer = null;
+        }
+        _metricsMonitor?.Dispose();
+        _metricsMonitor = null;
+        _metricsText = null;
     }
 
     private static StackPanel StatRow(string label, string value)
@@ -1532,13 +2088,14 @@ public sealed class SettingsWindow : Window
             editConnButton.Click += (_, _) => ShowModelConnectionEditor();
             comboRow.Children.Add(editConnButton);
             providerPanel.Children.Add(comboRow);
-            providerPanel.Children.Add(new TextBlock
+            var providerUrl = new TextBlock
             {
-                Text = selectedProvider.BaseUrl,
                 FontSize = 11,
                 Foreground = Brush("TextTertiaryBrush"),
                 TextWrapping = TextWrapping.Wrap,
-            });
+            };
+            WpfLocalizer.SetDynamicText(providerUrl, selectedProvider.BaseUrl);
+            providerPanel.Children.Add(providerUrl);
         }
 
         // Phase 6f：生图连接（总结图）+ 日记查看入口
@@ -1726,13 +2283,25 @@ public sealed class SettingsWindow : Window
             };
             var inner = new StackPanel();
             var nameRow = new StackPanel { Orientation = Orientation.Horizontal };
-            nameRow.Children.Add(new TextBlock
+            var personaName = new TextBlock
             {
-                Text = persona.Name + (persona.Builtin ? "" : " · 自定义"),
                 FontSize = 12.5,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = selected ? Brush("AccentBrush") : Brush("TextPrimaryBrush"),
-            });
+            };
+            if (persona.Builtin)
+            {
+                WpfLocalizer.SetText(personaName, persona.Name, _i18n);
+            }
+            else
+            {
+                WpfLocalizer.SetFormattedText(
+                    personaName,
+                    "{0} · 自定义",
+                    _i18n,
+                    persona.Name);
+            }
+            nameRow.Children.Add(personaName);
             if (selected)
             {
                 nameRow.Children.Add(new TextBlock
@@ -1745,14 +2314,18 @@ public sealed class SettingsWindow : Window
                 });
             }
             inner.Children.Add(nameRow);
-            inner.Children.Add(new TextBlock
+            var personaDescription = new TextBlock
             {
-                Text = persona.Description,
                 FontSize = 10.5,
                 Foreground = Brush("TextTertiaryBrush"),
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 4, 0, 0),
-            });
+            };
+            if (persona.Builtin)
+                WpfLocalizer.SetText(personaDescription, persona.Description, _i18n);
+            else
+                WpfLocalizer.SetDynamicText(personaDescription, persona.Description);
+            inner.Children.Add(personaDescription);
             if (!persona.Builtin)
             {
                 var editLink = new TextBlock
@@ -1872,13 +2445,16 @@ public sealed class SettingsWindow : Window
     private void Save(Func<AppSettings, AppSettings> change)
     {
         var before = _settings;
-        _settings = AppSettings.Normalize(change(_settings));
+        var next = AppSettings.Normalize(change(before));
         // 首次开启 AI → 引导窗（称呼+人格）；完成标记随本 Save 一并落盘
-        if (_settings.Ai.Enabled && !before.Ai.Enabled && !_settings.Ai.Onboarded)
+        var onboardingRequired = false;
+        var onboardingCompleted = false;
+        if (next.Ai.Enabled && !before.Ai.Enabled && !next.Ai.Onboarded)
         {
             var ai = _ai;
             if (ai is not null)
             {
+                onboardingRequired = true;
                 var personas = ai.Personas;
                 var profile = _store.LoadMemoryProfile()
                     ?? new DesktopPet.Core.Memory.UserProfile("", [], "", "");
@@ -1888,16 +2464,45 @@ public sealed class SettingsWindow : Window
                     selectedPersonaId: personas.SelectedId,
                     onComplete: (callName, personaId) =>
                     {
-                        ai.CompleteOnboarding(callName, personaId);
-                        _settings = _settings with { Ai = _settings.Ai with { Onboarded = true } };
-                    });
+                        try
+                        {
+                            ai.CompleteOnboarding(
+                                callName,
+                                personaId,
+                                next with { Ai = next.Ai with { Onboarded = true } });
+                            onboardingCompleted = true;
+                            return true;
+                        }
+                        catch (JsonStoreException ex)
+                        {
+                            PersistenceErrorPresenter.Report(ex, this);
+                            return false;
+                        }
+                    },
+                    i18n: _i18n);
                 welcome.Owner = this;
                 welcome.ShowDialog();
             }
         }
-        _store.SaveSettings(_settings);
-        _manager.ApplySettings(_settings);
-        _ai?.ApplySettings(_settings); // AI 设置同步（总开关启停 Agent / 配置下发）
+        if (onboardingRequired && !onboardingCompleted)
+            return;
+        if (onboardingCompleted)
+            next = next with { Ai = next.Ai with { Onboarded = true } };
+
+        try
+        {
+            _store.SaveSettings(next);
+        }
+        catch (JsonStoreException ex)
+        {
+            PersistenceErrorPresenter.Report(ex, this);
+            _manager.RefreshSettingsWindow();
+            return;
+        }
+
+        _settings = next;
+        _manager.ApplySettings(next);
+        _ai?.ApplySettings(next); // AI 设置同步（总开关启停 Agent / 配置下发）
     }
 
     // ---- Phase 6e：人格编辑/新建（含示例对话输入）----
@@ -1968,7 +2573,7 @@ public sealed class SettingsWindow : Window
             var prompt = promptBox.Text.Trim();
             if (name.Length == 0 || prompt.Length == 0)
             {
-                MessageBox.Show(window, "名称和提示词不能为空", "DesktopPet");
+                MessageBox.Show(window, _i18n.T("名称和提示词不能为空"), "DesktopPet");
                 return;
             }
             if (name.Length > 12) name = name[..12];
@@ -1997,6 +2602,7 @@ public sealed class SettingsWindow : Window
         root.Children.Add(footer);
         root.Children.Add(form);
         window.Content = root;
+        WpfLocalizer.ApplyNew(window, _i18n);
         window.ShowDialog();
     }
 
@@ -2010,10 +2616,8 @@ public sealed class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "desktoppet-ai.log"),
-                $"[conn-editor] EXCEPTION: {ex}" + System.Environment.NewLine);
-            MessageBox.Show(this, "模型连接编辑器打开失败：" + ex.Message, "DesktopPet");
+            System.Diagnostics.Debug.WriteLine($"Model connection editor failed: {ex.GetType().Name}");
+            MessageBox.Show(this, _i18n.T("模型连接编辑器打开失败"), "DesktopPet");
         }
     }
 
@@ -2027,12 +2631,12 @@ public sealed class SettingsWindow : Window
 
         var baseBox = new TextBox { Text = cfg?.BaseUrl ?? "", FontSize = 12, Height = 30 };
         var modelBox = new TextBox { Text = cfg?.ModelName ?? "", FontSize = 12, Height = 30 };
-        var keyBox = new TextBox { Text = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? "" : "（已配置，留空不修改）", FontSize = 12, Height = 30 };
+        var keyBox = new PasswordBox { FontSize = 12, Height = 30 };
         var maxTokensBox = new TextBox { Text = cfg?.MaxOutputTokens?.ToString() ?? "", FontSize = 12, Height = 30 };
         var contextBox = new TextBox { Text = cfg?.ContextWindowTokens?.ToString() ?? "", FontSize = 12, Height = 30 };
         var reasoningCombo = new ComboBox { Margin = new Thickness(0, 0, 0, 6) };
-        reasoningCombo.Items.Add("关闭思考（推荐，响应更快）");
-        reasoningCombo.Items.Add("跟随模型默认");
+        reasoningCombo.Items.Add(new ComboBoxItem { Content = "关闭思考（推荐，响应更快）" });
+        reasoningCombo.Items.Add(new ComboBoxItem { Content = "跟随模型默认" });
         reasoningCombo.SelectedIndex = string.IsNullOrEmpty(cfg?.ReasoningEffort) ? 1 : 0;
 
         var form = new StackPanel { Margin = new Thickness(20, 16, 20, 0) };
@@ -2042,6 +2646,16 @@ public sealed class SettingsWindow : Window
         form.Children.Add(modelBox);
         form.Children.Add(FormLabel("API Key（存 Windows 凭据管理器，不落明文）", new Thickness(0, 12, 0, 5)));
         form.Children.Add(keyBox);
+        if (!string.IsNullOrEmpty(cfg?.ApiKeyRef))
+        {
+            form.Children.Add(new TextBlock
+            {
+                Text = "已保存凭据；留空保持不变",
+                FontSize = 11,
+                Foreground = Brush("TextTertiaryBrush"),
+                Margin = new Thickness(0, 4, 0, 0),
+            });
+        }
         form.Children.Add(FormLabel("最大输出 token（留空 = 短句默认；国产模型一般不用填）", new Thickness(0, 12, 0, 5)));
         form.Children.Add(maxTokensBox);
         form.Children.Add(FormLabel("上下文长度 token（留空 = 会话记住最近 5 轮；如 256000）", new Thickness(0, 12, 0, 5)));
@@ -2053,13 +2667,78 @@ public sealed class SettingsWindow : Window
         {
             Title = "模型连接",
             Width = 440,
-            Height = 500,
+            Height = 560,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             Background = Brush("WindowBgBrush"),
             ResizeMode = ResizeMode.NoResize,
             ShowInTaskbar = false,
         };
+        var testController = new Ai.ModelConnectionTestController(_ai);
+        var status = new TextBlock
+        {
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Brush("TextSecondaryBrush"),
+        };
+        ModelConnectionDraft ReadDraft()
+        {
+            var maxTokens = int.TryParse(maxTokensBox.Text.Trim(), out var mt) && mt > 0 ? (int?)mt : null;
+            var contextTokens = int.TryParse(contextBox.Text.Trim(), out var context) && context > 0
+                ? (int?)context
+                : null;
+            return new ModelConnectionDraft(
+                baseBox.Text.Trim(),
+                modelBox.Text.Trim(),
+                cfg?.ApiKeyRef ?? "",
+                keyBox.Password,
+                cfg?.Capabilities ?? (Core.Scheduling.ModelCapabilities.Chat | Core.Scheduling.ModelCapabilities.Vision),
+                reasoningCombo.SelectedIndex == 0 ? "none" : null,
+                maxTokens,
+                contextTokens);
+        }
+
+        var testButton = new Button
+        {
+            Content = "测试连接",
+            Style = AppStyle("ButtonDefaultStyle"),
+            Width = 100,
+            Height = 32,
+            FontSize = 13,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        testButton.Click += async (_, _) =>
+        {
+            testButton.IsEnabled = false;
+            status.Text = _i18n.T("正在测试连接...");
+            status.Foreground = Brush("TextSecondaryBrush");
+            try
+            {
+                var result = await testController.TestLatestAsync(ReadDraft());
+                if (result is null) return;
+                status.Text = DescribeConnectionTest(result);
+                status.Foreground = result.Success ? Brush("SuccessBrush") : Brush("DangerBrush");
+            }
+            finally
+            {
+                if (window.IsLoaded) testButton.IsEnabled = true;
+            }
+        };
+        void InvalidateTest()
+        {
+            testController.Cancel();
+            status.Text = "";
+            testButton.IsEnabled = true;
+        }
+        baseBox.TextChanged += (_, _) => InvalidateTest();
+        modelBox.TextChanged += (_, _) => InvalidateTest();
+        keyBox.PasswordChanged += (_, _) => InvalidateTest();
+        maxTokensBox.TextChanged += (_, _) => InvalidateTest();
+        contextBox.TextChanged += (_, _) => InvalidateTest();
+        reasoningCombo.SelectionChanged += (_, _) => InvalidateTest();
+        window.Closed += (_, _) => testController.Dispose();
+
         var saveButton = new Button
         {
             Content = "保存模型连接",
@@ -2068,47 +2747,128 @@ public sealed class SettingsWindow : Window
             Height = 32,
             FontSize = 13,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 16, 0, 0),
         };
         saveButton.Click += (_, _) =>
         {
-            var baseUrl = baseBox.Text.Trim();
-            var model = modelBox.Text.Trim();
-            if (baseUrl.Length == 0 || model.Length == 0)
+            testController.Cancel();
+            var draft = ReadDraft();
+            if (draft.BaseUrl.Length == 0 || draft.ModelName.Length == 0)
             {
-                MessageBox.Show(window, "接口地址和模型名不能为空", "DesktopPet");
+                status.Text = _i18n.T("接口地址和模型名不能为空");
+                status.Foreground = Brush("DangerBrush");
                 return;
             }
-            var keyRef = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? "model-key" : cfg.ApiKeyRef;
-            if (keyBox.Text.Length > 0 && keyBox.Text != "（已配置，留空不修改）")
-                creds.Set(keyRef, keyBox.Text);
-            // 数字字段：留空/非法 = null（走默认），填了才生效
-            var maxTokens = int.TryParse(maxTokensBox.Text.Trim(), out var mt) && mt > 0 ? (int?)mt : null;
-            var contextTokens = int.TryParse(contextBox.Text.Trim(), out var ct) && ct > 0 ? (int?)ct : null;
-            var newCfg = new Core.Scheduling.ProviderConfig(
-                Id: cfg?.Id ?? "model",
-                Name: model,
-                BaseUrl: baseUrl,
-                ApiKeyRef: keyRef,
-                ModelName: model,
-                Capabilities: cfg?.Capabilities ?? (Core.Scheduling.ModelCapabilities.Chat | Core.Scheduling.ModelCapabilities.Vision),
-                IsDefault: cfg?.IsDefault ?? true,
-                ReasoningEffort: reasoningCombo.SelectedIndex == 0 ? "none" : null,
-                MaxOutputTokens: maxTokens,
-                ContextWindowTokens: contextTokens);
-            var models = providers.Models.ToList();
-            var idx = models.FindIndex(m => m.Id == newCfg.Id);
-            if (idx >= 0) models[idx] = newCfg;
-            else models.Add(newCfg);
-            providers.Models = models;
-            _ai.ApplyProviders(providers);
-            // 新建场景：当前选中 id 不存在 → 指向新连接，AI 立即可用
-            if (providers.Models.All(m => m.Id != _settings.Ai.ProviderId))
-                Save(s => s with { Ai = s.Ai with { ProviderId = newCfg.Id } });
-            window.Close();
-            ShowPage("ai");
+
+            try
+            {
+                var connectionId = cfg?.Id ?? ProviderCredentialRefs.NewConnectionId();
+                var oldSecret = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? null : creds.Get(cfg.ApiKeyRef);
+                if (!string.IsNullOrEmpty(cfg?.ApiKeyRef)
+                    && oldSecret is null
+                    && string.IsNullOrEmpty(draft.DraftApiKey))
+                {
+                    status.Text = _i18n.T("已保存的凭据不存在，请重新输入 API Key");
+                    status.Foreground = Brush("DangerBrush");
+                    return;
+                }
+                var secret = string.IsNullOrEmpty(draft.DraftApiKey) ? oldSecret : draft.DraftApiKey;
+                var keyRef = secret is null ? "" : ProviderCredentialRefs.ForModel(connectionId);
+                _ = ProviderEndpointPolicy.BuildRequestUri(draft.BaseUrl, "models", secret is not null);
+
+                var previousTargetSecret = keyRef.Length == 0 ? null : creds.Get(keyRef);
+                var credentialChanged = keyRef.Length > 0
+                    && !string.Equals(previousTargetSecret, secret, StringComparison.Ordinal);
+                if (credentialChanged) creds.Set(keyRef, secret!);
+
+                var newCfg = new Core.Scheduling.ProviderConfig(
+                    Id: connectionId,
+                    Name: draft.ModelName,
+                    BaseUrl: draft.BaseUrl,
+                    ApiKeyRef: keyRef,
+                    ModelName: draft.ModelName,
+                    Capabilities: draft.Capabilities,
+                    IsDefault: cfg?.IsDefault ?? true,
+                    ReasoningEffort: draft.ReasoningEffort,
+                    MaxOutputTokens: draft.MaxOutputTokens,
+                    ContextWindowTokens: draft.ContextWindowTokens);
+                var models = providers.Models.ToList();
+                var index = models.FindIndex(model => model.Id == newCfg.Id);
+                if (index >= 0) models[index] = newCfg;
+                else models.Add(newCfg);
+                var nextProviders = new Core.Scheduling.ProvidersFileModel
+                {
+                    Models = models,
+                    Image = providers.Image,
+                };
+                try
+                {
+                    _ai.ApplyProviders(nextProviders);
+                }
+                catch (JsonStoreException ex)
+                {
+                    var credentialRollbackComplete = true;
+                    if (credentialChanged)
+                    {
+                        try
+                        {
+                            if (previousTargetSecret is null) creds.Delete(keyRef);
+                            else creds.Set(keyRef, previousTargetSecret);
+                        }
+                        catch (CredentialStoreException)
+                        {
+                            credentialRollbackComplete = false;
+                        }
+                    }
+                    PersistenceErrorPresenter.Report(ex, window);
+                    status.Text = credentialRollbackComplete
+                        ? _i18n.T("保存失败，凭据已恢复")
+                        : _i18n.T("保存失败，凭据未能完整恢复");
+                    status.Foreground = Brush("DangerBrush");
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(cfg?.ApiKeyRef)
+                    && !string.Equals(cfg.ApiKeyRef, keyRef, StringComparison.Ordinal)
+                    && nextProviders.Models.All(model => model.ApiKeyRef != cfg.ApiKeyRef)
+                    && nextProviders.Image?.ApiKeyRef != cfg.ApiKeyRef)
+                {
+                    try { creds.Delete(cfg.ApiKeyRef); }
+                    catch (CredentialStoreException)
+                    {
+                        MessageBox.Show(window, _i18n.T("模型连接已保存，但旧凭据清理失败。"), "DesktopPet");
+                    }
+                }
+
+                if (nextProviders.Models.All(model => model.Id != _settings.Ai.ProviderId))
+                    Save(settings => settings with { Ai = settings.Ai with { ProviderId = newCfg.Id } });
+                window.Close();
+                ShowPage("ai");
+            }
+            catch (CredentialStoreException ex)
+            {
+                status.Text = _i18n.Format("Windows 凭据操作失败（系统错误 {0}）", ex.NativeError);
+                status.Foreground = Brush("DangerBrush");
+            }
+            catch (Core.Scheduling.ProviderException ex)
+            {
+                status.Text = ex.Code switch
+                {
+                    "insecure-transport" => _i18n.T("远程 HTTP 连接不能保存 API Key，请使用 HTTPS"),
+                    _ => _i18n.T("模型接口地址无效"),
+                };
+                status.Foreground = Brush("DangerBrush");
+            }
         };
-        var footer = new Grid { Margin = new Thickness(20, 4, 20, 16) };
+        var footer = new Grid { Margin = new Thickness(20, 10, 20, 16) };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(testButton, 0);
+        footer.Children.Add(testButton);
+        Grid.SetColumn(status, 1);
+        status.Margin = new Thickness(10, 0, 10, 0);
+        footer.Children.Add(status);
+        Grid.SetColumn(saveButton, 2);
         footer.Children.Add(saveButton);
         var root = new DockPanel();
         DockPanel.SetDock(form, Dock.Top);
@@ -2116,7 +2876,31 @@ public sealed class SettingsWindow : Window
         root.Children.Add(footer);
         root.Children.Add(form);
         window.Content = root;
+        WpfLocalizer.ApplyNew(window, _i18n);
         window.ShowDialog();
+    }
+
+    private string DescribeConnectionTest(ModelConnectionTestResult result)
+    {
+        if (result.Success)
+        {
+            return result.Models.Count == 0
+                ? _i18n.T("连接成功，服务未返回模型列表")
+                : _i18n.Format("连接成功，可用模型 {0} 个", result.Models.Count);
+        }
+        return result.Code switch
+        {
+            "invalid-url" => _i18n.T("模型接口地址无效"),
+            "insecure-transport" => _i18n.T("远程 HTTP 连接不能发送 API Key，请使用 HTTPS"),
+            "auth" => _i18n.T("鉴权失败，请检查 API Key"),
+            "timeout" => _i18n.T("连接测试超时"),
+            "network" => _i18n.T("无法连接模型服务"),
+            "rate-limit" => _i18n.T("模型服务请求过于频繁"),
+            "server" => _i18n.T("模型服务暂时不可用"),
+            "invalid-response" => _i18n.T("模型列表响应格式无效"),
+            "credential" => _i18n.T("无法读取 Windows 凭据"),
+            _ => _i18n.T("模型服务拒绝了连接测试"),
+        };
     }
 
     // ---- Phase 6f：生图连接（providers.json image 段）----
@@ -2130,7 +2914,7 @@ public sealed class SettingsWindow : Window
 
         var baseBox = new TextBox { Text = cfg?.BaseUrl ?? "", FontSize = 12, Height = 30 };
         var modelBox = new TextBox { Text = cfg?.ModelName ?? "", FontSize = 12, Height = 30 };
-        var keyBox = new TextBox { Text = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? "" : "（已配置，留空不修改）", FontSize = 12, Height = 30 };
+        var keyBox = new PasswordBox { FontSize = 12, Height = 30 };
 
         var form = new StackPanel { Margin = new Thickness(20, 16, 20, 0) };
         form.Children.Add(FormLabel("生图 BaseUrl（OpenAI 兼容，如 https://api.openai.com/v1）"));
@@ -2139,12 +2923,22 @@ public sealed class SettingsWindow : Window
         form.Children.Add(modelBox);
         form.Children.Add(FormLabel("API Key（存 Windows 凭据管理器，不落明文 JSON）", new Thickness(0, 12, 0, 5)));
         form.Children.Add(keyBox);
+        if (!string.IsNullOrEmpty(cfg?.ApiKeyRef))
+        {
+            form.Children.Add(new TextBlock
+            {
+                Text = "已保存凭据；留空保持不变",
+                FontSize = 11,
+                Foreground = Brush("TextTertiaryBrush"),
+                Margin = new Thickness(0, 4, 0, 0),
+            });
+        }
 
         var window = new Window
         {
             Title = "生图连接（总结图）",
             Width = 440,
-            Height = 320,
+            Height = 360,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             Background = Brush("WindowBgBrush"),
@@ -2167,16 +2961,84 @@ public sealed class SettingsWindow : Window
             var model = modelBox.Text.Trim();
             if (baseUrl.Length == 0 || model.Length == 0)
             {
-                MessageBox.Show(window, "BaseUrl 和模型名不能为空", "DesktopPet");
+                MessageBox.Show(window, _i18n.T("BaseUrl 和模型名不能为空"), "DesktopPet");
                 return;
             }
-            const string keyRef = "image-key";
-            if (keyBox.Text.Length > 0 && keyBox.Text != "（已配置，留空不修改）")
-                creds.Set(keyRef, keyBox.Text);
-            providers.Image = new Core.Scheduling.ImageGenConfig(baseUrl, keyRef, model);
-            _ai.ApplyProviders(providers);
-            window.Close();
-            ShowPage("ai");
+
+            try
+            {
+                var oldSecret = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? null : creds.Get(cfg.ApiKeyRef);
+                if (!string.IsNullOrEmpty(cfg?.ApiKeyRef)
+                    && oldSecret is null
+                    && string.IsNullOrEmpty(keyBox.Password))
+                {
+                    MessageBox.Show(window, _i18n.T("已保存的凭据不存在，请重新输入 API Key"), "DesktopPet");
+                    return;
+                }
+                var secret = string.IsNullOrEmpty(keyBox.Password) ? oldSecret : keyBox.Password;
+                var keyRef = secret is null ? "" : ProviderCredentialRefs.Image;
+                _ = ProviderEndpointPolicy.BuildRequestUri(baseUrl, "images/generations", secret is not null);
+                var previousTargetSecret = keyRef.Length == 0 ? null : creds.Get(keyRef);
+                var credentialChanged = keyRef.Length > 0
+                    && !string.Equals(previousTargetSecret, secret, StringComparison.Ordinal);
+                if (credentialChanged) creds.Set(keyRef, secret!);
+
+                var nextProviders = new Core.Scheduling.ProvidersFileModel
+                {
+                    Models = providers.Models.ToList(),
+                    Image = new Core.Scheduling.ImageGenConfig(baseUrl, keyRef, model),
+                };
+                try
+                {
+                    _ai.ApplyProviders(nextProviders);
+                }
+                catch (JsonStoreException ex)
+                {
+                    if (credentialChanged)
+                    {
+                        try
+                        {
+                            if (previousTargetSecret is null) creds.Delete(keyRef);
+                            else creds.Set(keyRef, previousTargetSecret);
+                        }
+                        catch (CredentialStoreException)
+                        {
+                            MessageBox.Show(window, _i18n.T("配置保存失败，凭据未能完整恢复。"), "DesktopPet");
+                        }
+                    }
+                    PersistenceErrorPresenter.Report(ex, window);
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(cfg?.ApiKeyRef)
+                    && !string.Equals(cfg.ApiKeyRef, keyRef, StringComparison.Ordinal)
+                    && nextProviders.Models.All(connection => connection.ApiKeyRef != cfg.ApiKeyRef))
+                {
+                    try { creds.Delete(cfg.ApiKeyRef); }
+                    catch (CredentialStoreException)
+                    {
+                        MessageBox.Show(window, _i18n.T("生图连接已保存，但旧凭据清理失败。"), "DesktopPet");
+                    }
+                }
+                window.Close();
+                ShowPage("ai");
+            }
+            catch (CredentialStoreException ex)
+            {
+                MessageBox.Show(
+                    window,
+                    _i18n.Format("Windows 凭据操作失败（系统错误 {0}）", ex.NativeError),
+                    "DesktopPet");
+            }
+            catch (Core.Scheduling.ProviderException ex)
+            {
+                MessageBox.Show(
+                    window,
+                    ex.Code == "insecure-transport"
+                        ? _i18n.T("远程 HTTP 连接不能保存 API Key，请使用 HTTPS")
+                        : _i18n.T("生图接口地址无效"),
+                    "DesktopPet");
+            }
         };
         var footer = new Grid { Margin = new Thickness(20, 4, 20, 16) };
         footer.Children.Add(saveButton);
@@ -2186,6 +3048,7 @@ public sealed class SettingsWindow : Window
         root.Children.Add(footer);
         root.Children.Add(form);
         window.Content = root;
+        WpfLocalizer.ApplyNew(window, _i18n);
         window.ShowDialog();
     }
 
@@ -2228,26 +3091,33 @@ public sealed class SettingsWindow : Window
                     Effect = Shadow("ShadowCard"),
                 };
                 var inner = new StackPanel();
-                inner.Children.Add(new TextBlock
+                var diaryDay = new TextBlock
                 {
-                    Text = day,
                     FontSize = 13,
                     FontWeight = FontWeights.SemiBold,
                     Foreground = Brush("TextPrimaryBrush"),
-                });
+                };
+                WpfLocalizer.SetDynamicText(diaryDay, day);
+                inner.Children.Add(diaryDay);
                 try
                 {
                     var text = File.ReadAllText(file);
-                    inner.Children.Add(new TextBlock
+                    var diaryText = new TextBlock
                     {
-                        Text = text.Length > 200 ? text[..200] + "…" : text,
                         FontSize = 12,
                         TextWrapping = TextWrapping.Wrap,
                         Foreground = Brush("TextSecondaryBrush"),
                         Margin = new Thickness(0, 5, 0, 0),
-                    });
+                    };
+                    WpfLocalizer.SetDynamicText(
+                        diaryText,
+                        text.Length > 200 ? text[..200] + "…" : text);
+                    inner.Children.Add(diaryText);
                 }
-                catch (Exception) { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.Error("Settings", $"diary read failed: {ex.GetType().Name}: {ex.Message}");
+                }
                 if (File.Exists(png))
                 {
                     try
@@ -2264,7 +3134,10 @@ public sealed class SettingsWindow : Window
                             Stretch = Stretch.Uniform,
                         });
                     }
-                    catch (Exception) { } // 图损坏不阻塞文本
+                    catch (Exception ex)
+                    {
+                        _logger.Error("Settings", $"diary image load failed: {ex.GetType().Name}: {ex.Message}");
+                    } // 图损坏不阻塞文本
                 }
                 item.Child = inner;
                 form.Children.Add(item);
@@ -2283,6 +3156,7 @@ public sealed class SettingsWindow : Window
         };
         var scroll = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         window.Content = scroll;
+        WpfLocalizer.ApplyNew(window, _i18n);
         window.ShowDialog();
     }
 
@@ -2293,6 +3167,7 @@ public sealed class SettingsWindow : Window
     {
         _previewTimer.Stop();
         StopClipHover(); // hover 预览 timer 随窗口关闭停止（DispatcherTimer 保持目标存活，必须显式停止）
+        StopDiagnostics();
         base.OnClosed(e);
     }
 }

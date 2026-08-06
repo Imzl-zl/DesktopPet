@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="DesktopPet.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- i18n 词条：由 scripts/extract-i18n.py 从 windows/src/i18n.ts 生成 -->
     <!-- WithCulture=false：文件名含语言段（zh/vi）会被误判为卫星资源 -->
     <EmbeddedResource Include="Resources/i18n.*.json" WithCulture="false" />

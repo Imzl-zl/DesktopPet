@@ -38,6 +38,8 @@ public class JsonStoreTests : IDisposable
         store.SavePetStore(PetStoreModel.CreatePetInstance(PetStoreModel.EmptyPetStore(), instance));
 
         var raw = File.ReadAllText(Path.Combine(_dir, "pet-store.json"));
+        var bytes = File.ReadAllBytes(Path.Combine(_dir, "pet-store.json"));
+        Assert.False(bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }));
         Assert.Contains("\"roamMode\":\"climb\"", raw);
         Assert.Contains("\"selectedId\":\"pet-abc\"", raw);
 
@@ -118,6 +120,107 @@ public class JsonStoreTests : IDisposable
 
         store.SaveDiaryLastGenerated(new DateOnly(2026, 8, 5));
         Assert.Equal(new DateOnly(2026, 8, 5), store.LoadDiaryLastGenerated());
+    }
+
+    [Fact]
+    public void SaveFailure_PreservesOldFile_SurfacesError_AndCleansTemporaryFile()
+    {
+        var store = new FileJsonStore(_dir);
+        store.SaveGlobalVisibility(true);
+        string? temporaryPath = null;
+        var failingStore = new FileJsonStore(
+            _dir,
+            new AtomicFilePublisher((temporary, _) =>
+            {
+                temporaryPath = temporary;
+                throw new IOException("injected publish failure");
+            }));
+
+        var ex = Assert.Throws<JsonStoreException>(
+            () => failingStore.SaveGlobalVisibility(false));
+
+        Assert.Equal("写入", ex.Operation);
+        Assert.Equal(Path.Combine(_dir, "pets-visible"), ex.FilePath);
+        Assert.Equal("1", File.ReadAllText(ex.FilePath));
+        Assert.NotNull(temporaryPath);
+        Assert.False(File.Exists(temporaryPath));
+        Assert.Empty(Directory.EnumerateFiles(_dir, "*.tmp"));
+    }
+
+    [Fact]
+    public void FirstSaveFailure_DoesNotPublishPartialFile()
+    {
+        var failingStore = new FileJsonStore(
+            _dir,
+            new AtomicFilePublisher((_, _) => throw new IOException("injected first publish failure")));
+
+        Assert.Throws<JsonStoreException>(() =>
+            failingStore.SaveDiaryLastGenerated(new DateOnly(2026, 8, 6)));
+
+        Assert.False(File.Exists(Path.Combine(_dir, "diary-meta.json")));
+        Assert.Empty(Directory.EnumerateFiles(_dir, "*.tmp"));
+    }
+
+    [Fact]
+    public void ConcurrentWrites_PublishOneCompleteJsonDocument()
+    {
+        var stores = Enumerable.Range(0, 4)
+            .Select(_ => new FileJsonStore(_dir))
+            .ToArray();
+
+        Parallel.For(0, 32, writer =>
+        {
+            var positions = Enumerable.Range(0, 100).ToDictionary(
+                index => $"pet-{writer}-{index}",
+                index => new PetPosition(writer, index));
+            stores[writer % stores.Length].SavePositions(positions);
+        });
+
+        var loaded = stores[0].LoadPositions();
+        Assert.Equal(100, loaded.Count);
+        var writerPrefix = loaded.Keys.First().Split('-')[1];
+        Assert.All(loaded.Keys, key => Assert.StartsWith($"pet-{writerPrefix}-", key));
+        Assert.Empty(Directory.EnumerateFiles(_dir, "*.tmp"));
+    }
+
+    [Fact]
+    public void ReadIoFailure_IsObservable()
+    {
+        var store = new FileJsonStore(_dir);
+        var settingsPath = Path.Combine(_dir, "app-settings.json");
+        Directory.CreateDirectory(settingsPath);
+
+        var ex = Assert.Throws<JsonStoreException>(() => store.LoadSettings());
+
+        Assert.Equal("读取", ex.Operation);
+        Assert.Equal(settingsPath, ex.FilePath);
+    }
+
+    [Fact]
+    public void MalformedJson_StillReturnsDomainDefault()
+    {
+        var store = new FileJsonStore(_dir);
+        File.WriteAllText(Path.Combine(_dir, "app-settings.json"), "{");
+
+        Assert.Null(store.LoadSettings());
+    }
+
+    [Fact]
+    public void SettingsHotkeys_MissingFieldUsesLegacyDefaults_AndExplicitUnboundRoundTrips()
+    {
+        var store = new FileJsonStore(_dir);
+        var defaults = AppSettings.Defaults(DesktopPet.Core.I18n.AppLang.En);
+        store.SaveSettings(defaults);
+        var path = Path.Combine(_dir, "app-settings.json");
+        var legacy = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        Assert.True(legacy.Remove("hotkeys"));
+        File.WriteAllText(path, legacy.ToJsonString());
+
+        Assert.Equal(defaults.Hotkeys, store.LoadSettings()!.Hotkeys);
+
+        var unbound = new DesktopPet.Core.Hotkeys.HotkeySettings(null, null, null, null);
+        store.SaveSettings(defaults with { Hotkeys = unbound });
+        Assert.Equal(unbound, store.LoadSettings()!.Hotkeys);
     }
 
     [Fact]

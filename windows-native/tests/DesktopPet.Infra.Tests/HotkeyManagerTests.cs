@@ -1,116 +1,148 @@
+using DesktopPet.Core.Hotkeys;
 using DesktopPet.Infra.Hotkey;
 
 namespace DesktopPet.Infra.Tests;
 
-/// <summary>
-/// Phase 6h：全局快捷键（bongo-cat-next 借鉴；迁移计划 §5 Phase 6）。
-/// Ctrl+Alt+H 显隐 / Ctrl+Alt+M 切换模式 / Ctrl+Alt+S 设置 / Ctrl+Alt+Q 退出。
-/// RegisterHotKey P/Invoke；WndProc 接线在 App 层（WM_HOTKEY 分发）。
-/// </summary>
-public class HotkeyManagerTests
+public sealed class HotkeyManagerTests
 {
     private sealed class FakeHotkeyRegistration : IHotkeyRegistration
     {
-        public List<(int Id, uint Mods, uint Key)> Registered { get; } = [];
+        public Dictionary<int, (uint Mods, uint Key)> Active { get; } = [];
         public List<int> Unregistered { get; } = [];
-        public bool FailNext { get; set; }
+        public Dictionary<int, int> RegisterErrorsByCall { get; } = [];
+        public Dictionary<int, int> UnregisterErrorsByCall { get; } = [];
+        public int RegisterCalls { get; private set; }
+        public int UnregisterCalls { get; private set; }
 
-        public bool Register(IntPtr hwnd, int id, uint modifiers, uint virtualKey)
+        public HotkeyNativeResult Register(IntPtr hwnd, int id, uint modifiers, uint virtualKey)
         {
-            if (FailNext) { FailNext = false; return false; }
-            Registered.Add((id, modifiers, virtualKey));
-            return true;
+            RegisterCalls++;
+            if (RegisterErrorsByCall.TryGetValue(RegisterCalls, out var error))
+                return HotkeyNativeResult.Failed(error);
+            Active[id] = (modifiers, virtualKey);
+            return HotkeyNativeResult.Ok;
         }
 
-        public bool Unregister(IntPtr hwnd, int id)
+        public HotkeyNativeResult Unregister(IntPtr hwnd, int id)
         {
+            UnregisterCalls++;
+            if (UnregisterErrorsByCall.TryGetValue(UnregisterCalls, out var error))
+                return HotkeyNativeResult.Failed(error);
+            Active.Remove(id);
             Unregistered.Add(id);
-            return true;
+            return HotkeyNativeResult.Ok;
         }
     }
 
-    private static readonly (HotkeyAction Action, uint Mods, uint Key)[] Presets =
-    [
-        (HotkeyAction.TogglePets, HotkeyManager.ModControlAlt, 'H'),
-        (HotkeyAction.ToggleMode, HotkeyManager.ModControlAlt, 'M'),
-        (HotkeyAction.OpenSettings, HotkeyManager.ModControlAlt, 'S'),
-        (HotkeyAction.Quit, HotkeyManager.ModControlAlt, 'Q'),
-    ];
-
     [Fact]
-    public void Register_AssignsIds_AndResolvesActions()
+    public void TryReplaceAll_RegistersCompleteSetAndResolvesActions()
     {
         var fake = new FakeHotkeyRegistration();
         var manager = new HotkeyManager(IntPtr.Zero, fake);
 
-        foreach (var (action, mods, key) in Presets)
-            Assert.True(manager.Register(action, mods, key));
+        var result = manager.TryReplaceAll(HotkeySettings.Defaults);
 
-        Assert.Equal(4, fake.Registered.Count);
-        // 每个注册 id 都映射回对应 action
-        foreach (var (id, _, _) in fake.Registered)
-            Assert.NotNull(manager.Resolve(id));
-        Assert.Equal(HotkeyAction.Quit, manager.Resolve(fake.Registered[3].Id));
-        Assert.Equal(HotkeyAction.TogglePets, manager.Resolve(fake.Registered[0].Id));
+        Assert.True(result.Success);
+        Assert.Equal(4, fake.Active.Count);
+        Assert.Equal(HotkeySettings.Defaults, manager.CurrentSettings);
+        Assert.Equal(
+            Enum.GetValues<HotkeyAction>().Order(),
+            fake.Active.Keys.Select(id => manager.Resolve(id)!.Value).Order());
+        Assert.All(fake.Active.Values, value => Assert.NotEqual(0u, value.Mods & HotkeyManager.ModNoRepeat));
     }
 
     [Fact]
-    public void Register_ReRegisterSameAction_UnregistersOldId()
+    public void TryReplaceAll_UnboundActionsAreNotRegistered()
     {
         var fake = new FakeHotkeyRegistration();
         var manager = new HotkeyManager(IntPtr.Zero, fake);
+        Assert.True(manager.TryReplaceAll(HotkeySettings.Defaults).Success);
 
-        Assert.True(manager.Register(HotkeyAction.TogglePets, HotkeyManager.ModControlAlt, 'H'));
-        var firstId = fake.Registered[0].Id;
-        Assert.True(manager.Register(HotkeyAction.TogglePets, HotkeyManager.ModControlAlt, 'H'));
+        var candidate = HotkeySettings.Defaults with { ToggleMode = null, Quit = null };
+        var result = manager.TryReplaceAll(candidate);
 
-        Assert.Contains(firstId, fake.Unregistered);          // 旧 id 已注销
-        Assert.Equal(2, fake.Registered.Count);
-        Assert.Equal(HotkeyAction.TogglePets, manager.Resolve(fake.Registered[1].Id));
+        Assert.True(result.Success);
+        Assert.Equal(2, fake.Active.Count);
+        Assert.Equal(candidate, manager.CurrentSettings);
     }
 
     [Fact]
-    public void Register_Failure_LeavesNoMapping()
-    {
-        var fake = new FakeHotkeyRegistration { FailNext = true };
-        var manager = new HotkeyManager(IntPtr.Zero, fake);
-
-        Assert.False(manager.Register(HotkeyAction.Quit, HotkeyManager.ModControlAlt, 'Q'));
-        Assert.Empty(fake.Registered);
-        Assert.Null(manager.Resolve(0xC000));
-    }
-
-    [Fact]
-    public void UnregisterAll_ClearsMappings()
+    public void TryReplaceAll_DuplicateDoesNotTouchCurrentRegistrations()
     {
         var fake = new FakeHotkeyRegistration();
         var manager = new HotkeyManager(IntPtr.Zero, fake);
-        manager.Register(HotkeyAction.Quit, HotkeyManager.ModControlAlt, 'Q');
+        Assert.True(manager.TryReplaceAll(HotkeySettings.Defaults).Success);
+        var activeBefore = fake.Active.ToArray();
+        var callsBefore = (fake.RegisterCalls, fake.UnregisterCalls);
+        var duplicate = HotkeySettings.Defaults with { Quit = HotkeySettings.Defaults.TogglePets };
 
-        manager.UnregisterAll();
+        var result = manager.TryReplaceAll(duplicate);
 
-        Assert.Single(fake.Unregistered);
-        Assert.Null(manager.Resolve(fake.Registered[0].Id));
+        Assert.False(result.Success);
+        Assert.Equal("validation", result.Phase);
+        Assert.Contains(result.ValidationIssues, issue => issue.Code == "duplicate");
+        Assert.Equal(callsBefore, (fake.RegisterCalls, fake.UnregisterCalls));
+        Assert.Equal(activeBefore.OrderBy(x => x.Key), fake.Active.OrderBy(x => x.Key));
+        Assert.Equal(HotkeySettings.Defaults, manager.CurrentSettings);
     }
 
     [Fact]
-    public void Resolve_UnknownId_ReturnsNull()
+    public void TryReplaceAll_CandidateFailureRestoresOldCompleteSet()
     {
-        var manager = new HotkeyManager(IntPtr.Zero, new FakeHotkeyRegistration());
-        Assert.Null(manager.Resolve(0x1234));
-    }
-
-    [Fact]
-    public void Presets_UseExpectedModifiersAndKeys()
-    {
-        Assert.All(Presets, p =>
+        var fake = new FakeHotkeyRegistration();
+        var manager = new HotkeyManager(IntPtr.Zero, fake);
+        Assert.True(manager.TryReplaceAll(HotkeySettings.Defaults).Success);
+        fake.RegisterErrorsByCall[6] = 1409; // second candidate binding
+        var candidate = HotkeySettings.Defaults with
         {
-            Assert.Equal(HotkeyManager.ModControlAlt, p.Mods);
-            Assert.InRange(p.Key, 'A', 'Z');
-        });
-        Assert.Equal('H', Presets[0].Key);
-        Assert.Equal('M', Presets[1].Key);
-        Assert.Equal('S', Presets[2].Key);
-        Assert.Equal('Q', Presets[3].Key);
+            TogglePets = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Shift, 'P'),
+            ToggleMode = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Shift, 'M'),
+        };
+
+        var result = manager.TryReplaceAll(candidate);
+
+        Assert.False(result.Success);
+        Assert.Equal("register", result.Phase);
+        Assert.Equal(HotkeyAction.ToggleMode, result.FailedAction);
+        Assert.Equal(1409, result.NativeError);
+        Assert.True(result.RollbackComplete);
+        Assert.Equal(HotkeySettings.Defaults, manager.CurrentSettings);
+        Assert.Equal(4, fake.Active.Count);
+    }
+
+    [Fact]
+    public void TryReplaceAll_RollbackFailureReportsDegradedActualSet()
+    {
+        var fake = new FakeHotkeyRegistration();
+        var manager = new HotkeyManager(IntPtr.Zero, fake);
+        Assert.True(manager.TryReplaceAll(HotkeySettings.Defaults).Success);
+        fake.RegisterErrorsByCall[6] = 1409; // candidate ToggleMode fails
+        fake.RegisterErrorsByCall[8] = 5;    // old ToggleMode restore fails
+        var candidate = HotkeySettings.Defaults with
+        {
+            TogglePets = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Shift, 'P'),
+            ToggleMode = new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Shift, 'M'),
+        };
+
+        var result = manager.TryReplaceAll(candidate);
+
+        Assert.False(result.Success);
+        Assert.False(result.RollbackComplete);
+        Assert.Null(manager.CurrentSettings.ToggleMode);
+        Assert.Equal(3, fake.Active.Count);
+        Assert.All(fake.Active.Keys, id => Assert.NotNull(manager.Resolve(id)));
+    }
+
+    [Fact]
+    public void Dispose_UnregistersActualActiveSet()
+    {
+        var fake = new FakeHotkeyRegistration();
+        var manager = new HotkeyManager(IntPtr.Zero, fake);
+        Assert.True(manager.TryReplaceAll(HotkeySettings.Defaults).Success);
+
+        manager.Dispose();
+
+        Assert.Empty(fake.Active);
+        Assert.All(fake.Unregistered, id => Assert.Null(manager.Resolve(id)));
     }
 }

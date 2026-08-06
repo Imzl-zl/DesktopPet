@@ -1,0 +1,140 @@
+{
+  "runId": "2ec73e36-3fba-40f8-b3f7-487717694aac",
+  "agent": "reviewer",
+  "task": "你是资深 Windows 桌面应用审查专家（Windows.Graphics.Capture / WinRT / .NET 进程架构）。审查 C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Agent 与 DesktopPet.AgentHost 及相关 Core 文件，只读不改。\n\n文件清单：\n- src/DesktopPet.Agent/Capture/GraphicsCaptureSource.cs, Capture/IScreenCaptureSource.cs, Capture/SwitchableScreenCaptureSource.cs\n- src/DesktopPet.Agent/Analysis/AnalysisEngine.cs, Analysis/CapturedFrameExtensions.cs\n- src/DesktopPet.Agent/AgentService.cs\n- src/DesktopPet.AgentHost/Program.cs\n- src/DesktopPet.Core/Ai/FrameHasher.cs, ScreenContextFormatter.cs, ScreenEvent.cs, AgentConfig.cs, AgentConfigBuilder.cs, ModelContracts.cs\n- src/DesktopPet.Infra/PipeRpc/PipeRpc.cs\n\n重点找：\n1. Windows.Graphics.Capture API 误用（GraphicsCaptureSession 生命周期、Direct3D11CaptureFramePool 未 Disposal、复帧泄漏、Recreate 处理、设备丢失处理）\n2. WinRT/.NET 互操作问题（CreateDirect3D11DeviceFromDXGIDevice、Windows SDK 包用法、资源释放）\n3. 双进程设计问题（IPC 协议、心跳缺失、Agent 崩溃恢复、配置下发竞态）\n4. 硬编码值（截屏间隔、分辨率、JPEG 质量、帧率写死且没有配置对接）\n5. 内存/性能问题（每帧分配、Bitmap 转换浪费、事件风暴）\n\n输出格式：按严重程度分组列出发现（Critical / Important / Minor），每条含 文件:行号、问题描述、为何是问题、修复建议。没有发现的类别不要硬凑。最后给 1-2 行总体结论。\n\n## Acceptance Contract\nAcceptance level: attested\nCompletion is not accepted from prose alone. End with a structured acceptance report.\n\nCriteria:\n- criterion-1: Return concrete findings with file paths and severity when applicable\n\nRequired evidence: review-findings, residual-risks\n\nFinish with a fenced JSON block tagged `acceptance-report` in this shape:\nUse empty arrays when no items apply; array fields contain strings unless object entries are shown.\n`criteriaSatisfied[].status` must be exactly one of: satisfied, not-satisfied, not-applicable.\n`commandsRun[].result` must be exactly one of: passed, failed, not-run.\n`manualNotes` and `notes` are optional strings; an empty string means no note and does not satisfy `manual-notes` evidence.\n```acceptance-report\n{\n  \"criteriaSatisfied\": [\n    {\n      \"id\": \"criterion-1\",\n      \"status\": \"satisfied\",\n      \"evidence\": \"specific proof\"\n    }\n  ],\n  \"changedFiles\": [\n    \"src/file.ts\"\n  ],\n  \"testsAddedOrUpdated\": [\n    \"test/file.test.ts\"\n  ],\n  \"commandsRun\": [\n    {\n      \"command\": \"command\",\n      \"result\": \"passed\",\n      \"summary\": \"short result\"\n    }\n  ],\n  \"validationOutput\": [\n    \"validation output or concise summary\"\n  ],\n  \"residualRisks\": [\n    \"none\"\n  ],\n  \"noStagedFiles\": true,\n  \"diffSummary\": \"short description of the diff\",\n  \"reviewFindings\": [\n    \"blocker: file.ts:12 - issue found, or no blockers\"\n  ],\n  \"manualNotes\": \"anything else the parent should know\"\n}\n```",
+  "exitCode": 0,
+  "model": "deepseek/deepseek-v4-flash:high",
+  "attemptedModels": [
+    "deepseek/deepseek-v4-flash:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "deepseek/deepseek-v4-flash:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 47625,
+        "output": 55775,
+        "cacheRead": 1858176,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 31
+      }
+    }
+  ],
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "输出按 Critical/Important/Minor 分组的具体发现，每条含 文件:行号、问题描述、成因与修复建议；核心互操作结论经 IL 反汇编实证（CsWinRT ObjectReference<T>.FromAbi 内部调用 Marshal.AddRef，判定 CreateD3DDevice 缺 Release 而 CreateCaptureItemForMonitor 正确）；dotnet build 0 错误通过；覆盖全部 14 个目标文件 + App 侧对接代码 AiCoordinator.cs、ProviderConfig/OpenAiCompatibleModelProvider/ModelContracts 契约文件。"
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "dotnet build src/DesktopPet.Agent/DesktopPet.Agent.csproj -v q --nologo",
+          "result": "passed",
+          "summary": "0 错误 8 警告（CA1416 等既有警告），编译通过"
+        },
+        {
+          "command": "pwsh IL 反汇编 WinRT.Runtime.dll (10.0.19041.57) ObjectReference<T>.FromAbi/Attach",
+          "result": "passed",
+          "summary": "证实 FromAbi(IntPtr,T,Guid) 调用 Marshal.AddRef；Attach 不调用。据此判定 186 行缺 Marshal.Release(graphicsDevice) 为引用泄漏，137/141 行 item 路径平衡正确"
+        },
+        {
+          "command": "grep/find/git log 核查 Ping/Pong 发送方、DeviceLost 订阅、phase6 脚本对真实截屏路径的覆盖",
+          "result": "passed",
+          "summary": "Ping 仅 Agent 侧实现（App 从不发送）；DeviceLost 无订阅；phase6-smoke/e2e 的 screenAnalysis=false 且用 mock provider，真实 GraphicsCapture 路径未被 CI 冒烟覆盖"
+        }
+      ],
+      "validationOutput": [
+        "Critical: 0；Important: 5（D3D 设备引用泄漏 GraphicsCaptureSource.cs:186；DeviceLost 未处理致捕获静默死亡；STA 泵全分辨率同步复制+每帧 66MB 分配；1s 截屏间隔写死且未对接 ScreenAnalysisIntervalSeconds 配置；Ping/Pong 死代码心跳缺失）；Minor: 10（fire-and-forget 未观察异常、HttpClient 泄漏、旧 engine task 不观察、捕获失败静默降级 OfflineFrameSource、构造器部分失败泄漏、主显示器写死、管道无鉴权、Hello 注释反向、DateTime.Now 非注入时钟、MinAnalysisIntervalSeconds 线上无界）",
+        "排除项：Direct3D11CaptureFramePool/复帧/SoftwareBitmap 释放均正确；无 JPEG（PNG）；CreateDirect3D11DeviceFromDXGIDevice DllImport 用法正确；Agent 崩溃恢复链路完整"
+      ],
+      "residualRisks": [
+        "FromAbi 语义结论基于 pin 定运行时 10.0.19041.57 的 IL 实证；若未来升级 Microsoft.Windows.SDK.NET.Ref 需复验",
+        "真实 GraphicsCapture 路径未被 CI 冒烟覆盖（phase6 脚本 screenAnalysis=false），设备泄漏/DeviceLost 行为只在真机暴露",
+        "命名管道无鉴权：同用户恶意进程可借 ApiKeyRef 触发凭据外带（评估为低危，未归入 Critical）",
+        "ModelContracts.cs 位于 DesktopPet.Core/Scheduling/ 而非清单中的 Ai/ 路径"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "审查任务为只读，未做任何修改，无 diff",
+      "reviewFindings": [
+        "important: src/DesktopPet.Agent/Capture/GraphicsCaptureSource.cs:186 - CreateD3DDevice 在 MarshalInterface<IDirect3DDevice>.FromAbi(graphicsDevice) 后未 Marshal.Release(graphicsDevice)；FromAbi 内部 AddRef（IL 实证），原始引用泄漏，每次 enable/disable 泄漏一个 D3D11 设备",
+        "important: src/DesktopPet.Agent/Capture/GraphicsCaptureSource.cs:39-50,108-121 - 未订阅 Direct3D11CaptureFramePool.DeviceLost/GraphicsCaptureItem.Closed，设备丢失后捕获静默死亡，异常被 catch-all 吞掉",
+        "important: src/DesktopPet.Agent/Capture/GraphicsCaptureSource.cs:84,122-130 - STA 泵上同步全分辨率复制 + 每帧 SoftwareBitmap/Buffer/byte[] 三重分配（4K 约 66MB/s），仅需 320×180 灰度",
+        "important: src/DesktopPet.Agent/AgentService.cs:41 + AnalysisEngine.cs:35 - 截屏间隔 1s 写死，与 ScreenAnalysisIntervalSeconds(3-30s) 配置脱钩（该配置只限流模型调用）；分辨率/间隔/监视器均无配置通道",
+        "important: src/DesktopPet.Agent/AgentService.cs:94-96 + DesktopPet.App/Ai/AiCoordinator.cs - Ping/Pong 仅服务端实现，客户端从不发送，心跳缺失；App 挂死时 Agent 无限截屏+调云端模型",
+        "minor: AgentService.cs:160,224-231 / 156 / 131-135；AgentHost/Program.cs:16-31；GraphicsCaptureSource.cs:39-50,45；PipeRpc.cs:11,81；AnalysisEngine.cs:119,139,144；AgentConfig.cs 线上无界——详见报告正文"
+      ],
+      "manualNotes": "任务要求输出按严重度分组的具体发现，未要求修改代码；全部结论基于只读核查（文件阅读 + 构建 + IL 反汇编实证）。关键证据：WinRT.Runtime.dll(10.0.19041.57) 的 ObjectReference<T>.FromAbi IL 含 Marshal.AddRef 调用，直接决定 186 行泄漏/137 行正确的判定。"
+    }
+  },
+  "launchContractDigest": "893bbe3593881ab309ef4efd8057f8bde3ec7830be8336f0056937bd18e76d07",
+  "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "configured": [],
+    "effective": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "omitted": {
+      "runtime": 0,
+      "configured": 0,
+      "effective": 0
+    }
+  },
+  "transcriptPath": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\2ec73e36-3fba-40f8-b3f7-487717694aac_reviewer_transcript.jsonl",
+  "skills": [],
+  "timestamp": 1785975833942
+}

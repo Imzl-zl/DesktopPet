@@ -2,6 +2,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
+using DesktopPet.App.Localization;
+using DesktopPet.Core.I18n;
 using DesktopPet.Core.Personas;
 
 namespace DesktopPet.App.Windows;
@@ -22,13 +24,19 @@ public sealed class WelcomeWindow : Window
         MaxLength = 20,
     };
     private readonly ComboBox _personaCombo = new() { FontSize = 13, Height = 34 };
+    private readonly IReadOnlyList<Persona> _builtinPersonas;
+    private readonly I18nService _i18n;
 
     public WelcomeWindow(
         IReadOnlyList<Persona> builtinPersonas,
         string initialCallName,
         string selectedPersonaId,
-        Action<string, string> onComplete)
+        Func<string, string, bool> onComplete,
+        I18nService? i18n = null)
     {
+        var localization = i18n ?? new I18nService();
+        _i18n = localization;
+        _builtinPersonas = builtinPersonas;
         Title = "欢迎使用 AI 桌宠";
         Width = 440;
         Height = 390;
@@ -39,7 +47,7 @@ public sealed class WelcomeWindow : Window
 
         foreach (var p in builtinPersonas)
         {
-            _personaCombo.Items.Add($"{p.Name} — {p.Description}");
+            _personaCombo.Items.Add($"{_i18n.T(p.Name)} — {_i18n.T(p.Description)}");
         }
         var index = builtinPersonas.ToList().FindIndex(p => p.Id == selectedPersonaId);
         _personaCombo.SelectedIndex = index >= 0 ? index : 0;
@@ -132,12 +140,12 @@ public sealed class WelcomeWindow : Window
             var callName = _callNameBox.Text.Trim();
             if (callName.Length == 0)
             {
-                MessageBox.Show(this, "先告诉我怎么称呼你吧～", "DesktopPet");
+                MessageBox.Show(this, _i18n.T("先告诉我怎么称呼你吧～"), "DesktopPet");
                 return;
             }
             var personaId = builtinPersonas[Math.Max(0, _personaCombo.SelectedIndex)].Id;
-            onComplete(callName, personaId);
-            Close();
+            if (onComplete(callName, personaId))
+                Close();
         };
         root.Children.Add(startButton);
         root.Children.Add(new TextBlock
@@ -150,5 +158,18 @@ public sealed class WelcomeWindow : Window
         });
 
         Content = root;
+        WpfLocalizer.ApplyNew(this, _i18n);
+    }
+
+    public void ApplyLocalization(I18nService i18n)
+    {
+        var selected = _personaCombo.SelectedIndex;
+        _personaCombo.Items.Clear();
+        foreach (var persona in _builtinPersonas)
+        {
+            _personaCombo.Items.Add($"{i18n.T(persona.Name)} — {i18n.T(persona.Description)}");
+        }
+        _personaCombo.SelectedIndex = selected;
+        WpfLocalizer.RefreshTracked(this, i18n);
     }
 }

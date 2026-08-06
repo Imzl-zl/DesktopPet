@@ -1,0 +1,143 @@
+{
+  "runId": "686ae5a3-be7c-4654-85dd-0adef29370e6",
+  "agent": "reviewer",
+  "task": "你是资深 .NET 架构审查专家。审查 C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Infra 与 DesktopPet.Core 的服务类，只读不改。\n\n文件清单：\n- src/DesktopPet.Infra/Providers/OpenAiCompatibleModelProvider.cs, OpenAiCompatibleImageProvider.cs, ProviderConfig.cs\n- src/DesktopPet.Infra/Tts/EdgeTts.cs, SapiTtsProvider.cs\n- src/DesktopPet.Core/Scheduling/ModelRequestScheduler.cs\n- src/DesktopPet.Core/Ai/ChatPipeline.cs\n- src/DesktopPet.Core/Memory/ConversationMemory.cs, MemoryStore.cs\n- src/DesktopPet.Core/Interaction/InteractionEngine.cs, QuickBubbleController.cs\n- src/DesktopPet.Core/Care/CareEngine.cs, IntimacyEngine.cs\n- src/DesktopPet.Core/Personas/PersonaEngine.cs, BuiltinPersonas.cs, PersonasFileModel.cs\n- src/DesktopPet.Core/Storage/TauriMigration.cs\n- src/DesktopPet.Core/Pets/Pause.cs, PetAnimationSettings.cs, StateMapping.cs, PetStoreModel.cs\n\n重点找：\n1. HttpClient 使用问题（未复用、超时处理、重试指数退避实现错误）\n2. 硬编码的用户可配置值（默认值是否与设置项对接：ModelRequestScheduler 并发数、超时、token 上限、温度、间隔等；设置文件中有的字段是否真被消费）\n3. 并发/竞态（SemaphoreSlim 使用、取消令牌、共享状态）\n4. 错误处理问题（吞异常、误导性降级）\n5. 设计缺陷（接口抽象泄漏、依赖倒置破坏、重复逻辑）\n6. 数据一致性（读-改-写竞态、持久化时机）\n\n输出格式：按严重程度分组列出发现（Critical / Important / Minor），每条含 文件:行号、问题描述、为何是问题、修复建议。没有发现的类别不要硬凑。最后给 1-2 行总体结论。\n\n## Acceptance Contract\nAcceptance level: attested\nCompletion is not accepted from prose alone. End with a structured acceptance report.\n\nCriteria:\n- criterion-1: Return concrete findings with file paths and severity when applicable\n\nRequired evidence: review-findings, residual-risks\n\nFinish with a fenced JSON block tagged `acceptance-report` in this shape:\nUse empty arrays when no items apply; array fields contain strings unless object entries are shown.\n`criteriaSatisfied[].status` must be exactly one of: satisfied, not-satisfied, not-applicable.\n`commandsRun[].result` must be exactly one of: passed, failed, not-run.\n`manualNotes` and `notes` are optional strings; an empty string means no note and does not satisfy `manual-notes` evidence.\n```acceptance-report\n{\n  \"criteriaSatisfied\": [\n    {\n      \"id\": \"criterion-1\",\n      \"status\": \"satisfied\",\n      \"evidence\": \"specific proof\"\n    }\n  ],\n  \"changedFiles\": [\n    \"src/file.ts\"\n  ],\n  \"testsAddedOrUpdated\": [\n    \"test/file.test.ts\"\n  ],\n  \"commandsRun\": [\n    {\n      \"command\": \"command\",\n      \"result\": \"passed\",\n      \"summary\": \"short result\"\n    }\n  ],\n  \"validationOutput\": [\n    \"validation output or concise summary\"\n  ],\n  \"residualRisks\": [\n    \"none\"\n  ],\n  \"noStagedFiles\": true,\n  \"diffSummary\": \"short description of the diff\",\n  \"reviewFindings\": [\n    \"blocker: file.ts:12 - issue found, or no blockers\"\n  ],\n  \"manualNotes\": \"anything else the parent should know\"\n}\n```",
+  "exitCode": 0,
+  "model": "deepseek/deepseek-v4-flash:high",
+  "attemptedModels": [
+    "deepseek/deepseek-v4-flash:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "deepseek/deepseek-v4-flash:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 61281,
+        "output": 41708,
+        "cacheRead": 1180160,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 21
+      }
+    }
+  ],
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "审查了清单内全部 21 个服务类文件及调用方(AiCoordinator/App.xaml.cs/JsonStore/AgentConfigBuilder/ScreenEventLog/SchedulerTests)，产出 3 条 Critical、5 条 Important、11 条 Minor 共 19 条带 文件:行号 的具体发现；每条含问题描述、为何是问题、修复建议；重点项(并发闸失效、ScreenEventLog 竞态、token 记账读-改-写竞态、超时重试契约、HttpClient 泄漏)均有直接代码证据或测试证据支撑"
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "read 全部清单文件 + AppSettings/AiSettings/ModelContracts/JsonStore/CareStoreModel/AgentConfigBuilder/FrameHasher/ScreenContextFormatter/App.xaml.cs/AiCoordinator/PetWindow 关键段",
+          "result": "passed",
+          "summary": "只读审查 20+ 文件，覆盖 Infra 与 Core 服务类及全部关键调用方"
+        },
+        {
+          "command": "grep 验证设置字段消费链(new ModelRequestScheduler / QuickBubbleDuration / PersonaEngine.* / _eventLog / LoadCare-SaveCare / MediaEnded)",
+          "result": "passed",
+          "summary": "确认 AiSettings 全字段被消费；确认 QuickBubbleDuration 为死代码、scheduler 唯一构造点为 concurrency:3"
+        },
+        {
+          "command": "bash 行号核验(grep -n / sed)",
+          "result": "passed",
+          "summary": "取得全部引用行号(ModelRequestScheduler.cs:74/96/130-141、FrameHasher.cs:121/126、IntimacyEngine.cs:45、App.xaml.cs:272-275、JsonStore.cs:80 等)"
+        }
+      ],
+      "validationOutput": [
+        "审查为纯只读，未运行构建/测试；结论基于静态代码阅读与现有测试(SchedulerTests.cs:66-78 断言过弱无法暴露并发闸失效、:141 断言最终抛 TaskCanceledException)佐证。未发现需要实证的行为偏差。",
+        "未修改任何文件，无 diff。"
+      ],
+      "residualRisks": [
+        "C3 并发对话竞态的可触发性依赖 UI 允许快速连发消息，未对 ChatWindow 发送路径做动态验证",
+        "I1 中 HttpClient.Timeout 与调度器 CancelAfter 竞速的实际胜率依赖运行时计时，未做实测",
+        "EdgeTtsSocket 对真实微软端点的帧/握手行为未在本次审查中联网验证",
+        "FileJsonStore 非原子写导致数据丢失的实际概率依赖崩溃时机，未能量化"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "纯只读架构审查，无代码改动、无暂存文件",
+      "reviewFindings": [
+        "critical: ModelRequestScheduler.cs:74,79-115 - 单 worker 循环内联执行所有请求，并发闸(SemaphoreSlim 3)与 concurrency 参数失效，多宠物并行/P0 不被阻塞承诺落空；测试断言过弱未暴露",
+        "critical: FrameHasher.cs:121,126 - ScreenEventLog 的 Queue 被 RPC 线程 Add 与 Timer/UI 线程 Recent() 无锁并发访问",
+        "critical: AiCoordinator.cs:190-197 + App.xaml.cs:272-275 - 并发对话导致 ConversationMemory List 竞态、画像/亲密度丢更新、care.json 读-改-写丢 token/XP",
+        "important: ModelRequestScheduler.cs:130-141 - 重试耗尽后抛裸 TaskCanceledException，UI 超时文案不可达；HttpClient 30s 与调度器 30s 双计时器竞态使重试非确定",
+        "important: OpenAiCompatibleModelProvider.cs:33-34 - HttpClient 每实例新建且从不释放，设置变更即泄漏；无 IHttpClientFactory",
+        "important: ModelRequestScheduler.cs:143-150 - DisposeAsync 不取消在飞请求，App 侧 2s 截断后遗留 loop 使用已释放信号量",
+        "important: JsonStore.cs:80 - File.WriteAllText 非原子写，崩溃截断后 LoadCare 等静默返回空导致数据丢失",
+        "important: IntimacyEngine.cs:45 - 衰减地板 Math.Max(DecayFloor, decayed) 会把自然低值(如 2)抬升到 5，与注释语义相悖",
+        "minor: QuickBubbleController.cs:75-90 死代码/双真值源；PersonaEngine/InteractionEngine 默认常量双源；EdgeTts 控制帧递归与 pong 长度截断；SapiTts 取消不完整；ImageProvider 裸 HttpRequestException/FormatException；TauriMigration 零实例边界丢数据；PetStoreModel 严格版本校验静默回退；Speak MediaEnded 处理器累积；OnAgentExited 线程池阻塞"
+      ],
+      "manualNotes": "本审查为 review-only 子任务，未写 progress.md、未修改任何代码。结论重点：调度器并发设计未实现(C1)与多处数据竞态(C2/C3)为最高优先级；超时重试契约(I1)与 HttpClient 泄漏(I2)次之。所有行号以 windows-native 仓库当前工作树为准。"
+    }
+  },
+  "launchContractDigest": "c048a6f7f7c25fe7e05fcc2791fab40bdb2f1776366acb3b73783211fc12ccfc",
+  "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "configured": [],
+    "effective": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "omitted": {
+      "runtime": 0,
+      "configured": 0,
+      "effective": 0
+    }
+  },
+  "transcriptPath": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\686ae5a3-be7c-4654-85dd-0adef29370e6_reviewer_transcript.jsonl",
+  "skills": [],
+  "timestamp": 1785975672668
+}

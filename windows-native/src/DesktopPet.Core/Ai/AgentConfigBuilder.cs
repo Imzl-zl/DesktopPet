@@ -12,7 +12,10 @@ namespace DesktopPet.Core.Ai;
 public static class AgentConfigBuilder
 {
     public static AgentConfig Build(
-        AppSettings settings, PersonasFileModel personas, ProvidersFileModel providers)
+        AppSettings settings,
+        PersonasFileModel personas,
+        ProvidersFileModel providers,
+        long revision = 0)
     {
         var persona = personas.ResolveSelected();
         var provider = SelectProvider(providers, settings.Ai.ProviderId);
@@ -24,7 +27,9 @@ public static class AgentConfigBuilder
             ProviderModel: provider?.ModelName,
             ProviderApiKeyRef: string.IsNullOrEmpty(provider?.ApiKeyRef) ? null : provider.ApiKeyRef,
             ProviderReasoningEffort: provider?.ReasoningEffort,
-            MinAnalysisIntervalSeconds: Math.Clamp(settings.Ai.ScreenAnalysisIntervalSeconds, 3, 30));
+            MinAnalysisIntervalSeconds: Math.Clamp(settings.Ai.ScreenAnalysisIntervalSeconds, 3, 30),
+            CaptureIntervalSeconds: Math.Clamp(settings.Ai.ScreenAnalysisIntervalSeconds, 3, 30),
+            Revision: revision);
     }
 
     /// <summary>选中 id 匹配优先，否则取第一个；无配置 → null（Agent 只做变化检测）。</summary>

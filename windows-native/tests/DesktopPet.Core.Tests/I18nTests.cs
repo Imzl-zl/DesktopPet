@@ -60,6 +60,47 @@ public class I18nTests
     }
 
     [Fact]
+    public void UiCatalog_IsCompleteAcrossAllFourLanguages()
+    {
+        Assert.NotEmpty(I18nService.UiCatalogKeys);
+        foreach (var key in I18nService.UiCatalogKeys)
+        foreach (var lang in Enum.GetValues<AppLang>())
+        {
+            Assert.True(I18nService.HasTranslation(lang, key), $"Missing {lang}: {key}");
+            Assert.False(string.IsNullOrWhiteSpace(new I18nService(lang).T(key)));
+        }
+    }
+
+    [Fact]
+    public void UiCatalog_PreservesFormatPlaceholdersAcrossLanguages()
+    {
+        foreach (var key in I18nService.UiCatalogKeys)
+        {
+            var expected = PlaceholderIndexes(new I18nService(AppLang.En).T(key));
+            foreach (var lang in Enum.GetValues<AppLang>())
+            {
+                var actual = PlaceholderIndexes(new I18nService(lang).T(key));
+                Assert.Equal(expected, actual);
+            }
+        }
+    }
+
+    private static string[] PlaceholderIndexes(string value)
+        => System.Text.RegularExpressions.Regex.Matches(value, @"\{(\d+)(?:[^}]*)\}")
+            .Select(match => match.Groups[1].Value)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+
+
+    [Theory]
+    [InlineData(AppLang.En, "快捷键", "Hotkeys")]
+    [InlineData(AppLang.ZhHans, "快捷键", "快捷键")]
+    [InlineData(AppLang.ZhHant, "快捷键", "快速鍵")]
+    [InlineData(AppLang.Vi, "快捷键", "Phím tắt")]
+    public void CurrentWindowsSourceText_UsesSharedCatalog(AppLang lang, string key, string expected)
+        => Assert.Equal(expected, new I18nService(lang).T(key));
+
+    [Fact]
     public void Detect_MatchesSystemLanguageShape()
     {
         // Detect 只依赖 CurrentCulture 前缀判断，不抛异常即可

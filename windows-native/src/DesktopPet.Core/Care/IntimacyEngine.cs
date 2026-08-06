@@ -3,7 +3,7 @@ namespace DesktopPet.Core.Care;
 /// <summary>
 /// 亲密度状态（持久化 intimacy.json）。
 /// 双线并行：XP=外观/行为（CareEngine），亲密度=AI 关系（IntimacyEngine）。
-/// 衰减只依赖 LastInteractionDate（距上次互动每整天 -1，下限 5 不归零）。
+/// 衰减只依赖 LastInteractionDate（距上次互动每整天 -1；历史低值不会被地板抬升）。
 /// </summary>
 public sealed record IntimacyState(int Value, DateTime LastInteractionDate)
 {
@@ -32,7 +32,7 @@ public sealed class IntimacyEngine
         State = state ?? throw new ArgumentNullException(nameof(state));
     }
 
-    /// <summary>对话结算：先衰减（距上次互动每整天 -1，下限 5），再增长（轮次 + token + 连续天数），封顶 100。</summary>
+    /// <summary>对话结算：先衰减（距上次互动每整天 -1，地板不抬高历史低值），再增长（轮次 + token + 连续天数），封顶 100。</summary>
     public void RecordConversation(int tokensUsed, DateTime now)
     {
         var today = now.Date;
@@ -42,7 +42,9 @@ public sealed class IntimacyEngine
         // 地板仅作用于真实衰减（未衰减的自然低值不被抬升）
         var missedDays = Math.Max(0, (today - lastDate).Days - 1);
         var decayed = State.Value - missedDays;
-        var afterDecay = missedDays > 0 ? Math.Max(DecayFloor, decayed) : Math.Max(0, decayed);
+        var afterDecay = missedDays > 0
+            ? Math.Max(Math.Min(DecayFloor, State.Value), decayed)
+            : Math.Max(0, decayed);
 
         // 连续天数：昨天互动过 → +3（同一天多次互动不重复）
         var streak = lastDate == today.AddDays(-1) ? StreakBonus : 0;

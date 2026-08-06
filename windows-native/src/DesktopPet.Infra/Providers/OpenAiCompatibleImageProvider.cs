@@ -15,17 +15,18 @@ public sealed class OpenAiCompatibleImageProvider : IImageProvider
     private readonly ImageGenConfig _config;
     private readonly ICredentialStore _credentials;
     private readonly HttpClient _http;
+    private readonly TimeSpan _requestTimeout;
 
     public OpenAiCompatibleImageProvider(
         ImageGenConfig config,
         ICredentialStore credentials,
-        HttpMessageHandler? handler = null,
-        TimeSpan? timeout = null)
+        HttpClient httpClient,
+        TimeSpan? requestTimeout = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
-        _http = handler is null ? new HttpClient() : new HttpClient(handler);
-        _http.Timeout = timeout ?? TimeSpan.FromSeconds(30);
+        _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(120);
     }
 
     public string Id => "openai-image";
@@ -46,17 +47,24 @@ public sealed class OpenAiCompatibleImageProvider : IImageProvider
             // 响应均已兼容（见下方解析），不发送最稳。
         };
 
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _config.BaseUrl.TrimEnd('/') + "/images/generations");
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            ProviderEndpointPolicy.BuildRequestUri(
+                _config.BaseUrl,
+                "images/generations",
+                !string.IsNullOrEmpty(apiKey)));
         if (!string.IsNullOrEmpty(apiKey))
             httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
         httpRequest.Content = JsonContent.Create(body);
 
+        using var deadline = CreateDeadline(ct);
+        var requestCt = deadline?.Token ?? ct;
         HttpResponseMessage response;
         try
         {
-            response = await _http.SendAsync(httpRequest, ct).ConfigureAwait(false);
+            response = await _http.SendAsync(httpRequest, requestCt).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && deadline?.IsCancellationRequested == true)
         {
             throw new ProviderException("timeout", "生图请求超时");
         }
@@ -80,7 +88,7 @@ public sealed class OpenAiCompatibleImageProvider : IImageProvider
             try
             {
                 using var doc = await JsonDocument.ParseAsync(
-                    await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    await response.Content.ReadAsStreamAsync(requestCt), cancellationToken: requestCt);
                 var data = doc.RootElement.GetProperty("data");
                 if (data.GetArrayLength() == 0)
                     throw new ProviderException("invalid-response", "生图响应无数据");
@@ -93,9 +101,9 @@ public sealed class OpenAiCompatibleImageProvider : IImageProvider
                 }
                 if (first.TryGetProperty("url", out var urlEl) && urlEl.ValueKind == JsonValueKind.String)
                 {
-                    using var imageResp = await _http.GetAsync(urlEl.GetString()!, ct).ConfigureAwait(false);
+                    using var imageResp = await _http.GetAsync(urlEl.GetString()!, requestCt).ConfigureAwait(false);
                     imageResp.EnsureSuccessStatusCode();
-                    return new ImageResult(await imageResp.Content.ReadAsByteArrayAsync(ct));
+                    return new ImageResult(await imageResp.Content.ReadAsByteArrayAsync(requestCt));
                 }
                 throw new ProviderException("invalid-response", "生图响应缺少 b64_json/url");
             }
@@ -104,5 +112,13 @@ public sealed class OpenAiCompatibleImageProvider : IImageProvider
                 throw new ProviderException("invalid-response", $"生图响应解析失败: {ex.Message}", ex);
             }
         }
+    }
+
+    private CancellationTokenSource? CreateDeadline(CancellationToken ct)
+    {
+        if (_requestTimeout == Timeout.InfiniteTimeSpan) return null;
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_requestTimeout);
+        return deadline;
     }
 }

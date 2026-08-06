@@ -17,6 +17,7 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
     private readonly ProviderConfig _config;
     private readonly ICredentialStore _credentials;
     private readonly HttpClient _http;
+    private readonly TimeSpan _requestTimeout;
 
     public string Id => _config.Id;
 
@@ -25,13 +26,13 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
     public OpenAiCompatibleModelProvider(
         ProviderConfig config,
         ICredentialStore credentials,
-        HttpMessageHandler? handler = null,
-        TimeSpan? timeout = null)
+        HttpClient httpClient,
+        TimeSpan? requestTimeout = null)
     {
-        _config = config;
-        _credentials = credentials;
-        _http = handler is null ? new HttpClient() : new HttpClient(handler);
-        _http.Timeout = timeout ?? TimeSpan.FromSeconds(30);
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+        _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
+        _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(30);
     }
 
     public async Task<ChatResult> CompleteAsync(ChatRequest request, CancellationToken ct)
@@ -76,21 +77,29 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
         if (!string.IsNullOrEmpty(_config.ReasoningEffort))
             body["reasoning_effort"] = _config.ReasoningEffort;
 
-        using var httpReq = new HttpRequestMessage(HttpMethod.Post, JoinUrl(_config.BaseUrl, "chat/completions"))
+        var apiKey = ResolveApiKey();
+        using var httpReq = new HttpRequestMessage(
+            HttpMethod.Post,
+            ProviderEndpointPolicy.BuildRequestUri(_config.BaseUrl, "chat/completions", !string.IsNullOrEmpty(apiKey)))
         {
             Content = JsonContent.Create(body, options: JsonOpts),
         };
-        ApplyAuth(httpReq);
+        ApplyAuth(httpReq, apiKey);
         // 部分网关/CDN 要求 UA（如 newapi.myovo.cc.cd）；统一带上应用标识。
         if (httpReq.Headers.UserAgent.Count == 0)
             httpReq.Headers.UserAgent.ParseAdd("DesktopPet/1.0");
 
+        using var deadline = CreateDeadline(ct);
+        var requestCt = deadline?.Token ?? ct;
         HttpResponseMessage resp;
         try
         {
-            resp = await _http.SendAsync(httpReq, ct).ConfigureAwait(false);
+            resp = await _http.SendAsync(
+                httpReq,
+                HttpCompletionOption.ResponseHeadersRead,
+                requestCt).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && deadline?.IsCancellationRequested == true)
         {
             throw new ProviderException("timeout", $"模型请求超时（{_config.Name}）");
         }
@@ -108,20 +117,30 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
             }
             if (!resp.IsSuccessStatusCode)
             {
-                var errBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                throw new ProviderException("http", $"模型服务返回 {(int)resp.StatusCode}（{_config.Name}）: {errBody}");
+                _ = await ReadResponseTextAsync(
+                    resp.Content,
+                    ct,
+                    requestCt,
+                    deadline,
+                    $"模型请求超时（{_config.Name}）",
+                    $"读取模型错误响应失败（{_config.Name}）").ConfigureAwait(false);
+                throw CreateHttpFailure(resp.StatusCode, _config.Name);
             }
 
             JsonDocument doc;
             try
             {
-                var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                var text = await ReadResponseTextAsync(
+                    resp.Content,
+                    ct,
+                    requestCt,
+                    deadline,
+                    $"模型请求超时（{_config.Name}）",
+                    $"读取模型响应失败（{_config.Name}）").ConfigureAwait(false);
                 doc = JsonDocument.Parse(text);
             }
-            catch (Exception ex) when (ex is JsonException or HttpRequestException or OperationCanceledException)
+            catch (JsonException ex)
             {
-                if (ex is OperationCanceledException && !ct.IsCancellationRequested)
-                    throw new ProviderException("timeout", $"模型请求超时（{_config.Name}）");
                 throw new ProviderException("invalid-response", "模型响应无法解析", ex);
             }
 
@@ -140,9 +159,12 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
                         : 0;
                     return new ChatResult(content, tokens);
                 }
-                catch (KeyNotFoundException ex)
+                catch (Exception ex) when (ex is KeyNotFoundException
+                                                  or InvalidOperationException
+                                                  or FormatException
+                                                  or OverflowException)
                 {
-                    throw new ProviderException("invalid-response", "模型响应缺少必需字段", ex);
+                    throw new ProviderException("invalid-response", "模型响应缺少或包含无效字段", ex);
                 }
             }
         }
@@ -150,15 +172,23 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
 
     public async Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken ct)
     {
-        using var httpReq = new HttpRequestMessage(HttpMethod.Get, JoinUrl(_config.BaseUrl, "models"));
-        ApplyAuth(httpReq);
+        var apiKey = ResolveApiKey();
+        using var httpReq = new HttpRequestMessage(
+            HttpMethod.Get,
+            ProviderEndpointPolicy.BuildRequestUri(_config.BaseUrl, "models", !string.IsNullOrEmpty(apiKey)));
+        ApplyAuth(httpReq, apiKey);
 
+        using var deadline = CreateDeadline(ct);
+        var requestCt = deadline?.Token ?? ct;
         HttpResponseMessage resp;
         try
         {
-            resp = await _http.SendAsync(httpReq, ct).ConfigureAwait(false);
+            resp = await _http.SendAsync(
+                httpReq,
+                HttpCompletionOption.ResponseHeadersRead,
+                requestCt).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && deadline?.IsCancellationRequested == true)
         {
             throw new ProviderException("timeout", $"连接测试超时（{_config.Name}）");
         }
@@ -172,23 +202,40 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
             if (resp.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
                 throw new ProviderException("auth", "API Key 无效或无权限（401/403）");
             if (!resp.IsSuccessStatusCode)
-                throw new ProviderException("http", $"模型服务返回 {(int)resp.StatusCode}（{_config.Name}）");
+            {
+                _ = await ReadResponseTextAsync(
+                    resp.Content,
+                    ct,
+                    requestCt,
+                    deadline,
+                    $"连接测试超时（{_config.Name}）",
+                    $"读取模型错误响应失败（{_config.Name}）").ConfigureAwait(false);
+                throw CreateHttpFailure(resp.StatusCode, _config.Name);
+            }
 
             try
             {
-                var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-                using (doc)
+                var text = await ReadResponseTextAsync(
+                    resp.Content,
+                    ct,
+                    requestCt,
+                    deadline,
+                    $"连接测试超时（{_config.Name}）",
+                    $"读取模型列表失败（{_config.Name}）").ConfigureAwait(false);
+                using var doc = JsonDocument.Parse(text);
+                var list = new List<ModelInfo>();
+                foreach (var m in doc.RootElement.GetProperty("data").EnumerateArray())
                 {
-                    var list = new List<ModelInfo>();
-                    foreach (var m in doc.RootElement.GetProperty("data").EnumerateArray())
-                    {
-                        var id = m.GetProperty("id").GetString() ?? "";
-                        list.Add(new ModelInfo(id, id, InferCapabilities(id)));
-                    }
-                    return list;
+                    var id = m.GetProperty("id").GetString() ?? "";
+                    list.Add(new ModelInfo(id, id, InferCapabilities(id)));
                 }
+                return list;
             }
-            catch (Exception ex) when (ex is JsonException or KeyNotFoundException)
+            catch (Exception ex) when (ex is JsonException
+                                              or KeyNotFoundException
+                                              or InvalidOperationException
+                                              or FormatException
+                                              or OverflowException)
             {
                 throw new ProviderException("invalid-response", "模型列表响应无法解析", ex);
             }
@@ -208,17 +255,59 @@ public sealed class OpenAiCompatibleModelProvider : IModelProvider
         return caps;
     }
 
-    private void ApplyAuth(HttpRequestMessage req)
+    private static async Task<string> ReadResponseTextAsync(
+        HttpContent content,
+        CancellationToken callerCt,
+        CancellationToken requestCt,
+        CancellationTokenSource? deadline,
+        string timeoutMessage,
+        string networkMessage)
     {
-        var key = string.IsNullOrEmpty(_config.ApiKeyRef) ? null : _credentials.Get(_config.ApiKeyRef);
-        if (!string.IsNullOrEmpty(key))
+        try
         {
-            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+            return await content.ReadAsStringAsync(requestCt).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (callerCt.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex) when (deadline?.IsCancellationRequested == true)
+        {
+            throw new ProviderException("timeout", timeoutMessage, ex);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            throw new ProviderException("network", networkMessage, ex);
         }
     }
 
-    private static string JoinUrl(string baseUrl, string path)
-        => baseUrl.TrimEnd('/') + "/" + path;
+    private CancellationTokenSource? CreateDeadline(CancellationToken ct)
+    {
+        if (_requestTimeout == Timeout.InfiniteTimeSpan) return null;
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_requestTimeout);
+        return deadline;
+    }
+
+    private string? ResolveApiKey()
+        => string.IsNullOrEmpty(_config.ApiKeyRef) ? null : _credentials.Get(_config.ApiKeyRef);
+
+    private static void ApplyAuth(HttpRequestMessage req, string? key)
+    {
+        if (!string.IsNullOrEmpty(key))
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+    }
+
+    private static ProviderException CreateHttpFailure(System.Net.HttpStatusCode status, string name)
+    {
+        var code = status switch
+        {
+            System.Net.HttpStatusCode.TooManyRequests => "rate-limit",
+            >= System.Net.HttpStatusCode.InternalServerError => "server",
+            _ => "http",
+        };
+        return new ProviderException(code, $"模型服务返回 {(int)status}（{name}）");
+    }
 
     private static string RoleName(ChatRole role) => role switch
     {

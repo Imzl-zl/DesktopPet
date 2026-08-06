@@ -17,6 +17,9 @@ public sealed class SpriteSheet
     public required IReadOnlyList<IReadOnlyList<SpriteFrame>> Clips { get; init; }
     public required IReadOnlyList<int> ClipMaxWidths { get; init; }
 
+    /// <summary>解码后的源图 RGBA 像素（导入预览等用途；测试构造可不填）。</summary>
+    public byte[]? SourceRgba { get; init; }
+
     public bool IsEmpty => Clips.Count == 0;
 
     /// <summary>解码（ImageSharp：PNG/WebP）→ 切片 → 预裁剪帧。失败返回 null（调用方回退占位）。</summary>
@@ -46,6 +49,7 @@ public sealed class SpriteSheet
                 SourceName = sourceName,
                 SourceWidth = width,
                 SourceHeight = height,
+                SourceRgba = rgba, // 保留解码像素（预览构建位图用；切片只读不修改）
                 Clips = frames,
                 ClipMaxWidths = maxWidths,
             };

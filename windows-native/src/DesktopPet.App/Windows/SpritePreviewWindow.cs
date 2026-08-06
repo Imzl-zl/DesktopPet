@@ -3,6 +3,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DesktopPet.App.Localization;
+using DesktopPet.Core.I18n;
 using DesktopPet.Core.Rendering;
 
 namespace DesktopPet.App.Windows;
@@ -16,9 +18,17 @@ public sealed class SpritePreviewWindow : Window
     private readonly SpriteSheet _sheet;
     private readonly byte[] _sourceBytes;
     private readonly string _suggestedName;
+    private I18nService _i18n;
+    private readonly TextBlock _header;
 
-    public SpritePreviewWindow(SpriteSheet sheet, byte[] sourceBytes, string suggestedName)
+    public SpritePreviewWindow(
+        SpriteSheet sheet,
+        byte[] sourceBytes,
+        string suggestedName,
+        I18nService? i18n = null)
     {
+        var localization = i18n ?? new I18nService();
+        _i18n = localization;
         _sheet = sheet;
         _sourceBytes = sourceBytes;
         _suggestedName = suggestedName;
@@ -34,18 +44,24 @@ public sealed class SpritePreviewWindow : Window
 
         var header = new TextBlock
         {
-            Text = $"{suggestedName} — 检测到 {sheet.Clips.Count} 行动画",
             FontSize = 14,
             FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(0, 0, 0, 10),
         };
+        _header = header;
+        WpfLocalizer.SetFormattedText(
+            header,
+            "{0} — 检测到 {1} 行动画",
+            _i18n,
+            suggestedName,
+            sheet.Clips.Count);
         root.Children.Add(header);
 
-        // 原图 + 网格线覆盖
+        // 原图 + 网格线覆盖。修复：曾误用压缩文件字节（_sourceBytes）当像素缓冲，
+        // 缓冲不足抛异常（async void 调用链无 handler → 进程崩溃）或显示垃圾像素；
+        // 现在用 Decode 保留的解码 RGBA 构建（Core 输出 RGBA，WPF 需 BGRA）。
         var imageArea = new Grid { Width = 384, Height = 320, HorizontalAlignment = HorizontalAlignment.Center };
-        var source = BitmapSource.Create(
-            sheet.SourceWidth, sheet.SourceHeight, 96, 96, PixelFormats.Bgra32, null,
-            RgbaToBgra(_sourceBytes), sheet.SourceWidth * 4);
+        var source = BuildSourcePreview(sheet);
         var image = new Image { Source = source, Stretch = Stretch.Uniform, Width = 384, Height = 320 };
         imageArea.Children.Add(image);
 
@@ -115,10 +131,32 @@ public sealed class SpritePreviewWindow : Window
         root.Children.Add(buttons);
 
         Content = root;
+        WpfLocalizer.ApplyNew(this, _i18n);
+    }
+
+    public void ApplyLocalization(I18nService i18n)
+    {
+        _i18n = i18n;
+        WpfLocalizer.RefreshTracked(this, i18n);
     }
 
     /// <summary>导入时由 PetWindow 读取：原始文件字节 + 建议名。</summary>
     public (byte[] Bytes, string Name) ImportPayload => (_sourceBytes, _suggestedName);
+
+    /// <summary>解码源图位图（Bgra32）。SourceRgba 缺失时回退透明图（不崩）。</summary>
+    private static BitmapSource BuildSourcePreview(SpriteSheet sheet)
+    {
+        if (sheet.SourceRgba is { Length: > 0 } rgba)
+        {
+            var pixels = RgbaToBgra(rgba);
+            return BitmapSource.Create(
+                sheet.SourceWidth, sheet.SourceHeight, 96, 96, PixelFormats.Bgra32, null,
+                pixels, sheet.SourceWidth * 4);
+        }
+        return BitmapSource.Create(
+            sheet.SourceWidth, sheet.SourceHeight, 96, 96, PixelFormats.Bgra32, null,
+            new byte[sheet.SourceWidth * sheet.SourceHeight * 4], sheet.SourceWidth * 4);
+    }
 
     private static byte[] RgbaToBgra(byte[] rgba)
     {

@@ -18,8 +18,27 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <ProjectReference Include="..\..\src\DesktopPet.Core\DesktopPet.Core.csproj" />
+    <ProjectReference Include="..\..\src\DesktopPet.Infra\DesktopPet.Infra.csproj" />
+    <Compile Include="..\..\src\DesktopPet.App\Hotkeys\HotkeySettingsCoordinator.cs"
+             Link="Hotkeys\HotkeySettingsCoordinator.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Localization\WpfLocalizer.cs"
+             Link="Localization\WpfLocalizer.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Localization\LanguageCoordinator.cs"
+             Link="Localization\LanguageCoordinator.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Diagnostics\ProcessMetricsMonitor.cs"
+             Link="Diagnostics\ProcessMetricsMonitor.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Fullscreen\FullscreenSuppression.cs"
+             Link="Fullscreen\FullscreenSuppression.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Ai\AgentHeartbeatMonitor.cs"
+             Link="Ai\AgentHeartbeatMonitor.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Ai\AgentLaunchContract.cs"
+             Link="Ai\AgentLaunchContract.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Ai\ModelConnectionTestController.cs"
+             Link="Ai\ModelConnectionTestController.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Rendering\SpriteLoader.cs"
              Link="Rendering\SpriteLoader.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Rendering\SpriteSheetCache.cs"
+             Link="Rendering\SpriteSheetCache.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Rendering\ReusablePixelBuffer.cs"
              Link="Rendering\ReusablePixelBuffer.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Rendering\PixelBuffer.cs"

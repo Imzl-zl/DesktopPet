@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.Versioning;
 using System.Speech.Synthesis;
 
 namespace DesktopPet.Infra.Tts;
@@ -9,6 +10,7 @@ namespace DesktopPet.Infra.Tts;
 /// 默认实现理由：Edge TTS 免费端点对 Windows SChannel 的 TLS 指纹风控
 /// （OpenSSL 路径可用但生产环境不可依赖；EdgeTtsProvider 保留作未来 OpenSSL 集成基础）。
 /// </summary>
+[SupportedOSPlatform("windows")]
 public sealed class SapiTtsProvider : ITtsProvider
 {
     public async Task<Stream> SynthesizeAsync(string text, TtsVoice voice, CancellationToken ct)

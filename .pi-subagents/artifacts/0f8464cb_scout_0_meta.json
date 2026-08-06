@@ -1,0 +1,110 @@
+{
+  "runId": "0f8464cb",
+  "agent": "scout",
+  "task": "只读分析 Task2 sprite cache：SpriteLoader.cs, PetWindowManager.cs, App tests。报告 I17 root cause/LRU structure/test seam，勿修改。\n\n---\n**Output:**\nWrite your findings to exactly this path: C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\outputs\\0f8464cb\\context.md\nThis path is authoritative for this run.\nIgnore any other output filename or output path mentioned elsewhere, including output destinations in the base agent prompt, system prompt, or task instructions.",
+  "exitCode": 1,
+  "processSignal": "SIGTERM",
+  "usage": {
+    "input": 26876,
+    "output": 789,
+    "cacheRead": 43520,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 4
+  },
+  "model": "cus-openai/gpt-5.6-sol:low",
+  "attemptedModels": [
+    "cus-openai/gpt-5.6-sol:low"
+  ],
+  "modelAttempts": [
+    {
+      "model": "cus-openai/gpt-5.6-sol:low",
+      "success": false,
+      "exitCode": 1,
+      "error": "Subagent process terminated by signal SIGTERM.",
+      "usage": {
+        "input": 26876,
+        "output": 789,
+        "cacheRead": 43520,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 4
+      }
+    }
+  ],
+  "durationMs": 299544,
+  "toolCount": 15,
+  "error": "Subagent process terminated by signal SIGTERM.",
+  "launchContractDigest": "6e4a494e9879b9cc52cb3915036c8ef49265de91d0391990b6b532337c6e3099",
+  "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "configured": [],
+    "effective": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "omitted": {
+      "runtime": 0,
+      "configured": 0,
+      "effective": 0
+    }
+  },
+  "acceptance": {
+    "status": "rejected",
+    "evidenceStatus": "rejected",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [
+      {
+        "id": "attestation",
+        "status": "failed",
+        "message": "Structured acceptance report not found."
+      }
+    ],
+    "verifyRuns": [],
+    "childReportParseError": "Structured acceptance report not found."
+  },
+  "transcriptPath": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\0f8464cb_scout_0_transcript.jsonl",
+  "timestamp": 1786004494074
+}

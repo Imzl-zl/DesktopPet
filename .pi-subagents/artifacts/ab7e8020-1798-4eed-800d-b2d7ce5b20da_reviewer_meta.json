@@ -1,0 +1,139 @@
+{
+  "runId": "ab7e8020-1798-4eed-800d-b2d7ce5b20da",
+  "agent": "reviewer",
+  "task": "你是资深 WPF/Win32 桌面应用审查专家。审查 C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App 下的渲染与窗口模块，只读不改。\n\n文件清单：\n- Rendering/SpriteLoader.cs, Rendering/SpriteFrameBitmapSourceCache.cs, Rendering/PixelBuffer.cs, Rendering/ReusablePixelBuffer.cs, Rendering/PlaceholderPet.cs\n- Windows/PetWindow.cs, Windows/FloatingBallWindow.cs, Windows/DanmakuWindow.cs, Windows/BubbleView.cs, Windows/XamlIslandHost.cs, Windows/PetWindowManager.cs, Windows/SpritePreviewWindow.cs, Windows/WelcomeWindow.cs\n- Interop/NativeMethods.cs（已确认基本合理，可跳过）\n- src/DesktopPet.Infra/Hotkey/HotkeyManager.cs（在 windows-native/src 下）\n- src/DesktopPet.Core/Rendering/OverlayRenderer.cs, PetRenderer.cs, SpriteSheet.cs（纯逻辑，可快速扫）\n\n重点找：\n1. Win32 API / WPF 官方 API 的误用（如 DispatcherTimer 使用不当、WriteableBitmap 写像素方式错误、HWND 生命周期、WndProc 泄漏、SetWindowPos/WS_EX_TRANSPARENT 用法、XAML Islands 用法）\n2. 硬编码的用户可配置值（尺寸、时间、颜色、频率、路径写死在源码里且没有设置项对接）\n3. 资源泄漏（timer 未释放、事件未退订、位图缓存无上限、句柄泄漏）\n4. 线程问题（UI 线程阻塞、跨线程访问、Dispatcher.Invoke 死锁风险）\n5. 设计缺陷（重复代码、职责混乱、状态不同步）\n\n输出格式：按严重程度分组列出发现（Critical / Important / Minor），每条含 文件:行号、问题描述、为何是问题、修复建议。没有发现的类别不要硬凑。最后给 1-2 行总体结论。\n\n## Acceptance Contract\nAcceptance level: attested\nCompletion is not accepted from prose alone. End with a structured acceptance report.\n\nCriteria:\n- criterion-1: Return concrete findings with file paths and severity when applicable\n\nRequired evidence: review-findings, residual-risks\n\nFinish with a fenced JSON block tagged `acceptance-report` in this shape:\nUse empty arrays when no items apply; array fields contain strings unless object entries are shown.\n`criteriaSatisfied[].status` must be exactly one of: satisfied, not-satisfied, not-applicable.\n`commandsRun[].result` must be exactly one of: passed, failed, not-run.\n`manualNotes` and `notes` are optional strings; an empty string means no note and does not satisfy `manual-notes` evidence.\n```acceptance-report\n{\n  \"criteriaSatisfied\": [\n    {\n      \"id\": \"criterion-1\",\n      \"status\": \"satisfied\",\n      \"evidence\": \"specific proof\"\n    }\n  ],\n  \"changedFiles\": [\n    \"src/file.ts\"\n  ],\n  \"testsAddedOrUpdated\": [\n    \"test/file.test.ts\"\n  ],\n  \"commandsRun\": [\n    {\n      \"command\": \"command\",\n      \"result\": \"passed\",\n      \"summary\": \"short result\"\n    }\n  ],\n  \"validationOutput\": [\n    \"validation output or concise summary\"\n  ],\n  \"residualRisks\": [\n    \"none\"\n  ],\n  \"noStagedFiles\": true,\n  \"diffSummary\": \"short description of the diff\",\n  \"reviewFindings\": [\n    \"blocker: file.ts:12 - issue found, or no blockers\"\n  ],\n  \"manualNotes\": \"anything else the parent should know\"\n}\n```",
+  "exitCode": 0,
+  "model": "deepseek/deepseek-v4-flash:high",
+  "attemptedModels": [
+    "deepseek/deepseek-v4-flash:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "deepseek/deepseek-v4-flash:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 55883,
+        "output": 30392,
+        "cacheRead": 888960,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 21
+      }
+    }
+  ],
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "交付 1 项 Critical（SpritePreviewWindow.cs:46-48 用编码字节当像素缓冲，可致 async void OnDrop 崩溃）、4 项 Important（DanmakuEngine 跨线程竞态 DanmakuWindow.cs:110-134、Paused 永不恢复+Win2D 未释放 DanmakuWindow.cs:108/139-143、SpriteLoader.cs:23/102-106 缓存无上限、PetWindow.cs:605-609 捕获丢失卡死 _pressed）、10 项 Minor，每条含文件:行号、问题、成因与修复建议"
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "grep -n 'Paused|_engine|_frameCount' DanmakuWindow.cs",
+          "result": "passed",
+          "summary": "确认 Paused 仅初始 true 与 ShowDanmaku 置 false，无恢复路径；_canvas 仅置 null 未 Dispose"
+        },
+        {
+          "command": "grep -n 'RouteOutput(' src",
+          "result": "passed",
+          "summary": "确认 ShowDanmaku 全部经 OnUiThread 调用（UI 线程），与 Win2D 渲染线程并发访问 DanmakuEngine"
+        },
+        {
+          "command": "grep -n 'instance\\.Size|DispatcherUnhandledException' src/DesktopPet.App",
+          "result": "passed",
+          "summary": "确认 PetInstance.Size 在 App 层零引用；无全局 UnhandledException 兜底（C1 崩溃可达性成立）"
+        }
+      ],
+      "validationOutput": [
+        "审查为只读源码核查，未运行 dotnet build（任务要求只读）；关键断言（BitmapSource.Create 缓冲校验、Win2D CanvasAnimatedControl 独立渲染线程、WS_EX_TRANSPARENT 点击穿透）基于 WPF/Win2D 官方语义与代码交叉验证",
+        "无编译/运行验证执行，属 residual risk 之一"
+      ],
+      "residualRisks": [
+        "DanmakuWindow 的 XAML Island + AllowsTransparency 分层窗口 + Win2D 透明合成仅依赖 PoC 注释断言，未经实机验证，存在黑底/不合成风险",
+        "混合 DPI 副屏下 PetWindow 位图模糊（M4）属已知限制，未实测",
+        "I1 竞态与 C1 崩溃均为偶发/路径性缺陷，未通过运行复现，判断基于代码语义"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "review-only，零改动",
+      "reviewFindings": [
+        "critical: SpritePreviewWindow.cs:46-48 - BitmapSource.Create 用编码文件字节当原始像素，常规精灵导入预览崩溃或显示垃圾像素",
+        "important: DanmakuWindow.cs:110-134 - DanmakuEngine 被 UI 线程 Enqueue 与 Win2D 渲染线程 Tick 无锁并发访问",
+        "important: DanmakuWindow.cs:108/134/139-143 - Paused 永不复位导致 60fps 空转；CanvasAnimatedControl/CanvasTextFormat 未 Dispose",
+        "important: SpriteLoader.cs:23/102-106 - 已解码 SpriteSheet 缓存无上限",
+        "important: PetWindow.cs:605-609 - 拖拽中捕获丢失后 _pressed 永久卡死，宠物点击失效至重启",
+        "minor: 另 10 项见正文 M1-M10"
+      ],
+      "manualNotes": "本任务为 review-only/no-edit，未写 progress.md。审查覆盖文件清单全部内容并交叉核查 DanmakuEngine/ModeService/AppSettings/App.xaml.cs 以确认线程、设置对接与生命周期断言。"
+    }
+  },
+  "launchContractDigest": "2930746657a4cc7baa4b8ec09afbb2410f8ca607fb61b177ac09487ade3b4792",
+  "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "configured": [],
+    "effective": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "omitted": {
+      "runtime": 0,
+      "configured": 0,
+      "effective": 0
+    }
+  },
+  "transcriptPath": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\ab7e8020-1798-4eed-800d-b2d7ce5b20da_reviewer_transcript.jsonl",
+  "skills": [],
+  "timestamp": 1785975563443
+}

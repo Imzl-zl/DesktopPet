@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "id": "5c5f5d8c-86ff-4efc-9b74-9f285ddf6a10",
+  "title": "Perform an independent read-only code review of the current uncommitted Windows localization impl...",
+  "goal": "Perform an independent read-only code review of the current uncommitted Windows localization implementation for Important/Critical issues only. Review DesktopPet.Core/I18n/I18n.cs, all four Core Resources/i18n*.json catalogs, App/Localization/WpfLocalizer.cs and LanguageCoordinator.cs, App.xaml.cs language publication, and localized WPF surfaces Settings/Chat/FloatingBall/Welcome/SpritePreview/Pet/Tray/Danmaku plus AiCoordinator/HotkeySettingsCoordinator/PersistenceErrorPresenter. Requirements: English, Simplified Chinese, Traditional Chinese, Vietnamese; persist before publish; immediate refresh of all currently visible static UI; user/model content, prompts, logs, style keys never translated; formatted placeholders preserved; no mixed-language page. Inspect tests. Do not modify files. Report findings ordered by severity with exact file:line evidence, or explicitly review-passed; include residual native UI smoke gaps.",
+  "status": "completed",
+  "createdAt": "2026-08-06T13:20:47.085Z",
+  "updatedAt": "2026-08-06T13:25:58.962Z",
+  "runs": [
+    {
+      "runId": "3506d5a9",
+      "mode": "single",
+      "agent": "reviewer",
+      "status": "completed",
+      "startedAt": "2026-08-06T13:25:58.961Z",
+      "completedAt": "2026-08-06T13:25:58.961Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "output",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\3506d5a9_reviewer_0_output.md"
+    },
+    {
+      "kind": "other",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\3506d5a9_reviewer_0_transcript.jsonl",
+      "description": "Child transcript"
+    }
+  ],
+  "receipts": [],
+  "cwd": "C:\\sudy\\github\\DesktopPet",
+  "ownerSessionId": "C:\\Users\\zhanglu\\.pi\\agent\\sessions\\--C--sudy-github-DesktopPet--\\2026-08-06T00-54-32-569Z_019fd490-9379-7773-a6d3-7d03ff39c0ee.jsonl",
+  "summary": "## Review\n\n- Correct: `LanguageCoordinator.ChangeLanguageAsync` persists settings before calling `_i18n.SetLang` and `_publish` at `windows-native/src/DesktopPet.App/Localization/LanguageCoordinator.cs:44-66`. The persistence-before-publication tests pass.\n- Correct: Existing placeholder checks pass for keys present in the English catalog. AI prompts, model output, user text, and diagnostic log messages are generally kept outside the localization path in `AiCoordinator.cs`.\n- Blocker: **English catalog is incomplete, causing widespread Chinese text in English UI.** `i18n.en.json` ends at line 347 and contains 345 keys, while `i18n.zh.json` contains 704 keys, `i18n.zh-TW.json` 709 keys, and `i18n.vi.json` 704 keys. The non-English catalogs contain 359, 364, and 359 keys respectively that are absent from English. For example, the current Settings surface uses `\"我的宠物\"` and `\"添加宠物\"` at `windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:823-840`, but these keys are absent from `i18n.en.json`. `I18nService.T` returns the key itself when English has no entry at `windows-native/src/DesktopPet.Core/I18n/I18n.cs:54-67`, so English displays the Chinese source text. This violates English support and produces mixed-language pages.\n- Important: **The completeness test cannot detect the missing English entries.** `I18nService.UiCatalogKeys` is derived exclusively from the English dictionary at `windows-native/src/DesktopPet.Core/I18n/I18n.cs:77-80`; `I18nTests.UiCatalog_IsCompleteAcrossAllFourLanguages` only iterates that set at `windows-native/tests/DesktopPet.Core.Tests/I18nTests.cs:62-71`. Consequently, the 359/364 non-English-only keys are excluded from the assertion. Placeholder tests have the same blind spot for those keys.\n- Important: **Language publication does not refresh every currently visible surface.** `App.PublishLanguage` only refreshes the manager, tray, and chat window at `windows-native/src/DesktopPet.App/App.xaml.cs:503-511`. `PetWindowManager.App...",
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "Concrete Important/Critical findings are reported with exact file paths and line references, ordered by severity."
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "dotnet test windows-native/tests/DesktopPet.Core.Tests/DesktopPet.Core.Tests.csproj --no-restore --filter FullyQualifiedName~I18nTests",
+          "result": "passed",
+          "summary": "13 localization core tests passed."
+        },
+        {
+          "command": "dotnet test windows-native/tests/DesktopPet.App.Tests/DesktopPet.App.Tests.csproj --no-restore --filter 'FullyQualifiedName~LanguageCoordinatorTests|FullyQualifiedName~WpfLocalizerTests|FullyQualifiedName~HotkeySettingsCoordinatorTests'",
+          "result": "passed",
+          "summary": "10 targeted App localization/coordinator tests passed."
+        },
+        {
+          "command": "Catalog key comparison for i18n.en.json, i18n.zh.json, i18n.zh-TW.json, and i18n.vi.json",
+          "result": "passed",
+          "summary": "Inspection found 359, 364, and 359 non-English-only keys absent from the English catalog."
+        },
+        {
+          "command": "git diff --check -- inspected localization files",
+          "result": "passed",
+          "summary": "No whitespace errors reported."
+        }
+      ],
+      "validationOutput": [
+        "English catalog: 345 keys.",
+        "Simplified Chinese catalog: 704 keys.",
+        "Traditional Chinese catalog: 709 keys.",
+        "Vietnamese catalog: 704 keys.",
+        "Persist-before-publish tests passed, but catalog completeness and live native-window coverage remain insufficient."
+      ],
+      "residualRisks": [
+        "No native Windows UI smoke test for live language switching with Welcome, Settings, Chat, FloatingBall, Danmaku, SpritePreview, Pet, and tray surfaces visible.",
+        "WPF tests do not validate real tray menu, popup lifetime, Win2D/XAML Island, or cross-window refresh behavior.",
+        "Current catalog completeness tests are English-baseline tests and miss keys that exist only in non-English catalogs."
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "Read-only review completed; no files changed or staged.",
+      "reviewFindings": [
+        "blocker: windows-native/src/DesktopPet.Core/Resources/i18n.en.json:1-347 and windows-native/src/DesktopPet.Core/I18n/I18n.cs:54-67 - English is missing 359 to 364 current UI keys, so Chinese source text is shown in English mode.",
+        "important: windows-native/tests/DesktopPet.Core.Tests/I18nTests.cs:62-71 and windows-native/src/DesktopPet.Core/I18n/I18n.cs:77-80 - completeness and placeholder tests derive their key set from the incomplete English catalog.",
+        "important: windows-native/src/DesktopPet.App/App.xaml.cs:503-511 and windows-native/src/DesktopPet.App/Windows/PetWindowManager.cs:296-302 - publication refreshes only manager-owned windows, tray, and chat; visible Welcome, Danmaku, and SpritePreview surfaces have no refresh path.",
+        "important: windows-native/src/DesktopPet.App/Localization/WpfLocalizer.cs:114-125,178-181 and windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:911-920,2252-2277 - dynamic pet/persona content can be translated when its value collides with a catalog key."
+      ],
+      "manualNotes": "Review-only task. Native Windows UI smoke testing was not run; automated targeted tests passed."
+    }
+  }
+}

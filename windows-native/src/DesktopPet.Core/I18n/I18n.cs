@@ -50,14 +50,34 @@ public sealed class I18nService
         return true;
     }
 
-    /// <summary>翻译：en 返回 key 本身；其他语言查字典，缺失回退 key。</summary>
+    /// <summary>翻译 UI key；英语资源可将历史中文源文案映射为英文。</summary>
     public string T(string key)
     {
-        if (Lang == AppLang.En) return key;
-        return Dictionaries.TryGetValue(Lang, out var dict) && dict.TryGetValue(key, out var value)
-            ? value
-            : key;
+        if (Dictionaries.TryGetValue(Lang, out var current)
+            && current.TryGetValue(key, out var translated))
+        {
+            return translated;
+        }
+        if (Lang != AppLang.En
+            && Dictionaries.TryGetValue(AppLang.En, out var english)
+            && english.TryGetValue(key, out var fallback))
+        {
+            return fallback;
+        }
+        return key;
     }
+
+    public string Format(string key, params object?[] args)
+        => string.Format(CultureInfo.CurrentCulture, T(key), args);
+
+    public static bool HasTranslation(AppLang lang, string key)
+        => Dictionaries.TryGetValue(lang, out var dictionary)
+           && dictionary.ContainsKey(key);
+
+    public static IReadOnlyCollection<string> UiCatalogKeys
+        => Dictionaries.TryGetValue(AppLang.En, out var english)
+            ? english.Keys
+            : [];
 
     private static Dictionary<AppLang, Dictionary<string, string>> LoadDictionaries()
     {
@@ -65,6 +85,7 @@ public sealed class I18nService
         var result = new Dictionary<AppLang, Dictionary<string, string>>();
         foreach (var (lang, resourceName) in new[]
         {
+            (AppLang.En, "DesktopPet.Core.Resources.i18n.en.json"),
             (AppLang.ZhHans, "DesktopPet.Core.Resources.i18n.zh.json"),
             (AppLang.ZhHant, "DesktopPet.Core.Resources.i18n.zh-TW.json"),
             (AppLang.Vi, "DesktopPet.Core.Resources.i18n.vi.json"),

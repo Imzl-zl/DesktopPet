@@ -7,13 +7,16 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using DesktopPet.App.Interop;
+using DesktopPet.Core.I18n;
 using DesktopPet.App.Rendering;
 using DesktopPet.Core.Care;
+using DesktopPet.Core.Input;
 using DesktopPet.Core.Interaction;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Rendering;
 using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
+using DesktopPet.Infra.Diagnostics;
 
 namespace DesktopPet.App.Windows;
 
@@ -32,6 +35,8 @@ public sealed class PetWindow : Window
     private readonly Action<PetWindow, int, int> _onDragFinished;
     private readonly SpriteLoader _spriteLoader;
     private readonly IJsonStore _store;
+    private readonly IAppLogger _logger;
+    private I18nService _i18n = new();
     private CareState _careState = null!;
     private readonly Image _image = new();
     private readonly WriteableBitmap _bitmap;
@@ -82,10 +87,8 @@ public sealed class PetWindow : Window
     private long _idleChatterIntervalMs = 15_000;
 
     // 拖拽状态（对齐 windows/src/window-drag.ts 语义：阈值区分点击/拖拽）
-    private bool _pressed;
-    private bool _dragging;
+    private readonly DragInteractionState _dragState = new();
     private (int X, int Y) _pressPoint;
-    private int _pressMessageTime;
     private long _pressTickMs;
     private (int X, int Y) _grabOffset;
     private nint _hwnd;
@@ -97,6 +100,8 @@ public sealed class PetWindow : Window
     private readonly List<double> _endToEndLatencyMs = [];
 
     public string PetId => _instance.Id;
+    public string SpriteSlug => _instance.SpriteSlug;
+    public bool PetVisible => _instance.Visible;
 
     public nint Hwnd => _hwnd;
 
@@ -105,6 +110,8 @@ public sealed class PetWindow : Window
     public IReadOnlyList<double> ProcessingLatencySamples => _processingLatencyMs;
 
     public IReadOnlyList<double> EndToEndLatencySamples => _endToEndLatencyMs;
+
+    public void ApplyLocalization(I18nService i18n) => _i18n = i18n;
 
     /// <summary>静止或前台窗口交互时停止桌宠计时器，避免后台工作争用资源。</summary>
     public bool AnimationEnabled
@@ -127,11 +134,17 @@ public sealed class PetWindow : Window
         UpdateTimerState();
     }
 
-    public PetWindow(PetInstance instance, SpriteLoader spriteLoader, IJsonStore store, Action<PetWindow, int, int> onDragFinished)
+    public PetWindow(
+        PetInstance instance,
+        SpriteLoader spriteLoader,
+        IJsonStore store,
+        Action<PetWindow, int, int> onDragFinished,
+        IAppLogger? logger = null)
     {
         _instance = instance;
         _spriteLoader = spriteLoader;
         _store = store;
+        _logger = logger ?? NullAppLogger.Instance;
         _onDragFinished = onDragFinished;
         var care = _store.LoadCare();
         _careState = care.TryGetValue(instance.Id, out var state) ? state : CareEngine.EmptyState(DateTime.Now);
@@ -264,12 +277,16 @@ public sealed class PetWindow : Window
         var sheet = SpriteSheet.Decode(bytes, System.IO.Path.GetFileName(path));
         if (sheet is null)
         {
-            MessageBox.Show(this, "无法解析精灵图（需要带透明通道的 PNG/WebP，且能检测到帧间隙）", "DesktopPet",
+            MessageBox.Show(this, _i18n.T("无法解析精灵图（需要带透明通道的 PNG/WebP，且能检测到帧间隙）"), "DesktopPet",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        var preview = new SpritePreviewWindow(sheet, bytes, System.IO.Path.GetFileNameWithoutExtension(path))
+        var preview = new SpritePreviewWindow(
+            sheet,
+            bytes,
+            System.IO.Path.GetFileNameWithoutExtension(path),
+            _i18n)
         {
             Owner = this,
         };
@@ -431,7 +448,7 @@ public sealed class PetWindow : Window
             _renderSignature = signature;
             if (celebrating)
             {
-                _bubble.RenderLine(_celebrateText.Length > 0 ? _celebrateText : "Done!");
+                _bubble.RenderLine(_celebrateText.Length > 0 ? _celebrateText : _i18n.T("Done!"));
             }
             else if (_moodLine is { Length: > 0 })
             {
@@ -574,6 +591,8 @@ public sealed class PetWindow : Window
         const int wmMouseMove = 0x0200;
         const int wmLeftDown = 0x0201;
         const int wmLeftUp = 0x0202;
+        const int wmCancelMode = 0x001F;
+        const int wmCaptureChanged = 0x0215;
         const nint mkLeftButton = 0x0001;
         switch (msg)
         {
@@ -582,13 +601,18 @@ public sealed class PetWindow : Window
                 OnRawLeftDown(lParam);
                 handled = true;
                 break;
-            case wmMouseMove when _pressed && (wParam.ToInt64() & mkLeftButton) != 0:
+            case wmMouseMove when _dragState.IsPressed && (wParam.ToInt64() & mkLeftButton) != 0:
                 OnRawMove(lParam);
                 handled = true;
                 break;
             case wmLeftUp:
-                BenchTrace($"raw msg up pressed={_pressed}");
-                if (_pressed) OnRawLeftUp();
+                BenchTrace($"raw msg up pressed={_dragState.IsPressed}");
+                if (_dragState.IsPressed) OnRawLeftUp();
+                handled = true;
+                break;
+            case wmCancelMode:
+            case wmCaptureChanged:
+                CancelPointerInteraction();
                 handled = true;
                 break;
         }
@@ -602,13 +626,12 @@ public sealed class PetWindow : Window
     /// </summary>
     private void OnRawLeftDown(nint lParam)
     {
-        if (_dragging || _pressed) return;
+        if (_dragState.IsDragging || _dragState.IsPressed) return;
         var client = ClientPointOfMessage(lParam);
         if (!HitTestSprite(client)) return;
 
-        _pressed = true;
+        _dragState.Begin();
         _pressPoint = client;
-        _pressMessageTime = NativeMethods.MessageTime();
         _pressTickMs = Environment.TickCount64;
         var cursor = NativeMethods.CursorPosition();
         var windowPos = PhysicalPosition();
@@ -620,15 +643,16 @@ public sealed class PetWindow : Window
 
     private void OnRawMove(nint lParam)
     {
-        if (!_pressed) return;
+        if (!_dragState.IsPressed) return;
         var client = ClientPointOfMessage(lParam);
-        if (!_dragging && MovedBeyondThreshold(client))
+        var crossedThreshold = !_dragState.IsDragging && MovedBeyondThreshold(client);
+        if (crossedThreshold)
         {
-            _dragging = true;
+            _dragState.StartDragging();
             ApplyDragRow(true); // 拖拽动作行（最高优先级，无绑定则保持当前动作）
             BenchTrace("raw drag started");
         }
-        if (!_dragging) return;
+        if (!_dragState.IsDragging) return;
 
         var cursor = NativeMethods.CursorPosition();
         var targetX = cursor.X - _grabOffset.X;
@@ -644,24 +668,35 @@ public sealed class PetWindow : Window
 
     private void OnRawLeftUp()
     {
-        if (!_pressed) return;
-        _pressed = false;
+        if (!_dragState.IsPressed) return;
+        var terminalAction = _dragState.Complete();
         ReleaseMouseCapture();
 
-        if (_dragging)
+        if (terminalAction == DragTerminalAction.CommitPosition)
         {
-            _dragging = false;
-            ApplyDragRow(false); // 释放拖拽动作行 → 回 idle/漫游
-            _roamEngine.FinishManualDrag(); // releasePending → 引擎 tick 抛掷/下落
+            ApplyDragRow(false);
+            _roamEngine.FinishManualDrag();
             var (x, y) = PhysicalPosition();
             _onDragFinished(this, x, y);
             BenchTrace($"raw drag finished at {x},{y}");
         }
-        else if (Environment.TickCount64 - _pressTickMs <= 280)
+        else if (terminalAction == DragTerminalAction.Click
+                 && Environment.TickCount64 - _pressTickMs <= 280)
         {
             // 未超阈值 = 点击（对齐 WindowDragController clickMaxMs + onClick）
             OnPetClick();
         }
+    }
+
+    private void CancelPointerInteraction()
+    {
+        if (!_dragState.IsPressed && !_dragState.IsDragging) return;
+        var wasDragging = _dragState.IsDragging;
+        _dragState.Cancel();
+        if (IsMouseCaptured) ReleaseMouseCapture();
+        if (wasDragging) ApplyDragRow(false);
+        _roamEngine.CancelManualDrag();
+        BenchTrace("raw pointer interaction cancelled");
     }
 
     /// <summary>拖拽动作行：越过 4px 阈值后激活（最高优先级），松开释放；无绑定保持当前动作。</summary>
@@ -895,29 +930,33 @@ public sealed class PetWindow : Window
     /// <summary>喂 token（对齐 feedPet：升级 → 进化气泡）。</summary>
     public void FeedTokens(double tokens)
     {
-        var before = CareEngine.LevelForXp(_careState.Xp);
-        CareEngine.FeedTokens(_careState, tokens, DateTime.Now);
-        var after = CareEngine.LevelForXp(_careState.Xp);
-        if (after > before) FlashCelebrate($"进化！{CareEngine.StageName(after)}");
-        PersistCare();
+        var next = _careState.Clone();
+        var before = CareEngine.LevelForXp(next.Xp);
+        CareEngine.FeedTokens(next, tokens, DateTime.Now);
+        var after = CareEngine.LevelForXp(next.Xp);
+        PersistCare(next);
+        _careState.CopyFrom(next);
+        if (after > before) FlashCelebrate(_i18n.Format("进化！{0}", CareEngine.StageName(after)));
     }
 
     /// <summary>记录一次会话（25 XP）。</summary>
     public void RecordMeal()
     {
-        var before = CareEngine.LevelForXp(_careState.Xp);
-        CareEngine.RecordMeal(_careState, DateTime.Now);
-        var after = CareEngine.LevelForXp(_careState.Xp);
-        if (after > before) FlashCelebrate($"进化！{CareEngine.StageName(after)}");
-        PersistCare();
+        var next = _careState.Clone();
+        var before = CareEngine.LevelForXp(next.Xp);
+        CareEngine.RecordMeal(next, DateTime.Now);
+        var after = CareEngine.LevelForXp(next.Xp);
+        PersistCare(next);
+        _careState.CopyFrom(next);
+        if (after > before) FlashCelebrate(_i18n.Format("进化！{0}", CareEngine.StageName(after)));
     }
 
     public CareState CurrentCareState => _careState;
 
-    private void PersistCare()
+    private void PersistCare(CareState next)
     {
         var care = _store.LoadCare();
-        care[_instance.Id] = _careState;
+        care[_instance.Id] = next;
         _store.SaveCare(care);
     }
 
@@ -958,13 +997,7 @@ public sealed class PetWindow : Window
     private void BenchTrace(string message)
     {
         if (!BenchLogEnabled) return;
-        try
-        {
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "desktoppet-drag.log"),
-                $"{Environment.TickCount64}: {message}{Environment.NewLine}");
-        }
-        catch (System.IO.IOException) { }
+        _logger.Info("BenchDrag", $"tick={Environment.TickCount64} {message}");
     }
 
     /// <summary>仅 bench 模式启用拖拽诊断日志（平时零 IO）。</summary>
@@ -1025,10 +1058,12 @@ public sealed class PetWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        CancelPointerInteraction();
         _animationTimer.Stop();
         _roamTimer.Stop();
         _renderTimer.Stop();
         _hwndSource?.RemoveHook(WndProcHook); // 钩子由弱引用持有（官方文档），窗口关闭显式摘除
+        _hwndSource = null;
         base.OnClosed(e);
     }
 }

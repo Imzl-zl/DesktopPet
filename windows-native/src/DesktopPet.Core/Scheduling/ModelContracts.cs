@@ -157,6 +157,10 @@ public interface IImageProvider
     Task<ImageResult> GenerateAsync(ImageGenRequest request, CancellationToken ct);
 }
 
+public sealed record ProvidersFileMigrationSource(
+    ProvidersFileModel Providers,
+    bool IsLossless);
+
 /// <summary>providers.json 存储模型 + 归一化/序列化（camelCase，对齐既有 JSON 存储风格）。</summary>
 public sealed class ProvidersFileModel
 {
@@ -184,6 +188,25 @@ public sealed class ProvidersFileModel
         PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
         Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase) },
     };
+
+    public static ProvidersFileMigrationSource InspectForMigration(string json)
+    {
+        try
+        {
+            var raw = System.Text.Json.JsonSerializer.Deserialize<ProvidersFileModel>(json, Options);
+            if (raw is null)
+                return new ProvidersFileMigrationSource(new ProvidersFileModel(), false);
+            var rawModelCount = raw.Models?.Count ?? 0;
+            var normalized = Normalize(raw);
+            var lossless = normalized.Models.Count == rawModelCount
+                           && (raw.Image is null || normalized.Image is not null);
+            return new ProvidersFileMigrationSource(normalized, lossless);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new ProvidersFileMigrationSource(new ProvidersFileModel(), false);
+        }
+    }
 
     public static string Serialize(ProvidersFileModel file)
         => System.Text.Json.JsonSerializer.Serialize(Normalize(file), Options);

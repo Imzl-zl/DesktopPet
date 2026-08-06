@@ -1,5 +1,8 @@
 namespace DesktopPet.App.Ai;
 
+using DesktopPet.App.Fullscreen;
+using DesktopPet.Core.I18n;
+
 /// <summary>输出模式四选一（迁移计划 §5 + 体验优化）：模式只决定 AI 主动输出形式；
 /// 用户主动对话随时可开（对话窗不受模式限制）。气泡 = 宠物头上气泡文字（默认，
 /// 不打断工作）；静默 = 停 Agent + 无主动输出。</summary>
@@ -23,19 +26,26 @@ public sealed class ModeService
     private readonly Func<Windows.DanmakuWindow> _danmakuFactory;
     private readonly Action<AiOutput> _routeToChat;
     private readonly Action<string> _routeToBubble;
+    private readonly Func<bool> _isFullscreen;
 
     private Windows.DanmakuWindow? _danmakuWindow;
     private OutputMode _mode = OutputMode.Silent;
+    private bool _fullscreenSuppressed;
 
     public OutputMode Mode => _mode;
 
     public event Action<OutputMode>? ModeChanged;
 
-    public ModeService(Func<Windows.DanmakuWindow> danmakuFactory, Action<AiOutput> routeToChat, Action<string> routeToBubble)
+    public ModeService(
+        Func<Windows.DanmakuWindow> danmakuFactory,
+        Action<AiOutput> routeToChat,
+        Action<string> routeToBubble,
+        Func<bool>? isFullscreen = null)
     {
         _danmakuFactory = danmakuFactory;
         _routeToChat = routeToChat;
         _routeToBubble = routeToBubble;
+        _isFullscreen = isFullscreen ?? (() => false);
     }
 
     /// <summary>切换模式：立即生效（旧窗口关闭即销毁，新窗口按需创建）。</summary>
@@ -43,16 +53,28 @@ public sealed class ModeService
     {
         if (_mode == mode) return;
         _mode = mode;
-        if (mode != OutputMode.Danmaku)
-        {
-            CloseDanmakuWindow();
-        }
+        if (_fullscreenSuppressed) CloseDanmakuWindow();
+        else if (_mode != OutputMode.Danmaku) CloseDanmakuWindow();
         ModeChanged?.Invoke(mode);
     }
 
-    /// <summary>路由 AI 输出（按当前模式；silent = 丢弃）。</summary>
+    public bool FullscreenSuppressed => _fullscreenSuppressed;
+
+    public void SetFullscreenSuppressed(bool suppressed)
+    {
+        if (_fullscreenSuppressed == suppressed) return;
+        _fullscreenSuppressed = suppressed;
+        if (suppressed) CloseDanmakuWindow();
+    }
+
+    /// <summary>路由 AI 输出（按当前模式；静默或全屏时丢弃主动输出）。</summary>
     public void RouteOutput(AiOutput output)
     {
+        if (FullscreenOutputPolicy.ShouldSuppress(
+                output.FromAnalysis,
+                _fullscreenSuppressed,
+                output.FromAnalysis && _isFullscreen())) return;
+
         switch (_mode)
         {
             case OutputMode.Danmaku:
@@ -74,8 +96,12 @@ public sealed class ModeService
         }
     }
 
+    public void ApplyLocalization(I18nService i18n)
+        => _danmakuWindow?.ApplyLocalization(i18n);
+
     public void Shutdown()
     {
+        _mode = OutputMode.Silent;
         CloseDanmakuWindow();
     }
 

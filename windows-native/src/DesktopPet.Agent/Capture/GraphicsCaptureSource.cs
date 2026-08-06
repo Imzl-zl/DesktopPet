@@ -6,6 +6,13 @@ using Windows.Graphics.Imaging;
 
 namespace DesktopPet.Agent.Capture;
 
+public enum GraphicsCaptureState
+{
+    Running,
+    Faulted,
+    Disposed,
+}
+
 /// <summary>
 /// 真实屏幕捕获（迁移计划 §6.4）：IGraphicsCaptureItemInterop.CreateForMonitor
 /// （微软官方 Win32 互操作路径，Windows.UI.Composition-Win32-Samples 同款）
@@ -13,7 +20,11 @@ namespace DesktopPet.Agent.Capture;
 /// 注意：必须在 STA + 消息泵线程创建（FrameArrived 事件依赖消息循环；
 /// AgentHost 用 WPF Dispatcher.Run 提供泵）。不可用 → 抛 NotSupportedException。
 /// </summary>
-public sealed class GraphicsCaptureSource : IScreenCaptureSource, IDisposable
+public sealed class GraphicsCaptureSource :
+    IScreenCaptureSource,
+    ICaptureCadenceSource,
+    ICaptureFaultSource,
+    IDisposable
 {
     public const int ThumbWidth = 320;
     public const int ThumbHeight = 180;
@@ -25,36 +36,66 @@ public sealed class GraphicsCaptureSource : IScreenCaptureSource, IDisposable
     private static readonly Guid IID_IDXGIDevice = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
 
     private readonly object _gate = new();
+    private readonly CaptureCadenceGate _copyCadence;
+    private GraphicsCaptureItem? _item;
     private GraphicsCaptureSession? _session;
     private Direct3D11CaptureFramePool? _framePool;
     private IDirect3DDevice? _device;
     private SoftwareBitmap? _latest;
+    private GraphicsCaptureState _state;
     private bool _hasFrame;
-    private bool _disposed;
+    private int _consecutiveFailures;
 
     public static bool IsSupported() => GraphicsCaptureSession.IsSupported();
 
-    public GraphicsCaptureSource()
+    public GraphicsCaptureSource(
+        TimeSpan? captureInterval = null,
+        TimeProvider? timeProvider = null)
     {
-        if (!IsSupported())
+        _copyCadence = new CaptureCadenceGate(
+            captureInterval ?? TimeSpan.FromSeconds(1),
+            timeProvider);
+        try
         {
-            throw new NotSupportedException("当前设备不支持 Windows.Graphics.Capture");
-        }
+            if (!IsSupported())
+                throw new NotSupportedException("当前设备不支持 Windows.Graphics.Capture");
 
-        _device = CreateD3DDevice();
-        var item = CreateCaptureItemForMonitor(MonitorFromPoint(0, 0, 1 /* MONITOR_DEFAULTTONEAREST */));
-        _framePool = Direct3D11CaptureFramePool.Create(
-            _device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 1, item.Size);
-        _framePool.FrameArrived += OnFrameArrived;
-        _session = _framePool.CreateCaptureSession(item);
-        _session.StartCapture();
+            _device = CreateD3DDevice();
+            _item = CreateCaptureItemForMonitor(MonitorFromPoint(0, 0, 1 /* MONITOR_DEFAULTTONEAREST */));
+            _item.Closed += OnItemClosed;
+            _framePool = Direct3D11CaptureFramePool.Create(
+                _device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 1, _item.Size);
+            _framePool.FrameArrived += OnFrameArrived;
+            _session = _framePool.CreateCaptureSession(_item);
+            _session.StartCapture();
+            lock (_gate) _state = GraphicsCaptureState.Running;
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
     }
+
+    public GraphicsCaptureState State
+    {
+        get { lock (_gate) return _state; }
+    }
+
+    public event Action<Exception>? Faulted;
+
+    public void SetCaptureInterval(TimeSpan interval) => _copyCadence.UpdateInterval(interval);
 
     public Task<CapturedFrame?> CaptureAsync(CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         SoftwareBitmap? bitmap;
         lock (_gate)
         {
+            if (_state == GraphicsCaptureState.Disposed)
+                throw new ObjectDisposedException(nameof(GraphicsCaptureSource));
+            if (_state == GraphicsCaptureState.Faulted)
+                throw new CaptureSourceUnavailableException("GraphicsCapture source is faulted");
             if (!_hasFrame) return Task.FromResult<CapturedFrame?>(null);
             bitmap = _latest;
             _latest = null;
@@ -65,13 +106,16 @@ public sealed class GraphicsCaptureSource : IScreenCaptureSource, IDisposable
         {
             using (bitmap)
             {
-                var gray = ConvertToGrayThumbnail(bitmap!); // lock 内已保证非 null（_hasFrame=true）
-                return Task.FromResult<CapturedFrame?>(new CapturedFrame(ThumbWidth, ThumbHeight, gray));
+                var gray = ConvertToGrayThumbnail(bitmap!);
+                Interlocked.Exchange(ref _consecutiveFailures, 0);
+                return Task.FromResult<CapturedFrame?>(
+                    new CapturedFrame(ThumbWidth, ThumbHeight, gray));
             }
         }
-        catch
+        catch (Exception ex)
         {
-            return Task.FromResult<CapturedFrame?>(null); // 单帧转换失败：下一拍重试
+            RegisterFailure(ex);
+            return Task.FromResult<CapturedFrame?>(null);
         }
     }
 
@@ -79,20 +123,57 @@ public sealed class GraphicsCaptureSource : IScreenCaptureSource, IDisposable
     {
         try
         {
-            using var frame = sender.TryGetNextFrame();
-            if (frame is null) return;
-            var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface).AsTask().GetAwaiter().GetResult();
             lock (_gate)
             {
-                _latest?.Dispose();
+                if (_state != GraphicsCaptureState.Running) return;
+            }
+
+            using var frame = sender.TryGetNextFrame();
+            if (frame is null) return;
+            if (!_copyCadence.TryAcquire()) return;
+
+            var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface)
+                .AsTask().GetAwaiter().GetResult();
+            SoftwareBitmap? previous;
+            lock (_gate)
+            {
+                if (_state != GraphicsCaptureState.Running)
+                {
+                    bitmap.Dispose();
+                    return;
+                }
+                previous = _latest;
                 _latest = bitmap;
                 _hasFrame = true;
             }
+            previous?.Dispose();
+            Interlocked.Exchange(ref _consecutiveFailures, 0);
         }
-        catch
+        catch (Exception ex)
         {
-            // 单帧捕获失败忽略（下一帧再试）
+            RegisterFailure(ex);
         }
+    }
+
+    private void OnItemClosed(GraphicsCaptureItem sender, object args)
+        => MarkFault(new InvalidOperationException("GraphicsCaptureItem closed"));
+
+    private void RegisterFailure(Exception exception)
+    {
+        if (Interlocked.Increment(ref _consecutiveFailures) >= 3)
+            MarkFault(exception);
+    }
+
+    private void MarkFault(Exception exception)
+    {
+        var notify = false;
+        lock (_gate)
+        {
+            if (_state is GraphicsCaptureState.Disposed or GraphicsCaptureState.Faulted) return;
+            _state = GraphicsCaptureState.Faulted;
+            notify = true;
+        }
+        if (notify) Faulted?.Invoke(exception);
     }
 
     private static byte[] ConvertToGrayThumbnail(SoftwareBitmap source)
@@ -128,17 +209,25 @@ public sealed class GraphicsCaptureSource : IScreenCaptureSource, IDisposable
     private static GraphicsCaptureItem CreateCaptureItemForMonitor(IntPtr hmon)
     {
         var factory = GetActivationFactory(typeof(GraphicsCaptureItem));
-        var interop = (IGraphicsCaptureItemInterop)factory;
-        var iid = IID_GraphicsCaptureItem; // 固定 IID（typeof().GUID 随投影版本漂移）
-        var hr = interop.CreateForMonitor(hmon, ref iid, out var itemAbi);
-        if (hr < 0) throw Marshal.GetExceptionForHR(hr)!;
         try
         {
-            return GraphicsCaptureItem.FromAbi(itemAbi);
+            var interop = (IGraphicsCaptureItemInterop)factory;
+            var iid = IID_GraphicsCaptureItem; // 固定 IID（typeof().GUID 随投影版本漂移）
+            var itemAbi = IntPtr.Zero;
+            var hr = interop.CreateForMonitor(hmon, ref iid, out itemAbi);
+            if (hr < 0) throw Marshal.GetExceptionForHR(hr)!;
+            try
+            {
+                return GraphicsCaptureItem.FromAbi(itemAbi);
+            }
+            finally
+            {
+                if (itemAbi != IntPtr.Zero) Marshal.Release(itemAbi);
+            }
         }
         finally
         {
-            Marshal.Release(itemAbi);
+            if (Marshal.IsComObject(factory)) Marshal.FinalReleaseComObject(factory);
         }
     }
 
@@ -169,37 +258,72 @@ public sealed class GraphicsCaptureSource : IScreenCaptureSource, IDisposable
             out var d3dDevice, out _, out _);
         if (hr != 0)
         {
+            if (d3dDevice != IntPtr.Zero) Marshal.Release(d3dDevice);
             // WARP 软件回退（虚拟机/无 GPU 环境）
             hr = D3D11CreateDevice(IntPtr.Zero, D3D_DRIVER_TYPE_WARP, IntPtr.Zero,
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT, IntPtr.Zero, 0, D3D11_SDK_VERSION,
                 out d3dDevice, out _, out _);
-            if (hr != 0) throw new InvalidOperationException($"D3D11CreateDevice 失败 hr=0x{hr:X8}");
+            if (hr != 0)
+            {
+                if (d3dDevice != IntPtr.Zero) Marshal.Release(d3dDevice);
+                throw new InvalidOperationException($"D3D11CreateDevice 失败 hr=0x{hr:X8}");
+            }
         }
 
         var iidDxgi = IID_IDXGIDevice;
-        Marshal.QueryInterface(d3dDevice, ref iidDxgi, out var dxgiDevice);
+        var queryHr = Marshal.QueryInterface(d3dDevice, ref iidDxgi, out var dxgiDevice);
         Marshal.Release(d3dDevice);
+        if (queryHr < 0 || dxgiDevice == IntPtr.Zero)
+        {
+            if (dxgiDevice != IntPtr.Zero) Marshal.Release(dxgiDevice);
+            throw new InvalidOperationException($"QueryInterface IDXGIDevice 失败 hr=0x{queryHr:X8}");
+        }
+
+        var graphicsDevice = IntPtr.Zero;
         try
         {
-            hr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, out var graphicsDevice);
-            if (hr < 0) throw new InvalidOperationException($"CreateDirect3D11DeviceFromDXGIDevice 失败 hr=0x{hr:X8}");
+            hr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, out graphicsDevice);
+            if (hr < 0 || graphicsDevice == IntPtr.Zero)
+                throw new InvalidOperationException($"CreateDirect3D11DeviceFromDXGIDevice 失败 hr=0x{hr:X8}");
             return WinRT.MarshalInterface<IDirect3DDevice>.FromAbi(graphicsDevice);
         }
         finally
         {
+            if (graphicsDevice != IntPtr.Zero) Marshal.Release(graphicsDevice);
             Marshal.Release(dxgiDevice);
         }
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        _session?.Dispose();
-        if (_framePool is not null) _framePool.FrameArrived -= OnFrameArrived;
-        _framePool?.Dispose();
-        _device?.Dispose();
-        lock (_gate) _latest?.Dispose();
+        GraphicsCaptureSession? session;
+        Direct3D11CaptureFramePool? framePool;
+        GraphicsCaptureItem? item;
+        IDirect3DDevice? device;
+        SoftwareBitmap? latest;
+        lock (_gate)
+        {
+            if (_state == GraphicsCaptureState.Disposed) return;
+            _state = GraphicsCaptureState.Disposed;
+            session = _session;
+            framePool = _framePool;
+            item = _item;
+            device = _device;
+            latest = _latest;
+            _session = null;
+            _framePool = null;
+            _item = null;
+            _device = null;
+            _latest = null;
+            _hasFrame = false;
+        }
+
+        if (item is not null) item.Closed -= OnItemClosed;
+        if (framePool is not null) framePool.FrameArrived -= OnFrameArrived;
+        session?.Dispose();
+        framePool?.Dispose();
+        device?.Dispose();
+        latest?.Dispose();
     }
 
     [ComImport]

@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DesktopPet.Core.Ai;
@@ -38,6 +41,89 @@ public interface IJsonStore
     void SaveProvidersFile(ProvidersFileModel providers);
 }
 
+/// <summary>文件持久化失败；调用方可据此向用户显示明确错误并保留内存状态。</summary>
+public sealed class JsonStoreException : IOException
+{
+    public JsonStoreException(string operation, string filePath, Exception inner)
+        : base($"JSON 持久化{operation}失败：{filePath}", inner)
+    {
+        Operation = operation;
+        FilePath = filePath;
+    }
+
+    public string Operation { get; }
+    public string FilePath { get; }
+}
+
+/// <summary>同目录临时文件写透后，以单次 rename/move 发布目标文件。</summary>
+internal sealed class AtomicFilePublisher
+{
+    private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+    private readonly Action<string, string> _publish;
+
+    internal AtomicFilePublisher(Action<string, string>? publish = null)
+    {
+        _publish = publish ?? Publish;
+    }
+
+    private static void Publish(string temporaryPath, string destinationPath)
+        => File.Move(temporaryPath, destinationPath, overwrite: true);
+
+    internal void Write(string destinationPath, string content)
+    {
+        var directory = Path.GetDirectoryName(destinationPath)
+            ?? throw new ArgumentException("目标文件必须包含目录", nameof(destinationPath));
+        var temporaryPath = Path.Combine(
+            directory,
+            $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+        var published = false;
+        Exception? failure = null;
+
+        try
+        {
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.SequentialScan | FileOptions.WriteThrough))
+            using (var writer = new StreamWriter(
+                       stream,
+                       Utf8WithoutBom,
+                       bufferSize: 4096,
+                       leaveOpen: true))
+            {
+                writer.Write(content);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+            _publish(temporaryPath, destinationPath);
+            published = true;
+        }
+        catch (Exception ex)
+        {
+            failure = ex;
+        }
+
+        if (!published)
+        {
+            try
+            {
+                File.Delete(temporaryPath);
+            }
+            catch (Exception cleanupError)
+            {
+                failure = failure is null
+                    ? cleanupError
+                    : new AggregateException(failure, cleanupError);
+            }
+        }
+
+        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+}
+
 /// <summary>%APPDATA%/DesktopPet/ 的 JSON 文件实现（迁移计划 §2 持久化决策）。
 /// store 文件使用 camelCase + 枚举字符串，与 Tauri localStorage 的 TS 格式一致
 /// （Phase 3 迁移工具可直接读取）。</summary>
@@ -49,39 +135,66 @@ public sealed class FileJsonStore : IJsonStore
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
+    private static readonly ConcurrentDictionary<string, object> WriteLocks = new(
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private readonly string _directory;
+    private readonly AtomicFilePublisher _publisher;
 
     public string DirectoryPath => _directory;
 
     public FileJsonStore(string directory)
+        : this(directory, new AtomicFilePublisher())
+    {
+    }
+
+    internal FileJsonStore(string directory, AtomicFilePublisher publisher)
     {
         _directory = directory;
-        Directory.CreateDirectory(directory);
+        _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
+        try
+        {
+            Directory.CreateDirectory(directory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new JsonStoreException("创建数据目录", directory, ex);
+        }
     }
 
     private string PathFor(string name) => System.IO.Path.Combine(_directory, name);
 
     private string? ReadFile(string name)
     {
+        var path = PathFor(name);
         try
         {
-            return File.Exists(PathFor(name)) ? File.ReadAllText(PathFor(name)) : null;
+            return File.ReadAllText(path);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
             return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new JsonStoreException("读取", path, ex);
         }
     }
 
     private void WriteFile(string name, string content)
     {
-        try
+        var path = PathFor(name);
+        lock (WriteLocks.GetOrAdd(path, static _ => new object()))
         {
-            File.WriteAllText(PathFor(name), content);
-        }
-        catch (IOException)
-        {
-            // 持久化失败不拖垮主进程（对齐 Rust 的 let _ = write(...)）
+            try
+            {
+                _publisher.Write(path, content);
+            }
+            catch (Exception ex) when (ex is IOException
+                                             or UnauthorizedAccessException
+                                             or AggregateException)
+            {
+                throw new JsonStoreException("写入", path, ex);
+            }
         }
     }
 
@@ -229,6 +342,12 @@ public sealed class FileJsonStore : IJsonStore
 
     public void SavePersonasFile(PersonasFileModel personas)
         => WriteFile("personas.json", JsonSerializer.Serialize(PersonasFileModel.Normalize(personas), SettingsJsonOptions));
+
+    public ProvidersFileMigrationSource? LoadProvidersFileForMigration()
+    {
+        var raw = ReadFile("providers.json");
+        return raw is null ? null : ProvidersFileModel.InspectForMigration(raw);
+    }
 
     public ProvidersFileModel? LoadProvidersFile()
     {

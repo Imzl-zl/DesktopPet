@@ -1,16 +1,21 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Windows.Media;
 using DesktopPet.App.Windows;
 using DesktopPet.Core.Ai;
 using DesktopPet.Core.Care;
 using DesktopPet.Core.Interaction;
+using DesktopPet.Core.I18n;
 using DesktopPet.Core.Memory;
 using DesktopPet.Core.Personas;
+using DesktopPet.Core.Pets;
 using DesktopPet.Core.Scheduling;
 using DesktopPet.Core.Storage;
 using DesktopPet.Core.Summary;
+using DesktopPet.Infra.Diagnostics;
+using DesktopPet.Infra.Lifecycle;
 using DesktopPet.Infra.PipeRpc;
 using DesktopPet.Infra.Providers;
 using DesktopPet.Infra.Tts;
@@ -28,7 +33,7 @@ namespace DesktopPet.App.Ai;
 ///   主动互动（定时 + 事件驱动，多宠物并行分派）、每日总结 + 总结图（开关组）、
 ///   对话朗读（Edge TTS，语音开关 + 仅对话模式）
 /// </summary>
-public sealed class AiCoordinator : IDisposable
+public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnectionTester
 {
     private readonly FileJsonStore _store;
     private readonly ModeService _modeService;
@@ -37,21 +42,37 @@ public sealed class AiCoordinator : IDisposable
     private readonly string _agentHostPath;
     private readonly ScreenEventLog _eventLog = new();
     private readonly object _lock = new();
+    // 对话串行闸：管道执行 + 会话记忆 + token/亲密度/画像记账（读-改-写）整体串行化，
+    // 防并发对话互相覆盖（修复：原实现 LoadCare→FeedTokens→SaveCare 并发丢账）。
+    private readonly SemaphoreSlim _chatSerial = new(1, 1);
 
     private AppSettings _settings;
     private PersonasFileModel _personas;
     private ProvidersFileModel _providers;
 
     private Process? _agent;
-    private PipeRpcClient? _rpc;
+    private readonly OwnedResourceSlot<PipeRpcClient> _rpcSlot = new();
     private CancellationTokenSource? _lifeCts;
     private bool _shuttingDown;
     private int _restartFailures;
+    private readonly object _disposeSync = new();
+    private Task? _disposeTask;
+    private int _shutdownRequested;
 
-    // App 侧对话管道（对话直连 provider，不占 Agent）
-    private ModelRequestScheduler? _chatScheduler;
-    private ChatPipeline? _pipeline;
+    // App 侧 provider 运行时代际：请求 lease 固定其管道，配置切换先发布新代际，旧代际 drain 后释放。
+    private readonly AsyncGenerationOwner<AiRuntimeGeneration> _runtime = new();
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private readonly object _stateLock = new();
+    private long _runtimeRevision;
+    private long _agentConfigRevision;
+    private long _agentRevisionFloor;
+    private long _pendingAgentRevision;
+    private readonly SemaphoreSlim _agentConfigSend = new(1, 1);
     private readonly WindowsCredentialStore _credentials = new();
+    private readonly HttpClient _providerHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly I18nService _i18n;
+    private readonly IAppLogger _logger;
+    private readonly CancellationTokenSource _coordinatorLifetime = new();
 
     // Phase 6：陪伴增强状态
     private UserProfile _profile;                       // 记忆画像（记忆开关关 = 空画像）
@@ -59,6 +80,7 @@ public sealed class AiCoordinator : IDisposable
     private readonly PetInteractionDispatcher _dispatcher = new();
     private InteractionEngine _interaction;             // 主动互动（频率/感知随设置更新）
     private DateOnly? _lastDiaryDate;                   // 日记最近生成日期
+    private DateOnly? _pendingDiaryDate;
     // L1/L2 分层会话记忆（简洁版）：L1 最近消息按 token 预算保留（预算 = 模型上下文 50%，
     // 256k 配置下几百轮不触发）；L2 真超预算时最早轮次压缩进滚动摘要注入，不静默丢弃；
     // 摘要可合并进 L3 画像（RecordChatSuccess）。
@@ -66,7 +88,9 @@ public sealed class AiCoordinator : IDisposable
     // 语音输出：SAPI 离线合成（默认；Edge TTS 对 SChannel 风控不可用，见 EdgeTtsProvider 注释）
     private readonly ITtsProvider _tts = new SapiTtsProvider();
     private readonly MediaPlayer _ttsPlayer = new();
-    private IImageProvider? _imageProvider;             // 总结图（providers.json image 段）
+    // 朗读生效状态（会话内）：初始 = 持久设置；对话窗按钮切换；设置页保存重置。
+    // 修复：原实现 Speak 只看持久设置，对话窗朗读按钮点击无效。
+    private bool _ttsSessionEnabled;
     private System.Threading.Timer? _tickTimer;         // 30s 周期：主动互动 + 每日总结
 
     public AiCoordinator(
@@ -74,20 +98,26 @@ public sealed class AiCoordinator : IDisposable
         ModeService modeService,
         ChatWindow chatWindow,
         Action<string, CareState, int> recordTokens,
-        string agentHostPath)
+        string agentHostPath,
+        I18nService? i18n = null,
+        IAppLogger? logger = null)
     {
         _store = store;
         _modeService = modeService;
         _chatWindow = chatWindow;
         _recordTokens = recordTokens;
         _agentHostPath = agentHostPath;
+        _i18n = i18n ?? new I18nService();
+        _logger = logger ?? NullAppLogger.Instance;
         _settings = AppSettings.Normalize(store.LoadSettings() ?? AppSettings.Defaults(Core.I18n.I18nService.Detect()));
         _personas = PersonasFileModel.Normalize(store.LoadPersonasFile() ?? new PersonasFileModel());
         _providers = store.LoadProvidersFile() ?? new ProvidersFileModel();
         _profile = MemoryProfileExtractor.Normalize(store.LoadMemoryProfile());
         _intimacy = new IntimacyEngine(store.LoadIntimacy() ?? IntimacyState.Defaults);
         _lastDiaryDate = store.LoadDiaryLastGenerated();
-        _imageProvider = BuildImageProvider(_providers);
+        _ = _runtime.ReplaceAsync(BuildRuntime(_settings, _providers, _personas));
+        _ttsSessionEnabled = _settings.Ai.TtsEnabled;
+        _chatWindow.TtsToggled += value => _ttsSessionEnabled = value;
         _interaction = new InteractionEngine(
             new InteractionEngineState(null, null),
             _settings.Ai.InteractionFrequency,
@@ -98,23 +128,51 @@ public sealed class AiCoordinator : IDisposable
 
     public PersonasFileModel Personas => _personas;
     public ProvidersFileModel Providers => _providers;
+
+    public Task<ModelConnectionTestResult> TestAsync(ModelConnectionDraft draft, CancellationToken ct)
+        => new ModelConnectionTester(_credentials, _providerHttp).TestAsync(draft, ct);
     public bool AiEnabled => _settings.Ai.Enabled;
 
-    /// <summary>设置变更（App 保存后调用）：总开关 + 输出模式共同决定 Agent 启停；其余同步配置。</summary>
+    public int? AgentProcessId
+    {
+        get
+        {
+            lock (_lock)
+            {
+                var process = _agent;
+                if (process is null) return null;
+                try { return process.HasExited ? null : process.Id; }
+                catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+                {
+                    return null;
+                }
+            }
+        }
+    }
+
+    /// <summary>设置变更：同步更新轻量 UI 状态，异步串行协调 Agent 与 provider 运行时代际。</summary>
     public void ApplySettings(AppSettings settings)
     {
-        // 仅聊天（silent）模式 = 停 Agent：无截屏、无 vision 分析、无事件评论——
-        // 主动互动用不上屏幕感知，继续截屏只烧 token（对齐迁移计划 §5 硬约束）。
-        // 用户主动对话在 App 进程直连，不受影响。
-        var shouldRun = settings.Ai.Enabled && settings.Ai.OutputMode != "silent";
-        var running = _agent is not null; // 以实际进程状态为准（启动时构造已读到旧设置）
-        _settings = settings;
-        if (shouldRun) _restartFailures = 0; // 设置变更重置看门狗计数
+        long revision;
+        var shouldRunAgent = settings.Ai.Enabled && settings.Ai.OutputMode != "silent";
+        lock (_stateLock)
+        {
+            _settings = settings;
+            revision = ++_runtimeRevision;
+            if (!settings.Ai.Enabled)
+            {
+                using var active = _runtime.Acquire();
+                active?.Value.RequestStop();
+            }
+        }
+        if (!shouldRunAgent) RequestAgentStopNow();
+
+        if (shouldRunAgent) _restartFailures = 0;
         _interaction.SetEnabled(settings.Ai.ActiveInteraction);
         _interaction.UpdateFrequency(settings.Ai.InteractionFrequency);
         _interaction.UpdateScreenAwareness(settings.Ai.ScreenAwareness);
-        _chatWindow.TtsEnabled = settings.Ai.TtsEnabled; // 语音开关同步到对话窗按钮
-        // 屏幕上下文：设置页 AI 开关 = 持久默认值；对话窗按钮只切换本次会话（与 TtsEnabled 同模式）
+        _chatWindow.TtsEnabled = settings.Ai.TtsEnabled;
+        _ttsSessionEnabled = settings.Ai.TtsEnabled;
         _chatWindow.ScreenContextEnabled = settings.Ai.ScreenContextEnabled;
         _modeService.SetMode(settings.Ai.OutputMode switch
         {
@@ -123,105 +181,214 @@ public sealed class AiCoordinator : IDisposable
             "bubble" => OutputMode.Bubble,
             _ => OutputMode.Silent,
         });
-        if (shouldRun && !running) StartAgent();
-        else if (!shouldRun && running) StopAgent();
-        else if (shouldRun) PushConfig(); // 分析/模式/人格/模型变化同步
-        RebuildChatPipeline();
+        QueueRuntimeReconcile(revision);
     }
 
     public void ApplyPersonas(PersonasFileModel personas)
     {
-        _personas = PersonasFileModel.Normalize(personas);
-        _store.SavePersonasFile(_personas);
-        RebuildChatPipeline(); // 人格切换立即生效（下一轮请求）
-        if (_settings.Ai.Enabled) PushConfig();
+        var normalized = PersonasFileModel.Normalize(personas);
+        _store.SavePersonasFile(normalized);
+        long revision;
+        lock (_stateLock)
+        {
+            _personas = normalized;
+            revision = ++_runtimeRevision;
+        }
+        QueueRuntimeReconcile(revision);
     }
 
     /// <summary>
     /// 初始化引导完成（称呼 + 人格，App 启动 / 设置页开启 AI 两处触发共用此入口）：
     /// 人格落盘 → 称呼写入画像 → Onboarded 标记。保存逻辑收敛一处，调用方不重复实现。
     /// </summary>
-    public void CompleteOnboarding(string callName, string personaId)
+    public void CompleteOnboarding(
+        string callName,
+        string personaId,
+        AppSettings? settingsOverride = null)
     {
         var personas = PersonasFileModel.Normalize(_personas);
         personas.SelectedId = personaId;
-        ApplyPersonas(personas);
-        SetCallName(callName);
-        _settings = AppSettings.Normalize(_settings) with { Ai = _settings.Ai with { Onboarded = true } };
-        _store.SaveSettings(_settings);
+        var profile = _profile with { CallName = callName.Trim() };
+        var baseSettings = AppSettings.Normalize(settingsOverride ?? _settings);
+        var nextSettings = baseSettings with
+        {
+            Ai = baseSettings.Ai with { Onboarded = true },
+        };
+
+        // 设置文件作为最后提交点：前两步失败时不会发布新的运行时快照；下次启动仍会重试引导。
+        _store.SavePersonasFile(personas);
+        if (nextSettings.Ai.MemoryEnabled) _store.SaveMemoryProfile(profile);
+        _store.SaveSettings(nextSettings);
+
+        long revision;
+        lock (_stateLock)
+        {
+            _personas = personas;
+            _settings = nextSettings;
+            revision = ++_runtimeRevision;
+        }
+        _profile = profile;
+        QueueRuntimeReconcile(revision);
     }
 
     /// <summary>设置称呼（更新记忆画像并落盘；记忆开关关 = 只更新内存画像）。</summary>
     public void SetCallName(string callName)
     {
-        _profile = _profile with { CallName = callName.Trim() };
-        if (_settings.Ai.MemoryEnabled) _store.SaveMemoryProfile(_profile);
+        var next = _profile with { CallName = callName.Trim() };
+        if (_settings.Ai.MemoryEnabled) _store.SaveMemoryProfile(next);
+        _profile = next;
     }
 
     public void ApplyProviders(ProvidersFileModel providers)
     {
-        _providers = ProvidersFileModel.Normalize(providers);
-        _store.SaveProvidersFile(_providers);
-        _imageProvider = BuildImageProvider(_providers); // 生图连接变更立即生效（总结图）
-        RebuildChatPipeline();
-        if (_settings.Ai.Enabled) PushConfig();
+        var normalized = ProvidersFileModel.Normalize(providers);
+        _store.SaveProvidersFile(normalized);
+        long revision;
+        lock (_stateLock)
+        {
+            _providers = normalized;
+            revision = ++_runtimeRevision;
+        }
+        QueueRuntimeReconcile(revision);
     }
 
     /// <summary>用户主动对话（任何模式下可用）：管道 → 输出到对话窗 + token 记账。</summary>
     public async Task SendChatAsync(string text, bool withScreenContext)
     {
-        if (_pipeline is null)
+        using var runtimeLease = _runtime.Acquire();
+        var pipeline = runtimeLease?.Value.Pipeline;
+        if (pipeline is null)
         {
-            OnUiThread(() => _chatWindow.AppendAssistantAsync("（未配置模型连接，请到设置 → AI 助手 → 模型连接）"));
+            OnUiThread(() => _chatWindow.AppendAssistantAsync(
+                _i18n.T("（未配置模型连接，请到设置 → AI 助手 → 模型连接）")));
             return;
         }
+
+        DesktopPet.Core.Ai.PipelineResult result;
         try
         {
-            // Phase 6：记忆注入（开关开 + 有画像）+ 亲密度语气指令（开关开）
-            Func<string>? memoryInjector = _settings.Ai.MemoryEnabled
-                ? () => MemoryProfileExtractor.Inject(_profile)
-                : null;
-            Func<string>? suffixFactory = _settings.Ai.IntimacyEnabled
-                ? () => _intimacy.BuildIntimacyDirective()
-                : null;
-            var result = await _pipeline.RunAsync(text, _conversation.BuildContext(CurrentContextTokens()), withScreenContext,
-                memoryInjector: memoryInjector,
-                systemPromptSuffix: suffixFactory,
-                maxTokens: CurrentMaxOutputTokens());
-            if (!result.Ok)
+            await _chatSerial.WaitAsync();
+            try
             {
-                OnUiThread(() => _chatWindow.AppendAssistantAsync(result.Error switch
+                // Phase 6：记忆注入（开关开 + 有画像）+ 亲密度语气指令（开关开）
+                Func<string>? memoryInjector = _settings.Ai.MemoryEnabled
+                    ? () => MemoryProfileExtractor.Inject(_profile)
+                    : null;
+                Func<string>? suffixFactory = _settings.Ai.IntimacyEnabled
+                    ? () => _intimacy.BuildIntimacyDirective()
+                    : null;
+                result = await pipeline.RunAsync(text, _conversation.BuildContext(CurrentContextTokens()), withScreenContext,
+                    memoryInjector: memoryInjector,
+                    systemPromptSuffix: suffixFactory,
+                    maxTokens: CurrentMaxOutputTokens(),
+                    ct: runtimeLease!.Value.LifetimeToken);
+                if (result.Ok)
                 {
-                    "empty" => "（消息不能为空）",
-                    "too-long" => "（消息太长了）",
-                    _ => "（出错了）",
-                }));
-                return;
+                    // L1 会话窗口维护：成功后追加本轮（预算裁剪与 L2 摘要由 ConversationMemory 负责）
+                    _conversation.Append(text, result.Text!);
+                    if (result.TokensUsed > 0) RecordTokens(result.TokensUsed);
+                    RecordChatSuccess(text, result.TokensUsed);   // 亲密度 + 画像更新
+                }
             }
-            // L1 会话窗口维护：成功后追加本轮（预算裁剪与 L2 摘要由 ConversationMemory 负责）
-            _conversation.Append(text, result.Text!);
-            OnUiThread(() => _chatWindow.AppendAssistantAsync(result.Text!));
-            if (result.TokensUsed > 0) RecordTokens(result.TokensUsed);
-            RecordChatSuccess(text, result.TokensUsed);   // Phase 6：亲密度 + 画像更新
-            Speak(result.Text!);                          // Phase 6：语音开关 + 对话模式
+            finally
+            {
+                _chatSerial.Release();
+            }
         }
         catch (ProviderException ex)
         {
             OnUiThread(() => _chatWindow.AppendAssistantAsync(ex.Code switch
             {
-                "auth" => "（API Key 无效，请检查模型连接）",
-                "timeout" => "（模型响应超时了，让我歇口气~）",
-                _ => "（模型连接出错了）",
+                "auth" => _i18n.T("（API Key 无效，请检查模型连接）"),
+                "timeout" => _i18n.T("（模型响应超时了，让我歇口气~）"),
+                _ => _i18n.T("（模型连接出错了）"),
             }));
+            return;
         }
         catch (Exception)
         {
-            OnUiThread(() => _chatWindow.AppendAssistantAsync("（出错了，请稍后再试）"));
+            OnUiThread(() => _chatWindow.AppendAssistantAsync(_i18n.T("（出错了，请稍后再试）")));
+            return;
         }
+
+        // UI 输出在串行段外（不延长锁持有；Speech 等同样移出）
+        if (!result.Ok)
+        {
+            OnUiThread(() => _chatWindow.AppendAssistantAsync(result.Error switch
+            {
+                "empty" => _i18n.T("（消息不能为空）"),
+                "too-long" => _i18n.T("（消息太长了）"),
+                _ => _i18n.T("（出错了）"),
+            }));
+            return;
+        }
+        OnUiThread(() => _chatWindow.AppendAssistantAsync(result.Text!));
+        Speak(result.Text!);                          // 语音开关 + 对话模式
     }
 
     /// <summary>打开对话窗（用户主动对话入口，任何模式可用）。</summary>
     public void EnsureChatWindow() => OnUiThread(_chatWindow.Show);
+
+    private void QueueRuntimeReconcile(long revision)
+        => ObserveTask(ReconcileRuntimeAsync(revision), "runtime reconcile");
+
+    private async Task ReconcileRuntimeAsync(long revision)
+    {
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            AppSettings settings;
+            ProvidersFileModel providers;
+            PersonasFileModel personas;
+            Task retirement;
+            lock (_stateLock)
+            {
+                if (_shuttingDown || revision != _runtimeRevision) return;
+                settings = _settings;
+                providers = _providers;
+                personas = _personas;
+
+                if (!settings.Ai.Enabled)
+                {
+                    using var active = _runtime.Acquire();
+                    active?.Value.RequestStop();
+                }
+                retirement = _runtime.ReplaceAsync(BuildRuntime(settings, providers, personas));
+            }
+            ObserveTask(retirement, "retired runtime disposal");
+
+            lock (_stateLock)
+            {
+                if (_shuttingDown || revision != _runtimeRevision) return;
+            }
+
+            var shouldRun = settings.Ai.Enabled && settings.Ai.OutputMode != "silent";
+            bool running;
+            lock (_lock) running = _agent is not null;
+            var rpc = _rpcSlot.Current;
+
+            if (shouldRun && !running) StartAgent();
+            else if (!shouldRun && running) await StopAgentAsync().ConfigureAwait(false);
+            else if (shouldRun) await PushConfigAsync(rpc, _coordinatorLifetime.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private void ObserveTask(Task task, string operation)
+    {
+        if (task.IsCompletedSuccessfully) return;
+        _ = ObserveTaskCoreAsync(task, operation);
+    }
+
+    private async Task ObserveTaskCoreAsync(Task task, string operation)
+    {
+        try { await task.ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { DebugLog($"{operation} failed: {ex}"); }
+    }
 
     // ---- Agent 生命周期 ----
 
@@ -233,38 +400,51 @@ public sealed class AiCoordinator : IDisposable
         else dispatcher.Invoke(action);
     }
 
-    private static void DebugLog(string msg)
-    {
-        try
-        {
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "desktoppet-ai.log"),
-                $"{DateTime.Now:HH:mm:ss.fff} [T{Thread.CurrentThread.ManagedThreadId}] {msg}" + System.Environment.NewLine);
-        }
-        catch (Exception) { }
-    }
+    private void DebugLog(string msg) => _logger.Info("AiCoordinator", msg);
 
     private void StartAgent()
     {
-        lock (_lock)
+        CancellationToken lifeToken = default;
+        AgentLaunchContract? launch = null;
+        var started = false;
+        var launchFailed = false;
+        lock (_stateLock)
         {
-            DebugLog($"StartAgent: enabled={_settings.Ai.Enabled} agent={_agent is not null} path={_agentHostPath} exists={File.Exists(_agentHostPath)}");
-            if (_agent is not null || _shuttingDown) return;
-            _lifeCts = new CancellationTokenSource();
-            _agent = LaunchAgentProcess();
-            DebugLog($"LaunchAgentProcess -> {(_agent is null ? "null" : "pid=" + _agent.Id)}");
-            if (_agent is null)
+            if (_shuttingDown || !_settings.Ai.Enabled || _settings.Ai.OutputMode == "silent") return;
+            lock (_lock)
             {
-                OnUiThread(() => _chatWindow.AppendAssistantAsync("（Agent 进程启动失败）"));
-                return;
+                DebugLog($"StartAgent: enabled={_settings.Ai.Enabled} agent={_agent is not null} hostExists={File.Exists(_agentHostPath)}");
+                if (_agent is not null || _shuttingDown) return;
+                _lifeCts = new CancellationTokenSource();
+                using var currentProcess = Process.GetCurrentProcess();
+                launch = AgentLaunchContract.Create(currentProcess);
+                _agent = LaunchAgentProcess(launch);
+                DebugLog($"LaunchAgentProcess -> {(_agent is null ? "null" : "pid=" + _agent.Id)}");
+                if (_agent is null)
+                {
+                    _lifeCts.Dispose();
+                    _lifeCts = null;
+                    launchFailed = true;
+                }
+                else
+                {
+                    var launched = _agent;
+                    launched.EnableRaisingEvents = true;
+                    launched.Exited += (_, _) => OnAgentExited(launched);
+                    lifeToken = _lifeCts.Token;
+                    started = true;
+                }
             }
-            _agent.EnableRaisingEvents = true;
-            _agent.Exited += (_, _) => OnAgentExited();
         }
-        _ = ConnectAndRunAsync(_lifeCts.Token); // 连接 + 接收循环（含重连）
+
+        if (launchFailed)
+        {
+            OnUiThread(() => _chatWindow.AppendAssistantAsync(_i18n.T("（Agent 进程启动失败）")));
+        }
+        if (started) ObserveTask(ConnectAndRunAsync(launch!.PipeName, lifeToken), "agent connection");
     }
 
-    private Process? LaunchAgentProcess()
+    private Process? LaunchAgentProcess(AgentLaunchContract launch)
     {
         if (!File.Exists(_agentHostPath)) return null;
         var psi = new ProcessStartInfo(_agentHostPath)
@@ -273,101 +453,162 @@ public sealed class AiCoordinator : IDisposable
             CreateNoWindow = true,
             WorkingDirectory = Path.GetDirectoryName(_agentHostPath)!,
         };
+        launch.ApplyTo(psi);
         return Process.Start(psi);
     }
 
-    private void StopAgent()
-    {
-        _lifeCts?.Cancel();
-        _lifeCts?.Dispose();
-        _lifeCts = null;
-        try
-        {
-            _rpc?.SendAsync(new RpcMessage(RpcType.Shutdown, null), CancellationToken.None)
-                .Wait(TimeSpan.FromSeconds(1));
-        }
-        catch (Exception)
-        {
-            // 管道可能已断：直接杀
-        }
-        KillAgent();
-        DisposeRpc();
-    }
-
-    private void KillAgent()
-    {
-        try
-        {
-            if (_agent is { HasExited: false })
-            {
-                _agent.Kill(entireProcessTree: true);
-                _agent.WaitForExit(2000);
-            }
-        }
-        catch (Exception)
-        {
-            // 进程已退出
-        }
-        _agent = null;
-    }
-
-    private void DisposeRpc()
+    private void RequestAgentStopNow()
     {
         lock (_lock)
         {
-            var rpc = _rpc;
-            _rpc = null;
-            rpc?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(1));
+            _lifeCts?.Cancel();
+            try
+            {
+                if (_agent is { HasExited: false }) _agent.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                DebugLog("agent immediate stop failed: " + ex.Message);
+            }
         }
     }
 
-    private void OnAgentExited()
+    private async Task StopAgentAsync()
     {
-        // 看门狗：总开关仍开 → 退避后重启（指数退避 3s→10s→30s 封顶；
-        // 连续 5 次失败停止，防崩溃风暴；设置变更时重置计数）
-        if (_shuttingDown || !_settings.Ai.Enabled) return;
+        CancellationTokenSource? life;
+        PipeRpcClient? rpc;
+        Process? agent;
+        lock (_lock)
+        {
+            life = _lifeCts;
+            _lifeCts = null;
+            agent = _agent;
+            _agent = null;
+        }
+        rpc = _rpcSlot.Take();
+
+        life?.Cancel();
+        if (rpc is not null)
+        {
+            using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            try
+            {
+                await rpc.SendAsync(new RpcMessage(RpcType.Shutdown, null), shutdownCts.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException)
+            {
+                DebugLog("agent shutdown message failed: " + ex.Message);
+            }
+        }
+
+        if (agent is not null)
+        {
+            try
+            {
+                if (!agent.HasExited)
+                {
+                    using var exitCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    try { await agent.WaitForExitAsync(exitCts.Token).ConfigureAwait(false); }
+                    catch (OperationCanceledException)
+                    {
+                        agent.Kill(entireProcessTree: true);
+                        await agent.WaitForExitAsync().ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                DebugLog("agent process stop failed: " + ex.Message);
+            }
+            finally
+            {
+                agent.Dispose();
+            }
+        }
+
+        await DisposeOwnedRpcAsync(rpc).ConfigureAwait(false);
+        life?.Dispose();
+    }
+
+    private static async Task DisposeOwnedRpcAsync(PipeRpcClient? rpc)
+    {
+        if (rpc is null) return;
+        try { await rpc.DisposeAsync().ConfigureAwait(false); }
+        catch (ObjectDisposedException) { }
+    }
+
+    private void OnAgentExited(Process exited)
+        => ObserveTask(RestartAgentAfterExitAsync(exited), "agent watchdog");
+
+    private async Task RestartAgentAfterExitAsync(Process exited)
+    {
+        CancellationTokenSource? life;
+        lock (_lock)
+        {
+            if (!ReferenceEquals(_agent, exited)) return;
+            _agent = null;
+            life = _lifeCts;
+            _lifeCts = null;
+        }
+        life?.Cancel();
+        life?.Dispose();
+        var rpc = _rpcSlot.Take();
+        await DisposeOwnedRpcAsync(rpc).ConfigureAwait(false);
+        exited.Dispose();
+
+        lock (_stateLock)
+        {
+            if (_shuttingDown || !_settings.Ai.Enabled || _settings.Ai.OutputMode == "silent") return;
+        }
         var delaySeconds = Math.Min(30, 3 * (1 << Math.Min(3, _restartFailures)));
         _restartFailures++;
         DebugLog($"agent exited, restart in {delaySeconds}s (failures={_restartFailures})");
-        Thread.Sleep(TimeSpan.FromSeconds(delaySeconds));
-        lock (_lock)
+        if (_restartFailures > 5)
         {
-            if (_shuttingDown || !_settings.Ai.Enabled || _settings.Ai.OutputMode == "silent" || _agent is not null) return;
-            if (_restartFailures > 5)
-            {
-                DebugLog("watchdog: too many failures, stopping until settings change");
-                return;
-            }
-            _agent = LaunchAgentProcess();
-            if (_agent is null) return;
-            _agent.EnableRaisingEvents = true;
-            _agent.Exited += (_, _) => OnAgentExited();
+            DebugLog("watchdog: too many failures, stopping until settings change");
+            return;
         }
-        _ = ConnectAndRunAsync(_lifeCts?.Token ?? CancellationToken.None);
+
+        await Task.Delay(TimeSpan.FromSeconds(delaySeconds)).ConfigureAwait(false);
+        StartAgent();
     }
 
-    private async Task ConnectAndRunAsync(CancellationToken ct)
+    private async Task ConnectAndRunAsync(string pipeName, CancellationToken ct)
     {
+        PipeRpcClient? rpc = null;
+        var published = false;
         try
         {
-            var rpc = new PipeRpcClient(AgentService_DefaultPipeName);
+            rpc = new PipeRpcClient(pipeName);
             await rpc.ConnectAsync(ct);
-            lock (_lock) _rpc = rpc;
+            if (ct.IsCancellationRequested || !_rpcSlot.TryPublish(rpc)) return;
+            published = true;
             DebugLog("pipe connected");
             // 握手
             var hello = await rpc.ReceiveAsync(ct);
             DebugLog("hello received: " + hello.Type);
             if (hello.Type != RpcType.Hello) return;
             await PushConfigAsync(rpc, ct);
-            // 接收循环：事件推送
-            while (!ct.IsCancellationRequested)
+
+            using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var heartbeat = new AgentHeartbeatMonitor(
+                pingInterval: TimeSpan.FromSeconds(3),
+                pongTimeout: TimeSpan.FromSeconds(10));
+            var receiveLoop = ReceiveAgentMessagesAsync(rpc, heartbeat, connectionCts.Token);
+            var heartbeatLoop = heartbeat.RunAsync(
+                token => rpc.SendAsync(new RpcMessage(RpcType.Ping, null), token),
+                connectionCts.Token);
+            try
             {
-                var msg = await rpc.ReceiveAsync(ct);
-                if (msg.Type == RpcType.ScreenEvent && msg.Payload is { } p)
-                {
-                    DebugLog("screen event received");
-                    OnAgentEvent(p);
-                }
+                var completed = await Task.WhenAny(receiveLoop, heartbeatLoop).ConfigureAwait(false);
+                await completed.ConfigureAwait(false);
+            }
+            finally
+            {
+                connectionCts.Cancel();
+                await ObserveConnectionLoopEndAsync(receiveLoop).ConfigureAwait(false);
+                await ObserveConnectionLoopEndAsync(heartbeatLoop).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -384,37 +625,98 @@ public sealed class AiCoordinator : IDisposable
         }
         finally
         {
-            DisposeRpc();
+            if (rpc is not null
+                && (!published || _rpcSlot.TryTake(rpc, out _)))
+            {
+                await DisposeOwnedRpcAsync(rpc).ConfigureAwait(false);
+            }
         }
     }
 
-    private void PushConfig()
+    private async Task ReceiveAgentMessagesAsync(
+        PipeRpcClient rpc,
+        AgentHeartbeatMonitor heartbeat,
+        CancellationToken ct)
     {
-        _ = Task.Run(async () =>
+        while (!ct.IsCancellationRequested)
         {
-            try
+            var msg = await rpc.ReceiveAsync(ct).ConfigureAwait(false);
+            if (msg.Type == RpcType.Pong)
             {
-                await PushConfigAsync(_rpc, CancellationToken.None);
+                heartbeat.RecordPong();
             }
-            catch (Exception ex)
+            else if (msg.Type == RpcType.ScreenEvent && msg.Payload is { } payload)
             {
-                DebugLog("PushConfig failed: " + ex.Message); // 管道可能正被 StopAgent 关闭
+                DebugLog("screen event received");
+                OnAgentEvent(payload);
             }
-        });
+        }
     }
 
-    private Task PushConfigAsync(PipeRpcClient? rpc, CancellationToken ct)
+    private static async Task ObserveConnectionLoopEndAsync(Task task)
     {
-        if (rpc is null || !_settings.Ai.Enabled) return Task.CompletedTask;
-        var cfg = AgentConfigBuilder.Build(_settings, _personas, _providers);
-        return rpc.SendAsync(new RpcMessage(RpcType.Config,
-            JsonSerializer.SerializeToElement(cfg, JsonOpts)), ct);
+        try { await task.ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+        catch (IOException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task PushConfigAsync(PipeRpcClient? rpc, CancellationToken ct)
+    {
+        if (rpc is null) return;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, _coordinatorLifetime.Token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(3));
+        await _agentConfigSend.WaitAsync(deadline.Token).ConfigureAwait(false);
+        long revision = 0;
+        try
+        {
+            AgentConfig cfg;
+            lock (_stateLock)
+            {
+                if (!_settings.Ai.Enabled) return;
+                revision = Interlocked.Increment(ref _agentConfigRevision);
+                Volatile.Write(ref _pendingAgentRevision, revision);
+                cfg = AgentConfigBuilder.Build(_settings, _personas, _providers, revision);
+            }
+
+            await rpc.SendAsync(new RpcMessage(RpcType.Config,
+                JsonSerializer.SerializeToElement(cfg, JsonOpts)), deadline.Token).ConfigureAwait(false);
+            Volatile.Write(ref _agentRevisionFloor, revision);
+            Interlocked.CompareExchange(ref _pendingAgentRevision, 0, revision);
+        }
+        catch
+        {
+            if (revision != 0) Interlocked.CompareExchange(ref _pendingAgentRevision, 0, revision);
+            await InvalidateAgentConnectionAsync(rpc).ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            _agentConfigSend.Release();
+        }
+    }
+
+    private async Task InvalidateAgentConnectionAsync(PipeRpcClient rpc)
+    {
+        if (_rpcSlot.TryTake(rpc, out var owned))
+            await DisposeOwnedRpcAsync(owned).ConfigureAwait(false);
     }
 
     private void OnAgentEvent(JsonElement payload)
     {
         try
         {
+            var configRevision = payload.TryGetProperty("configRevision", out var revisionElement)
+                ? revisionElement.GetInt64()
+                : 0;
+            var floor = Math.Max(
+                Volatile.Read(ref _agentRevisionFloor),
+                Volatile.Read(ref _pendingAgentRevision));
+            if (configRevision < floor)
+            {
+                DebugLog($"drop stale screen event revision={configRevision}");
+                return;
+            }
 
             var kind = Enum.TryParse<ScreenEventKind>(payload.GetProperty("kind").GetString(), out var k)
                 ? k : ScreenEventKind.Unknown;
@@ -426,9 +728,9 @@ public sealed class AiCoordinator : IDisposable
             _eventLog.Add(evt); // 对话屏幕上下文用（最近 N 条）
             // 无模型/分析失败时事件降级（summary 空）→ 默认台词（UI 有反馈，不静默）
             var text = string.IsNullOrWhiteSpace(summary)
-                ? "（看到你的屏幕有变化~）"
+                ? _i18n.T("（看到你的屏幕有变化~）")
                 : summary;
-            DebugLog($"[p6] screen event kind={kind} summary={text}");
+            DebugLog($"[p6] screen event kind={kind} revision={configRevision}");
             OnUiThread(() => _modeService.RouteOutput(new AiOutput(text, FromAnalysis: true)));
         }
         catch (Exception ex)
@@ -437,27 +739,56 @@ public sealed class AiCoordinator : IDisposable
         }
     }
 
-    private void RebuildChatPipeline()
+    private AiRuntimeGeneration? BuildRuntime(
+        AppSettings settings,
+        ProvidersFileModel providers,
+        PersonasFileModel personas)
     {
-        var provider = AgentConfigBuilder.SelectProvider(_providers, _settings.Ai.ProviderId);
-        _chatScheduler?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
-        _chatScheduler = null;
-        _pipeline = null;
-        if (!_settings.Ai.Enabled || provider is null) return;
+        if (!settings.Ai.Enabled) return null;
 
-        var model = new OpenAiCompatibleModelProvider(provider, _credentials);
-        // 并发闸 3（架构 §3.3）：对话 P0 / 主动互动 P1 / 每日总结 P2 共用——多宠物并行独立请求不被串行化
-        _chatScheduler = new ModelRequestScheduler(model, concurrency: 3);
-        _pipeline = new ChatPipeline(_chatScheduler, () => _personas.ResolveSelected(), _eventLog);
+        ModelRequestScheduler? scheduler = null;
+        ChatPipeline? pipeline = null;
+        var provider = AgentConfigBuilder.SelectProvider(providers, settings.Ai.ProviderId);
+        if (provider is not null)
+        {
+            var model = new OpenAiCompatibleModelProvider(
+                provider, _credentials, _providerHttp, requestTimeout: Timeout.InfiniteTimeSpan);
+            scheduler = new ModelRequestScheduler(model, concurrency: 3);
+            pipeline = new ChatPipeline(scheduler, personas.ResolveSelected, _eventLog);
+        }
+
+        IImageProvider? imageProvider = null;
+        if (providers.Image is not null)
+        {
+            imageProvider = new OpenAiCompatibleImageProvider(
+                providers.Image, _credentials, _providerHttp, requestTimeout: TimeSpan.FromSeconds(120));
+        }
+
+        return scheduler is null && imageProvider is null
+            ? null
+            : new AiRuntimeGeneration(scheduler, pipeline, imageProvider);
     }
 
     private void RecordTokens(int tokens)
     {
-        // 必须把 key 与 care 实例一起传给记账回调（App 侧不能再 LoadCare 找引用）
-        var states = _store.LoadCare();
-        var first = states.FirstOrDefault();
-        if (first.Key is null) return;
-        _recordTokens(first.Key, first.Value, tokens);
+        try
+        {
+            // 记到选中宠物（对话对象 = 浮球/选中实例），无选中回退第一只。
+            // 修复：原实现恒取 states.FirstOrDefault()，多宠物时 XP 全记给第一只。
+            var states = _store.LoadCare();
+            var store = _store.LoadPetStore();
+            var targetId = store is null
+                ? states.Keys.FirstOrDefault()
+                : PetStoreModel.SelectedPetInstance(store)?.Id
+                  ?? store.Instances.FirstOrDefault()?.Id
+                  ?? states.Keys.FirstOrDefault();
+            if (targetId is null || !states.TryGetValue(targetId, out var care)) return;
+            _recordTokens(targetId, care, tokens);
+        }
+        catch (JsonStoreException ex)
+        {
+            PersistenceErrorPresenter.Report(ex);
+        }
     }
 
     // ---- Phase 6：陪伴增强 ----
@@ -469,17 +800,24 @@ public sealed class AiCoordinator : IDisposable
         {
             if (_settings.Ai.IntimacyEnabled)
             {
-                _intimacy.RecordConversation(tokensUsed, DateTime.Now);
-                _store.SaveIntimacy(_intimacy.State);
+                var nextIntimacy = new IntimacyEngine(_intimacy.State);
+                nextIntimacy.RecordConversation(tokensUsed, DateTime.Now);
+                _store.SaveIntimacy(nextIntimacy.State);
+                _intimacy = nextIntimacy;
             }
             if (_settings.Ai.MemoryEnabled)
             {
-                _profile = MergeProfile(_profile, userText);
+                var nextProfile = MergeProfile(_profile, userText);
                 // L2 会话摘要合并进 L3 画像（“总结存记忆”：超预算压缩的会话内容落画像，不丢）
                 if (_conversation.Summary.Length > 0)
-                    _profile = _profile with { Summary = _conversation.Summary };
-                _store.SaveMemoryProfile(_profile);
+                    nextProfile = nextProfile with { Summary = _conversation.Summary };
+                _store.SaveMemoryProfile(nextProfile);
+                _profile = nextProfile;
             }
+        }
+        catch (JsonStoreException ex)
+        {
+            PersistenceErrorPresenter.Report(ex);
         }
         catch (Exception ex)
         {
@@ -540,9 +878,13 @@ public sealed class AiCoordinator : IDisposable
             var lines = await Task.WhenAll(tasks); // 并行独立请求：一次等待而非 N 倍延迟
             foreach (var line in lines)
             {
+                if (_shuttingDown || _coordinatorLifetime.IsCancellationRequested) return;
                 if (string.IsNullOrWhiteSpace(line)) continue;
-                DebugLog($"[p6] route output: {line[..Math.Min(20, line.Length)]}");
-                OnUiThread(() => _modeService.RouteOutput(new AiOutput(line, FromAnalysis: true)));
+                DebugLog($"[p6] route output length={line.Length}");
+                OnUiThread(() =>
+                {
+                    if (!_shuttingDown) _modeService.RouteOutput(new AiOutput(line, FromAnalysis: true));
+                });
             }
         });
     }
@@ -553,7 +895,9 @@ public sealed class AiCoordinator : IDisposable
     {
         try
         {
-            if (_chatScheduler is null) return null;
+            using var runtimeLease = _runtime.Acquire();
+            var scheduler = runtimeLease?.Value.Scheduler;
+            if (scheduler is null) return null;
             var persona = ResolvePetPersona(petId);
             var petName = (_store.LoadPetStore()?.Instances ?? [])
                 .FirstOrDefault(i => i.Id == petId)?.Name ?? petId;
@@ -571,8 +915,8 @@ public sealed class AiCoordinator : IDisposable
                 [new ChatMessage(ChatRole.User, trigger.PromptContext + "（请用一句简短的话主动说，不超过 30 字）")],
                 PersonaEngine.Temperature,
                 PersonaEngine.MaxTokens);
-            var result = await _chatScheduler.EnqueueAsync(
-                RequestPriority.Interactive, request, CancellationToken.None);
+            var result = await scheduler.EnqueueAsync(
+                RequestPriority.Interactive, request, runtimeLease!.Value.LifetimeToken);
             return result.Text;
         }
         catch (Exception ex)
@@ -599,19 +943,26 @@ public sealed class AiCoordinator : IDisposable
     {
         if (!_settings.Ai.DailySummary) return;
         var today = DateOnly.FromDateTime(DateTime.Now);
-        var due = DailySummaryTrigger.GetDueDate(_lastDiaryDate, today);
-        if (due is null) return;
-        var dueDay = due.Value; // lambda 捕获不做 null 提升，先解包
-        _lastDiaryDate = today; // 先标记：失败当日不重复尝试
-        _store.SaveDiaryLastGenerated(today);
-        _ = Task.Run(() => GenerateDailySummaryAsync(dueDay));
+        DateOnly dueDay;
+        lock (_stateLock)
+        {
+            if (_pendingDiaryDate is not null) return;
+            var due = DailySummaryTrigger.GetDueDate(_lastDiaryDate, today);
+            if (due is null) return;
+            dueDay = due.Value;
+            _pendingDiaryDate = dueDay;
+        }
+        _ = Task.Run(() => GenerateDailySummaryAsync(dueDay, today));
     }
 
-    private async Task GenerateDailySummaryAsync(DateOnly day)
+    private async Task GenerateDailySummaryAsync(DateOnly day, DateOnly completionDate)
     {
+        var completed = false;
         try
         {
-            if (_chatScheduler is null) return;
+            using var runtimeLease = _runtime.Acquire();
+            var runtime = runtimeLease?.Value;
+            if (runtime?.Scheduler is null) return;
             var petName = FirstPetName();
             var data = new DailySummaryData(
                 day,
@@ -624,21 +975,23 @@ public sealed class AiCoordinator : IDisposable
                 [new ChatMessage(ChatRole.User, "请生成今天的总结")],
                 Temperature: 0.8,
                 MaxTokens: 300);
-            var result = await _chatScheduler.EnqueueAsync(
-                RequestPriority.Background, request, CancellationToken.None);
+            var result = await runtime.Scheduler.EnqueueAsync(
+                RequestPriority.Background, request, runtime.LifetimeToken);
 
             var text = result.Text ?? "";
             var txtPath = DiaryStore.TextPath(_store.DirectoryPath, day);
             Directory.CreateDirectory(Path.GetDirectoryName(txtPath)!);
-            File.WriteAllText(txtPath, text);
+            AtomicFileWriter.WriteAllText(txtPath, text);
 
-            if (_settings.Ai.SummaryImage && _imageProvider is not null)
+            if (_settings.Ai.SummaryImage && runtime.ImageProvider is not null)
             {
                 try
                 {
-                    var image = await _imageProvider.GenerateAsync(
-                        new ImageGenRequest(ImagePromptBuilder.Build(text, petName)), CancellationToken.None);
-                    File.WriteAllBytes(DiaryStore.ImagePath(_store.DirectoryPath, day), image.PngBytes);
+                    var image = await runtime.ImageProvider.GenerateAsync(
+                        new ImageGenRequest(ImagePromptBuilder.Build(text, petName)), runtime.LifetimeToken);
+                    AtomicFileWriter.WriteAllBytes(
+                        DiaryStore.ImagePath(_store.DirectoryPath, day),
+                        image.PngBytes);
                 }
                 catch (Exception ex)
                 {
@@ -646,11 +999,27 @@ public sealed class AiCoordinator : IDisposable
                 }
             }
 
-            OnUiThread(() => _modeService.RouteOutput(new AiOutput("今天的总结出炉啦~（日记已保存）", FromAnalysis: true)));
+            _store.SaveDiaryLastGenerated(completionDate);
+            completed = true;
+            OnUiThread(() => _modeService.RouteOutput(new AiOutput(
+                _i18n.T("今天的总结出炉啦~（日记已保存）"),
+                FromAnalysis: true)));
+        }
+        catch (JsonStoreException ex)
+        {
+            PersistenceErrorPresenter.Report(ex);
         }
         catch (Exception ex)
         {
             DebugLog("daily summary failed: " + ex.Message);
+        }
+        finally
+        {
+            lock (_stateLock)
+            {
+                _pendingDiaryDate = null;
+                if (completed) _lastDiaryDate = completionDate;
+            }
         }
     }
 
@@ -672,7 +1041,7 @@ public sealed class AiCoordinator : IDisposable
 
     public void Speak(string text)
     {
-        if (!_settings.Ai.TtsEnabled || _settings.Ai.OutputMode != "chat") return;
+        if (!_ttsSessionEnabled || _settings.Ai.OutputMode != "chat") return;
         if (string.IsNullOrWhiteSpace(text)) return;
         _ = Task.Run(async () =>
         {
@@ -687,7 +1056,11 @@ public sealed class AiCoordinator : IDisposable
                 {
                     _ttsPlayer.MediaEnded += (_, _) =>
                     {
-                        try { File.Delete(tmp); } catch (Exception) { }
+                        try { File.Delete(tmp); }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            _logger.Error("AiCoordinator", $"TTS temp cleanup failed: {ex.Message}");
+                        }
                     };
                     _ttsPlayer.Open(new Uri(tmp));
                     _ttsPlayer.Play();
@@ -714,33 +1087,56 @@ public sealed class AiCoordinator : IDisposable
     private string FirstPetName()
         => (_store.LoadPetStore()?.Instances.FirstOrDefault()?.Name) ?? "桌宠";
 
-    private static IImageProvider? BuildImageProvider(ProvidersFileModel providers)
-    {
-        if (providers.Image is null) return null;
-        try
-        {
-            // 生图超时 120s：云端 T2I（DALL·E/agnes 等）通常需 20-60s，默认 30s 会误超时。
-            return new OpenAiCompatibleImageProvider(
-                providers.Image, new WindowsCredentialStore(), timeout: TimeSpan.FromSeconds(120));
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
-
     public void Dispose()
     {
+        BeginShutdown();
+        ObserveTask(GetOrStartDisposeTask(), "AI coordinator disposal");
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        BeginShutdown();
+        return new ValueTask(GetOrStartDisposeTask());
+    }
+
+    private void BeginShutdown()
+    {
+        if (Interlocked.Exchange(ref _shutdownRequested, 1) != 0) return;
         _shuttingDown = true;
+        _coordinatorLifetime.Cancel();
         _tickTimer?.Dispose();
         _tickTimer = null;
         _ttsPlayer.Close();
-        StopAgent();
-        _chatScheduler?.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
-        _chatScheduler = null;
+        using var active = _runtime.Acquire();
+        active?.Value.RequestStop();
+        RequestAgentStopNow();
     }
 
-    private const string AgentService_DefaultPipeName = "DesktopPet.Agent";
+    private Task GetOrStartDisposeTask()
+    {
+        lock (_disposeSync) return _disposeTask ??= DisposeCoreAsync();
+    }
+
+    private async Task DisposeCoreAsync()
+    {
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await StopAgentAsync().ConfigureAwait(false);
+            await _runtime.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+        _providerHttp.Dispose();
+        await _agentConfigSend.WaitAsync().ConfigureAwait(false);
+        _agentConfigSend.Release();
+        _agentConfigSend.Dispose();
+        _coordinatorLifetime.Dispose();
+        _chatSerial.Dispose();
+        _lifecycle.Dispose();
+    }
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {

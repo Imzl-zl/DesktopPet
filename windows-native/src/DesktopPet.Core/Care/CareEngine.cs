@@ -26,6 +26,38 @@ public sealed class CareState
     public string? LastFedDayKey { get; set; }
     public Dictionary<string, double> Days { get; set; } = []; // dayKey → tokens（最近 14 天）
     public List<string> UnlockedAchievements { get; set; } = [];
+
+    public CareState Clone() => new()
+    {
+        Xp = Xp,
+        TokenCarry = TokenCarry,
+        TokensToday = TokensToday,
+        MealsToday = MealsToday,
+        TotalTokens = TotalTokens,
+        TotalMeals = TotalMeals,
+        LastFedAt = LastFedAt,
+        DayKey = DayKey,
+        StreakDays = StreakDays,
+        LastFedDayKey = LastFedDayKey,
+        Days = new(Days),
+        UnlockedAchievements = [.. UnlockedAchievements],
+    };
+
+    public void CopyFrom(CareState source)
+    {
+        Xp = source.Xp;
+        TokenCarry = source.TokenCarry;
+        TokensToday = source.TokensToday;
+        MealsToday = source.MealsToday;
+        TotalTokens = source.TotalTokens;
+        TotalMeals = source.TotalMeals;
+        LastFedAt = source.LastFedAt;
+        DayKey = source.DayKey;
+        StreakDays = source.StreakDays;
+        LastFedDayKey = source.LastFedDayKey;
+        Days = new(source.Days);
+        UnlockedAchievements = [.. source.UnlockedAchievements];
+    }
 }
 
 /// <summary>

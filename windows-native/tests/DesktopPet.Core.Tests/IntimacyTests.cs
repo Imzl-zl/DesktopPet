@@ -88,6 +88,26 @@ public class IntimacyTests
     }
 
     [Fact]
+    public void Decay_LongAbsence_DoesNotRaiseZeroValue()
+    {
+        var e = New(0, Day0);
+
+        e.RecordConversation(tokensUsed: 0, now: Day0.AddDays(30));
+
+        Assert.Equal(2, e.State.Value);
+    }
+
+    [Fact]
+    public void Decay_LongAbsence_DoesNotRaiseLowValue()
+    {
+        var e = New(3, Day0);
+
+        e.RecordConversation(tokensUsed: 0, now: Day0.AddDays(30));
+
+        Assert.Equal(5, e.State.Value);
+    }
+
+    [Fact]
     public void Decay_NoInteractionSinceLastTurn_NoChange()
     {
         var e = New(50, Day0);

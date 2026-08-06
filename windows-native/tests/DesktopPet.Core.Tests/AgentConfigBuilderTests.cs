@@ -31,6 +31,18 @@ public class AgentConfigBuilderTests
         ModelCapabilities.Chat | ModelCapabilities.Vision, IsDefault: true);
 
     [Fact]
+    public void Build_PreservesCallerRevisionForEventOrdering()
+    {
+        var cfg = AgentConfigBuilder.Build(
+            SettingsWith(true, true),
+            new PersonasFileModel(),
+            ProvidersWith(Ollama),
+            revision: 42);
+
+        Assert.Equal(42, cfg.Revision);
+    }
+
+    [Fact]
     public void Build_AnalysisRequiresMasterSwitchAndAnalysisFlag()
     {
         var personas = new PersonasFileModel();
@@ -78,6 +90,23 @@ public class AgentConfigBuilderTests
         var cfg = AgentConfigBuilder.Build(SettingsWith(true, true), new PersonasFileModel(), new ProvidersFileModel());
         Assert.True(cfg.ScreenAnalysis);
         Assert.Null(cfg.ProviderBaseUrl); // 只检测不评论（Agent 降级 Unknown 事件）
+    }
+
+    [Fact]
+    public void Build_ProjectsDistinctCaptureAndAnalysisCadence()
+    {
+        var settings = SettingsWith(true, true) with
+        {
+            Ai = SettingsWith(true, true).Ai with { ScreenAnalysisIntervalSeconds = 17 },
+        };
+
+        var cfg = AgentConfigBuilder.Build(
+            settings,
+            new PersonasFileModel(),
+            ProvidersWith(Ollama));
+
+        Assert.Equal(17, cfg.CaptureIntervalSeconds);
+        Assert.Equal(17, cfg.MinAnalysisIntervalSeconds);
     }
 
     [Fact]

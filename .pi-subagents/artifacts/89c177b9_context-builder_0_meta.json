@@ -1,0 +1,135 @@
+{
+  "runId": "89c177b9",
+  "agent": "context-builder",
+  "task": "只读调查 I4 Provider 设置。读取 ProviderConfig/CredentialStore、OpenAiCompatibleModelProvider、providers JSON schema/JsonStore、SettingsWindow 模型编辑器、AiCoordinator generation 和测试。输出：当前 ApiKeyRef 生成/共享风险、可中断幂等迁移方案、未保存表单值异步 ListModels 测试所需依赖/调用链、HTTP 明文警告/错误分类/secret redaction、建议测试和精确符号。不要改文件。\n\n---\n**Output:**\nWrite your findings to exactly this path: C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\outputs\\89c177b9\\context.md\nThis path is authoritative for this run.\nIgnore any other output filename or output path mentioned elsewhere, including output destinations in the base agent prompt, system prompt, or task instructions.",
+  "exitCode": 1,
+  "usage": {
+    "input": 408104,
+    "output": 9347,
+    "cacheRead": 1184128,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 18
+  },
+  "model": "cus-openai/gpt-5.6-sol:medium",
+  "attemptedModels": [
+    "cus-openai/gpt-5.6-sol:medium"
+  ],
+  "modelAttempts": [
+    {
+      "model": "cus-openai/gpt-5.6-sol:medium",
+      "success": false,
+      "exitCode": 1,
+      "error": "Agent 'context-builder' requested unavailable child tools: web_search.\nThe `tools` field is a strict allowlist; it does not load extension code.\nFor extension tools, add the provider path to `subagentOnlyExtensions` (child-only), `extensions`, or as a path-like entry in `tools`, while keeping each registered tool name in `tools`.\nFor MCP tools, verify the MCP adapter configuration and selected tool names. For builtin tools, verify the name against the installed Pi version.",
+      "usage": {
+        "input": 408104,
+        "output": 9347,
+        "cacheRead": 1184128,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 18
+      }
+    }
+  ],
+  "durationMs": 446667,
+  "toolCount": 39,
+  "error": "Agent 'context-builder' requested unavailable child tools: web_search.\nThe `tools` field is a strict allowlist; it does not load extension code.\nFor extension tools, add the provider path to `subagentOnlyExtensions` (child-only), `extensions`, or as a path-like entry in `tools`, while keeping each registered tool name in `tools`.\nFor MCP tools, verify the MCP adapter configuration and selected tool names. For builtin tools, verify the name against the installed Pi version.",
+  "launchContractDigest": "3584651893fbdaa75587d399bc84788aff26dabdee238658ed6984a462a765bf",
+  "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "configured": [],
+    "effective": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "omitted": {
+      "runtime": 0,
+      "configured": 0,
+      "effective": 0
+    }
+  },
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "review-findings 给出 SettingsWindow.cs:2140 固定 model-key、ProviderConfig.cs:59-83 忽略 CredWrite、OpenAiCompatibleModelProvider.cs:159-220 ListModels 调用链等具体路径/行号与 Important/Moderate 严重度；residual-risks 明列事务、重复 ID、HTTP 决策及静默反序列化风险。"
+        }
+      ],
+      "changedFiles": [
+        ".pi-subagents/artifacts/outputs/89c177b9/context.md"
+      ],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [],
+      "validationOutput": [
+        "只读静态调查完成；尚未运行测试。"
+      ],
+      "residualRisks": [
+        "远程 HTTP + secret 是待确认的安全产品决策，建议默认阻断。",
+        "Credential Manager 与 providers.json 无跨资源原子事务，只能采用可恢复 copy-publish-cleanup saga。",
+        "重复 connection Id 必须在 ref 派生前迁移，否则仍会共享凭据。",
+        "ProvidersFileModel.Deserialize 当前会把损坏 JSON 静默归为空配置，迁移入口需避免误判。"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "仅新增指定调查交接 artifact；未修改产品代码或测试。",
+      "reviewFindings": [
+        "important: windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:2140 - 空 ApiKeyRef 固定归一为 model-key，多连接会共享并覆盖 secret。",
+        "important: windows-native/src/DesktopPet.Infra/Providers/ProviderConfig.cs:6-11,59-83 - credential contract 无 Delete/失败语义且忽略 CredWrite 返回值，无法可靠迁移。",
+        "important: windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:2119-2176 - 编辑器没有异步连接测试；未保存 draft 不能经过会持久化的 AiCoordinator.ApplyProviders。",
+        "moderate: windows-native/src/DesktopPet.Infra/Providers/OpenAiCompatibleModelProvider.cs:277-287 - 任意 HTTP endpoint 都可附带 Bearer key，缺少远程明文保护。",
+        "moderate: windows-native/src/DesktopPet.Infra/Providers/OpenAiCompatibleModelProvider.cs:124-135 and SettingsWindow.cs:2063-2074 - raw provider body/full exception 可进入异常或 temp 日志，存在 secret redaction 缺口。"
+      ],
+      "manualNotes": "建议实施者先写 failure-injection migration tests，再动 schema/UI；表单测试使用独立 cancellation generation，成功也不隐式保存。"
+    }
+  },
+  "transcriptPath": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\89c177b9_context-builder_0_transcript.jsonl",
+  "timestamp": 1786010777527
+}

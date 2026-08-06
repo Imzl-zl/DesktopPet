@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using System.ComponentModel;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -66,28 +68,74 @@ public static class RpcFraming
     }
 }
 
-/// <summary>命名管道服务端（Agent 侧）。单连接模型：接受第一个客户端。</summary>
+/// <summary>命名管道服务端（Agent 侧）。每次断开后可创建新实例重新接受客户端。</summary>
 public sealed class PipeRpcServer : IAsyncDisposable
 {
-    private readonly NamedPipeServerStream _pipe;
-    private readonly SemaphoreSlim _writeLock = new(1, 1); // 并发写防串帧（事件推送 + Ping 响应）
-    private bool _connected;
+    private readonly string _pipeName;
+    private readonly object _sync = new();
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private NamedPipeServerStream? _pipe;
+    private bool _disposed;
 
     public PipeRpcServer(string pipeName)
     {
-        // 显式缓冲（64KB）：默认构造下 Windows 阻塞写会挂起直到对端读取，
-        // 且大消息（>缓冲）写完再读必然死锁；显式缓冲 + 对端并行读是协议前提。
-        _pipe = new NamedPipeServerStream(
-            pipeName, PipeDirection.InOut, maxNumberOfServerInstances: 1,
-            PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
-            inBufferSize: 64 * 1024, outBufferSize: 64 * 1024);
+        if (string.IsNullOrWhiteSpace(pipeName)) throw new ArgumentException("管道名不能为空", nameof(pipeName));
+        _pipeName = pipeName;
     }
 
     public async Task WaitForConnectionAsync(CancellationToken ct)
     {
-        if (_connected) return;
-        await _pipe.WaitForConnectionAsync(ct).ConfigureAwait(false);
-        _connected = true;
+        NamedPipeServerStream pipe;
+        lock (_sync)
+        {
+            ThrowIfDisposed();
+            if (_pipe?.IsConnected == true) return;
+            _pipe?.Dispose();
+            pipe = CreatePipe();
+            _pipe = pipe;
+        }
+
+        try
+        {
+            await pipe.WaitForConnectionAsync(ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            var ownsPipe = false;
+            lock (_sync)
+            {
+                if (ReferenceEquals(_pipe, pipe))
+                {
+                    _pipe = null;
+                    ownsPipe = true;
+                }
+            }
+            if (ownsPipe) await pipe.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public int GetConnectedClientProcessId()
+    {
+        var pipe = ConnectedPipe();
+        if (!NativeMethods.GetNamedPipeClientProcessId(pipe.SafePipeHandle, out var processId))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "无法读取命名管道客户端 PID");
+        return checked((int)processId);
+    }
+
+    public async Task DisconnectAsync()
+    {
+        NamedPipeServerStream? pipe;
+        lock (_sync)
+        {
+            pipe = _pipe;
+            _pipe = null;
+        }
+        if (pipe is null) return;
+
+        pipe.Dispose(); // 先关闭句柄，打断可能占住 write lock 的异步写。
+        await _writeLock.WaitAsync().ConfigureAwait(false);
+        _writeLock.Release();
     }
 
     public async Task SendAsync(RpcMessage message, CancellationToken ct)
@@ -95,7 +143,7 @@ public sealed class PipeRpcServer : IAsyncDisposable
         await _writeLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await RpcFraming.WriteAsync(_pipe, message, ct).ConfigureAwait(false);
+            await RpcFraming.WriteAsync(ConnectedPipe(), message, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -104,12 +152,58 @@ public sealed class PipeRpcServer : IAsyncDisposable
     }
 
     public Task<RpcMessage> ReceiveAsync(CancellationToken ct)
-        => RpcFraming.ReadAsync(_pipe, ct);
+        => RpcFraming.ReadAsync(ConnectedPipe(), ct);
 
     public async ValueTask DisposeAsync()
     {
+        NamedPipeServerStream? pipe;
+        lock (_sync)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            pipe = _pipe;
+            _pipe = null;
+        }
+
+        if (pipe is not null) pipe.Dispose(); // 先取消在途 IO，再等待写锁归还。
+        await _writeLock.WaitAsync().ConfigureAwait(false);
+        _writeLock.Release();
         _writeLock.Dispose();
-        if (_connected) await _pipe.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private NamedPipeServerStream ConnectedPipe()
+    {
+        lock (_sync)
+        {
+            ThrowIfDisposed();
+            return _pipe is { IsConnected: true } pipe
+                ? pipe
+                : throw new IOException("命名管道尚未连接");
+        }
+    }
+
+    private NamedPipeServerStream CreatePipe()
+        => new(
+            _pipeName,
+            PipeDirection.InOut,
+            maxNumberOfServerInstances: 1,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly,
+            inBufferSize: 64 * 1024,
+            outBufferSize: 64 * 1024);
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(PipeRpcServer));
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool GetNamedPipeClientProcessId(
+            Microsoft.Win32.SafeHandles.SafePipeHandle pipe,
+            out uint clientProcessId);
     }
 }
 
@@ -119,6 +213,7 @@ public sealed class PipeRpcClient : IAsyncDisposable
     private readonly NamedPipeClientStream _pipe;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private bool _connected;
+    private int _disposed;
 
     public PipeRpcClient(string pipeName)
     {
@@ -150,7 +245,10 @@ public sealed class PipeRpcClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _pipe.Dispose(); // 先打断在途 connect/read/write，避免等待 write lock 无界挂起。
+        await _writeLock.WaitAsync().ConfigureAwait(false);
+        _writeLock.Release();
         _writeLock.Dispose();
-        if (_connected) await _pipe.DisposeAsync().ConfigureAwait(false);
     }
 }

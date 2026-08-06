@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "08289a6a-98d9-4e88-9c6b-f6260004fd4e",
+  "title": "你是资深 Windows 桌面应用审查专家（Windows.Graphics.Capture / WinRT / .NET 进程架构）。审查 C:/sudy/github/DesktopPet/...",
+  "goal": "你是资深 Windows 桌面应用审查专家（Windows.Graphics.Capture / WinRT / .NET 进程架构）。审查 C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Agent 与 DesktopPet.AgentHost 及相关 Core 文件，只读不改。\n\n文件清单：\n- src/DesktopPet.Agent/Capture/GraphicsCaptureSource.cs, Capture/IScreenCaptureSource.cs, Capture/SwitchableScreenCaptureSource.cs\n- src/DesktopPet.Agent/Analysis/AnalysisEngine.cs, Analysis/CapturedFrameExtensions.cs\n- src/DesktopPet.Agent/AgentService.cs\n- src/DesktopPet.AgentHost/Program.cs\n- src/DesktopPet.Core/Ai/FrameHasher.cs, ScreenContextFormatter.cs, ScreenEvent.cs, AgentConfig.cs, AgentConfigBuilder.cs, ModelContracts.cs\n- src/DesktopPet.Infra/PipeRpc/PipeRpc.cs\n\n重点找：\n1. Windows.Graphics.Capture API 误用（GraphicsCaptureSession 生命周期、Direct3D11CaptureFramePool 未 Disposal、复帧泄漏、Recreate 处理、设备丢失处理）\n2. WinRT/.NET 互操作问题（CreateDirect3D11DeviceFromDXGIDevice、Windows SDK 包用法、资源释放）\n3. 双进程设计问题（IPC 协议、心跳缺失、Agent 崩溃恢复、配置下发竞态）\n4. 硬编码值（截屏间隔、分辨率、JPEG 质量、帧率写死且没有配置对接）\n5. 内存/性能问题（每帧分配、Bitmap 转换浪费、事件风暴）\n\n输出格式：按严重程度分组列出发现（Critical / Important / Minor），每条含 文件:行号、问题描述、为何是问题、修复建议。没有发现的类别不要硬凑。最后给 1-2 行总体结论。",
+  "status": "completed",
+  "createdAt": "2026-08-06T00:13:21.459Z",
+  "updatedAt": "2026-08-06T00:23:54.132Z",
+  "runs": [
+    {
+      "runId": "2ec73e36-3fba-40f8-b3f7-487717694aac",
+      "mode": "single",
+      "asyncDir": "C:\\Users\\zhanglu\\AppData\\Local\\Temp\\pi-subagents-user-zhanglu\\async-subagent-runs\\2ec73e36-3fba-40f8-b3f7-487717694aac",
+      "status": "complete",
+      "startedAt": "2026-08-06T00:13:21.502Z",
+      "completedAt": "2026-08-06T00:23:54.132Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "status",
+      "path": "C:\\Users\\zhanglu\\AppData\\Local\\Temp\\pi-subagents-user-zhanglu\\async-subagent-runs\\2ec73e36-3fba-40f8-b3f7-487717694aac\\status.json"
+    },
+    {
+      "kind": "other",
+      "path": "C:\\Users\\zhanglu\\AppData\\Local\\Temp\\pi-subagents-user-zhanglu\\async-subagent-runs\\2ec73e36-3fba-40f8-b3f7-487717694aac\\events.jsonl",
+      "description": "Lifecycle events"
+    },
+    {
+      "kind": "output",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\2ec73e36-3fba-40f8-b3f7-487717694aac_reviewer_output.md"
+    }
+  ],
+  "receipts": [],
+  "cwd": "C:\\sudy\\github\\DesktopPet",
+  "ownerSessionId": "C:\\Users\\zhanglu\\.pi\\agent\\sessions\\--C--sudy-github-DesktopPet--\\2026-08-06T00-06-41-208Z_019fd464-c338-741a-840d-0a087789a3da.jsonl",
+  "summary": "reviewer:\n核查完毕，所有关键结论都有实证。以下为审查报告。\n\n## Review\n\n**审查范围**：Agent/AgentHost 全量 + Core 相关 + PipeRpc + App 侧对接代码（AiCoordinator.cs）。注：清单中的 `DesktopPet.Core/Ai/ModelContracts.cs` 实际位于 `DesktopPet.Core/Scheduling/ModelContracts.cs`。\n\n**已验证为正确的点（非问题）**\n- `Direct3D11CaptureFramePool` 在 `Dispose()` 中正确释放并退订 `FrameArrived`（GraphicsCaptureSource.cs:192-200）。\n- 复帧无泄漏：`OnFrameArrived` 的 `frame` 走 `using`、`_latest` 替换前先 Dispose 旧帧、`CaptureAsync` 转换完 Dispose 帧。帧队列管理正确。\n- `CreateDirect3D11DeviceFromDXGIDevice` 的 DllImport（d3d11.dll、ExactSpelling、StdCall）与 `IGraphicsCaptureItemInterop`（3628E81B…）、IDXGIDevice（54ec77fa…）、IActivationFactory IID 均正确；`GetActivationFactory` 的 RCW AddRef/Release 平衡正确。\n- 未用 JPEG：`CapturedFrameExtensions` 用 PNG（320×180 L8 每事件约 30KB），无\"JPEG 质量硬编码\"问题。\n- Agent 崩溃恢复链路完整：App 看门狗指数退避重启（3s→10s→30s、5 次封顶）、管道 EOF 触发 Agent 自终止、App 断连后重连。\n- 测试覆盖良好：AnalysisEngine/AgentService/Switchable 均有单测；`dotnet build` 0 错误通过。\n\n### Critical\n无。最接近的两项（设备泄漏、设备丢失死寂）均为确定性问题但不导致崩溃/数据损坏，归入 Important。\n\n### Important\n\n1. **GraphicsCaptureSource.cs:186 — D3D 设备包装器引用泄漏（缺 `Marshal.Release(graphicsDevice)`）**\n   经 IL 反汇编实证：pin 定运行时 `Microsoft.Windows.SDK.NET.Ref 10.0.19041.57` 中 `ObjectReference<T>.FromAbi` 内部调用 `Marshal.AddRef`。因此 `FromAbi(graphicsDevice)` 后引用计数为 2（CreateDirect3D11DeviceFromDXGIDevice 的 1 + FromAbi 的 1），但 finally 只释放 `dxgiDevice`，原始引用永远不还 → WinRT 设备包装器及其背后的 D3D11 设备在 Agent 进程生命周期内永不释放。对比同文件 137/141 行 `GraphicsCaptureItem.FromAbi(itemAbi)` 后正确 `Marshal.Release(itemAbi)`（该路径是平衡的），两条路径语义假设相反，必然一条错。而 `SwitchableScreenCaptureSource` 每次 enable/disable 都新建/销毁一个 `GraphicsCaptureSource` → 反复切换分析开关会累积泄漏多个 GPU 设备直至进程重启。\n   修复：`CreateD3DDevice` 的 finally 中补 `Marshal.Release(graphicsDevice)`（与 137/141 行一致）。\n\n2. **GraphicsCaptureSource.cs:39-50 / 108-121 — `Direct3D11CaptureFramePool.DeviceLost` 未订阅，捕获静默死亡**\n   GPU 设备丢失（驱动更新、休眠恢复、RDP 断开、虚拟机宿主变更）时 pool 触发 DeviceLost 并停止出帧；`OnFrameArrived` 的 catch-all 与 `CaptureAsync` 的 catch-all 会把一切异常吞掉，分析引擎继续每秒空转，屏幕感知功能永久失效直到 Agent 进程被重启。`GraphicsCaptureItem.C"
+}

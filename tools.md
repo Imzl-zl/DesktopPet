@@ -27,10 +27,14 @@
 - Provider 抽象：模型/TTS/生图统一 OpenAI 兼容协议（一个 HttpClient 实现通吃云端与本地 Ollama/vLLM）。
 - 对话请求管道：校验→人格拼接→记忆注入→屏幕上下文→模型调用→输出→token 记账→异步画像更新，每步独立可测。
 - 迁移惯例：Tauri 旧版 `windows/` 已整体删除，旧 localStorage 数据迁移为 JSON 仓储（适配器一次性迁移）。
+- Windows 本地化：Core embedded JSON 为唯一 catalog，四语言 key/placeholder 必须完全同集；`LanguageCoordinator` 先保存再发布；WPF 静态槽位走 `WpfLocalizer`，用户/模型/日记/自定义人格内容必须用 dynamic exclusion。
+- Windows 诊断：App/Agent 统一写 `AppDataPaths.Logs`；logger 写盘前脱敏并硬限制单文件，ZIP 导出再脱敏；恢复出厂前必须依次停 Agent/请求、关闭 UI/日志资源，再操作数据目录和 Credential Manager。
 
 ## Pitfalls
 - Windows 上 `swift test` 会崩溃（SwiftPM llbuild job bug，见 swiftlang/swift-package-manager#6605），必须用 `./scripts/verify-core-windows.sh` 跑 54 个 core 测试。
 - `windows-native/测试.txt` 含真实密钥，已被 .gitignore 忽略；不要读取、不要提交、不要解引用其内容。
 - WebView2 透明窗口禁用硬件加速导致动画卡顿（旧 Tauri 版根因）——Windows 版已迁移原生渲染，不要再引入 Web 渲染路径。
 - API Key 不得落明文 JSON：Windows 版存 Credential Manager，JSON 只存引用 ID。
-- 模型请求并发受限流：用 SemaphoreSlim(3) 并发闸 + P0>P1>P2 优先级队列，对话 30s/互动 8s 超时。
+- 模型请求并发受固定 worker 池和 P0>P1>P2 优先级队列控制；超时/重试策略由调度层拥有，Provider 只分类 transport 错误。
+- WPF 自动文本扫描不得直接覆盖动态内容；即使当前内容恰好等于 catalog key，也必须保持用户/模型原文。
+- Windows 文件发布/重置/凭据/GraphicsCapture/多屏 DPI 逻辑的单测不等于原生验收；最终报告要显式列出未跑的真实机器 smoke。

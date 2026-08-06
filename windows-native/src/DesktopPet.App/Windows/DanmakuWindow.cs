@@ -2,7 +2,9 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
+using DesktopPet.App.Localization;
 using DesktopPet.Core.Danmaku;
+using DesktopPet.Core.I18n;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.Graphics.Canvas.UI.Xaml;
@@ -34,14 +36,20 @@ public sealed class DanmakuWindow : Window
     private CanvasAnimatedControl? _canvas;
     private long _frameCount;
     private readonly DispatcherTimer _fpsTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private I18nService _i18n;
     private double _fps;
 
     /// <summary>最近 1s 帧率（验收 60fps 采样）。</summary>
     public double Fps => _fps;
 
-    public DanmakuWindow(double width, double height, int trackCount = 10)
+    public DanmakuWindow(
+        double width,
+        double height,
+        int trackCount = 10,
+        I18nService? i18n = null)
     {
-        Title = "DesktopPet Danmaku";
+        _i18n = i18n ?? new I18nService();
+        Title = _i18n.T("DesktopPet Danmaku");
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = System.Windows.Media.Brushes.Transparent;
@@ -56,16 +64,14 @@ public sealed class DanmakuWindow : Window
 
         _island = new XamlIslandHost(BuildCanvas);
         Content = _island;
+        WpfLocalizer.ApplyNew(this, _i18n);
         // XAML Island 必须在窗口稳定（Loaded）后 Attach（Show 中途初始化报窗口线程归属错误）
         Loaded += (_, _) =>
         {
             EnsureWinUiInitialized(); // 必须先于 DesktopWindowXamlSource 创建
             _island.AttachAndInitialize();
-            _fpsTimer.Tick += (_, _) =>
-            {
-                _fps = _frameCount;
-                _frameCount = 0;
-            };
+            _fpsTimer.Tick -= OnFpsTimerTick;
+            _fpsTimer.Tick += OnFpsTimerTick;
             _fpsTimer.Start();
         };
     }
@@ -84,6 +90,12 @@ public sealed class DanmakuWindow : Window
             _ = Microsoft.UI.Xaml.Hosting.WindowsXamlManager.InitializeForCurrentThread();
             _winuiInitialized = true;
         }
+    }
+
+    public void ApplyLocalization(I18nService i18n)
+    {
+        _i18n = i18n;
+        WpfLocalizer.RefreshTracked(this, i18n);
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -109,7 +121,11 @@ public sealed class DanmakuWindow : Window
         };
         _canvas.Update += (_, args) =>
         {
-            if (!_canvas.Paused) _engine.Tick(args.Timing.ElapsedTime.TotalSeconds);
+            if (!_canvas.Paused
+                && !_engine.Tick(args.Timing.ElapsedTime.TotalSeconds))
+            {
+                _canvas.Paused = true;
+            }
         };
         _canvas.Draw += (_, args) =>
         {
@@ -135,12 +151,27 @@ public sealed class DanmakuWindow : Window
         }
     }
 
+    private void OnFpsTimerTick(object? sender, EventArgs e)
+    {
+        _fps = _frameCount;
+        _frameCount = 0;
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         _fpsTimer.Stop();
+        _fpsTimer.Tick -= OnFpsTimerTick;
+        var canvas = _canvas;
+        _canvas = null;
+        if (canvas is not null)
+        {
+            canvas.Paused = true;
+            canvas.RemoveFromVisualTree();
+        }
+        _engine.Clear();
+        _textFormat.Dispose();
         _island?.DetachAndDispose();
         _island = null;
-        _canvas = null;
         base.OnClosed(e);
     }
 

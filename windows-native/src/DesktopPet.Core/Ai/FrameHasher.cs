@@ -109,6 +109,9 @@ public sealed class ScreenEventLog
 
     private readonly int _capacity;
     private readonly Queue<ScreenEvent> _events = new();
+    // RPC 接收线程（Add）与 Timer/UI 线程（Recent）并发访问：必须互斥。
+    // 修复：原实现无锁，Queue 并发损坏 → 偶发事件丢失/异常被外层 catch 吞掉。
+    private readonly object _lock = new();
 
     public ScreenEventLog(int capacity = DefaultCapacity)
     {
@@ -118,10 +121,16 @@ public sealed class ScreenEventLog
 
     public void Add(ScreenEvent e)
     {
-        _events.Enqueue(e);
-        while (_events.Count > _capacity) _events.Dequeue();
+        lock (_lock)
+        {
+            _events.Enqueue(e);
+            while (_events.Count > _capacity) _events.Dequeue();
+        }
     }
 
     /// <summary>最近事件（旧 → 新）。</summary>
-    public IReadOnlyList<ScreenEvent> Recent() => _events.ToArray();
+    public IReadOnlyList<ScreenEvent> Recent()
+    {
+        lock (_lock) return _events.ToArray();
+    }
 }

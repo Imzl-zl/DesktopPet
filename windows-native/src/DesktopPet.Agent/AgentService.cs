@@ -1,8 +1,10 @@
 using System.Text.Json;
+using System.Threading.Channels;
 using DesktopPet.Agent.Analysis;
 using DesktopPet.Agent.Capture;
 using DesktopPet.Core.Ai;
 using DesktopPet.Core.Scheduling;
+using DesktopPet.Infra.Diagnostics;
 using DesktopPet.Infra.PipeRpc;
 using DesktopPet.Infra.Providers;
 
@@ -15,15 +17,34 @@ namespace DesktopPet.Agent;
 /// </summary>
 public sealed class AgentService : IAsyncDisposable
 {
-    public const string DefaultPipeName = "DesktopPet.Agent";
-
     private readonly PipeRpcServer _server;
     private readonly IScreenCaptureSource _capture;
     private readonly ICredentialStore _credentials;
-    private readonly TimeSpan _captureInterval;
+    private readonly IAppLogger _logger;
+    private readonly int _expectedClientProcessId;
+    private readonly Func<int, bool> _clientAuthorizer;
+    private readonly HttpClient _providerHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly TimeSpan? _captureIntervalOverride;
+    private readonly TimeSpan _heartbeatTimeout;
+    private readonly TimeProvider _timeProvider;
     private readonly CancellationTokenSource _shutdown = new();
+    private readonly Channel<QueuedScreenEvent> _eventQueue = Channel.CreateBounded<QueuedScreenEvent>(
+        new BoundedChannelOptions(16)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait, // TryWrite=false 时显式计数；事件生产线程绝不等待。
+        });
+    private readonly object _disposeSync = new();
+    private Task? _disposeTask;
+    private Task? _runTask;
+    private bool _runStarted;
+    private bool _disposeStarted;
+    private long _engineGeneration;
+    private long _droppedEventCount;
 
     private readonly object _configLock = new();
+    private readonly SemaphoreSlim _engineLifecycle = new(1, 1);
     private AgentConfig _config = AgentConfig.Defaults;
     private AnalysisEngine? _engine;
     private CancellationTokenSource? _engineCts;
@@ -33,41 +54,106 @@ public sealed class AgentService : IAsyncDisposable
         string pipeName,
         IScreenCaptureSource capture,
         ICredentialStore credentials,
-        TimeSpan? captureInterval = null)
+        int expectedClientProcessId,
+        TimeSpan? captureInterval = null,
+        Func<int, bool>? clientAuthorizer = null,
+        TimeSpan? heartbeatTimeout = null,
+        TimeProvider? timeProvider = null,
+        IAppLogger? logger = null)
     {
+        if (expectedClientProcessId <= 0) throw new ArgumentOutOfRangeException(nameof(expectedClientProcessId));
         _server = new PipeRpcServer(pipeName);
         _capture = capture ?? throw new ArgumentNullException(nameof(capture));
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
-        _captureInterval = captureInterval ?? TimeSpan.FromSeconds(1);
+        _logger = logger ?? NullAppLogger.Instance;
+        _expectedClientProcessId = expectedClientProcessId;
+        _clientAuthorizer = clientAuthorizer ?? (pid => pid == _expectedClientProcessId);
+        _captureIntervalOverride = captureInterval;
+        _heartbeatTimeout = heartbeatTimeout ?? TimeSpan.FromSeconds(15);
+        if (_heartbeatTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(heartbeatTimeout));
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>运行直到 Shutdown 或 ct 取消。阻塞调用。</summary>
-    public async Task RunAsync(CancellationToken ct)
+    public Task RunAsync(CancellationToken ct)
     {
-        try
+        lock (_disposeSync)
         {
-            await _server.WaitForConnectionAsync(ct).ConfigureAwait(false);
-            await _server.SendAsync(new RpcMessage(RpcType.Hello,
-                JsonSerializer.SerializeToElement(new { agent = "DesktopPet.Agent", version = 1 })), ct).ConfigureAwait(false);
-
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _shutdown.Token);
-            var receiveLoop = Task.Run(() => ReceiveLoopAsync(linked.Token), CancellationToken.None);
-            try
-            {
-                await Task.Delay(Timeout.InfiniteTimeSpan, linked.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // 正常退出路径：ct 或 Shutdown
-            }
-            try { await receiveLoop.ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
-            catch (IOException) { }
+            if (_disposeStarted) throw new ObjectDisposedException(nameof(AgentService));
+            if (_runStarted) throw new InvalidOperationException("AgentService.RunAsync 只能启动一次");
+            _runStarted = true;
+            _runTask = RunCoreAsync(ct);
+            return _runTask;
         }
-        catch (OperationCanceledException) { }
     }
 
-    private async Task ReceiveLoopAsync(CancellationToken ct)
+    private async Task RunCoreAsync(CancellationToken ct)
+    {
+        using var runLifetime = CancellationTokenSource.CreateLinkedTokenSource(ct, _shutdown.Token);
+        var runCt = runLifetime.Token;
+        try
+        {
+            while (!runCt.IsCancellationRequested)
+            {
+                await _server.WaitForConnectionAsync(runCt).ConfigureAwait(false);
+                int clientProcessId;
+                try
+                {
+                    clientProcessId = _server.GetConnectedClientProcessId();
+                }
+                catch (Exception ex) when (ex is IOException or System.ComponentModel.Win32Exception)
+                {
+                    _logger.Info("Agent", "Reject pipe client: cannot resolve PID: " + ex.Message);
+                    await _server.DisconnectAsync().ConfigureAwait(false);
+                    continue;
+                }
+
+                if (!_clientAuthorizer(clientProcessId))
+                {
+                    _logger.Info("Agent", $"Reject pipe client pid={clientProcessId}; expected={_expectedClientProcessId}");
+                    await _server.DisconnectAsync().ConfigureAwait(false);
+                    continue;
+                }
+
+                await _server.SendAsync(new RpcMessage(RpcType.Hello,
+                    JsonSerializer.SerializeToElement(new { agent = "DesktopPet.Agent", version = 1 })), runCt).ConfigureAwait(false);
+
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(runCt);
+                var heartbeatLease = new HeartbeatLease(_heartbeatTimeout, _timeProvider);
+                var receiveLoop = ReceiveLoopAsync(heartbeatLease, linked.Token);
+                var heartbeatLoop = MonitorHeartbeatAsync(heartbeatLease, linked.Token);
+                var eventSendLoop = SendEventsAsync(linked.Token);
+                try
+                {
+                    var completed = await Task.WhenAny(receiveLoop, heartbeatLoop, eventSendLoop).ConfigureAwait(false);
+                    await completed.ConfigureAwait(false);
+                }
+                finally
+                {
+                    linked.Cancel();
+                    await ObserveSessionLoopEndAsync(receiveLoop).ConfigureAwait(false);
+                    await ObserveSessionLoopEndAsync(heartbeatLoop).ConfigureAwait(false);
+                    await ObserveSessionLoopEndAsync(eventSendLoop).ConfigureAwait(false);
+                }
+                return; // 已认证会话结束后 Agent 无独立工作，宿主退出
+            }
+        }
+        catch (OperationCanceledException) when (runCt.IsCancellationRequested)
+        {
+        }
+        catch (ObjectDisposedException) when (_disposeStarted)
+        {
+        }
+        catch (IOException) when (_disposeStarted)
+        {
+        }
+        finally
+        {
+            await StopEngineAndCaptureAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task ReceiveLoopAsync(HeartbeatLease heartbeatLease, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
@@ -89,9 +175,10 @@ public sealed class AgentService : IAsyncDisposable
             switch (msg.Type)
             {
                 case RpcType.Config:
-                    ApplyConfig(msg.Payload);
+                    await ApplyConfigAsync(msg.Payload, ct).ConfigureAwait(false);
                     break;
                 case RpcType.Ping:
+                    heartbeatLease.Renew();
                     await SafeSendAsync(new RpcMessage(RpcType.Pong, null), ct).ConfigureAwait(false);
                     break;
                 case RpcType.Shutdown:
@@ -101,13 +188,52 @@ public sealed class AgentService : IAsyncDisposable
         }
     }
 
+    private async Task MonitorHeartbeatAsync(HeartbeatLease heartbeatLease, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            var remaining = heartbeatLease.Remaining;
+            if (remaining == TimeSpan.Zero)
+            {
+                await HandleHeartbeatExpiredAsync().ConfigureAwait(false);
+                return;
+            }
+            await Task.Delay(remaining, _timeProvider, ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task HandleHeartbeatExpiredAsync()
+    {
+        _logger.Info("Agent", "Heartbeat lease expired; stopping capture and Agent service");
+        await StopEngineAndCaptureAsync(() => _shutdown.Cancel()).ConfigureAwait(false);
+    }
+
+    private async Task StopEngineAndCaptureAsync(Action? beforeRelease = null)
+    {
+        Interlocked.Increment(ref _engineGeneration);
+        await _engineLifecycle.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await StopEngineCoreAsync().ConfigureAwait(false);
+            if (_capture is IActivatableScreenCaptureSource activatableCapture)
+            {
+                activatableCapture.SetEnabled(false);
+            }
+            beforeRelease?.Invoke();
+        }
+        finally
+        {
+            _engineLifecycle.Release();
+        }
+    }
+
     private static readonly JsonSerializerOptions ConfigJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    private void ApplyConfig(JsonElement? payload)
+    private async Task ApplyConfigAsync(JsonElement? payload, CancellationToken ct)
     {
         AgentConfig cfg;
         try
@@ -122,44 +248,88 @@ public sealed class AgentService : IAsyncDisposable
             cfg = AgentConfig.Defaults;
         }
 
-        lock (_configLock)
+        await _engineLifecycle.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            _config = cfg;
-            AgentLog($"ApplyConfig: screenAnalysis={cfg.ScreenAnalysis} provider={cfg.ProviderBaseUrl} interval={cfg.MinAnalysisIntervalSeconds}");
-            RebuildEngineLocked();
+            long generation;
+            lock (_configLock)
+            {
+                if (cfg.Revision < _config.Revision)
+                {
+                    _logger.Info("Agent", $"Ignore stale config revision={cfg.Revision}; current={_config.Revision}");
+                    return;
+                }
+                _config = cfg;
+                generation = Interlocked.Increment(ref _engineGeneration);
+            }
+            _logger.Info("Agent", $"ApplyConfig: revision={cfg.Revision} screenAnalysis={cfg.ScreenAnalysis} providerConfigured={!string.IsNullOrWhiteSpace(cfg.ProviderBaseUrl)} analysisInterval={cfg.MinAnalysisIntervalSeconds} captureInterval={cfg.CaptureIntervalSeconds}");
+            await StopEngineCoreAsync().ConfigureAwait(false);
+            StartEngine(cfg, generation);
+        }
+        finally
+        {
+            _engineLifecycle.Release();
         }
     }
 
-    private void RebuildEngineLocked()
+    private void StartEngine(AgentConfig config, long generation)
     {
-        _engineCts?.Cancel();
-        _engineCts?.Dispose();
-        _engineCts = null;
-
+        var captureInterval = _captureIntervalOverride
+            ?? TimeSpan.FromSeconds(Math.Clamp(config.CaptureIntervalSeconds, 1, 30));
+        if (_capture is ICaptureCadenceSource cadence)
+            cadence.SetCaptureInterval(captureInterval);
         if (_capture is IActivatableScreenCaptureSource activatableCapture)
         {
-            activatableCapture.SetEnabled(_config.ScreenAnalysis);
+            activatableCapture.SetEnabled(config.ScreenAnalysis);
         }
 
         IModelProvider? model = null;
-        if (!string.IsNullOrEmpty(_config.ProviderBaseUrl) && !string.IsNullOrEmpty(_config.ProviderModel))
+        if (!string.IsNullOrEmpty(config.ProviderBaseUrl) && !string.IsNullOrEmpty(config.ProviderModel))
         {
             var pc = new ProviderConfig(
                 Id: "agent-analysis",
                 Name: "Agent 分析模型",
-                BaseUrl: _config.ProviderBaseUrl,
-                ApiKeyRef: _config.ProviderApiKeyRef ?? "",
-                ModelName: _config.ProviderModel,
+                BaseUrl: config.ProviderBaseUrl,
+                ApiKeyRef: config.ProviderApiKeyRef ?? "",
+                ModelName: config.ProviderModel,
                 Capabilities: ModelCapabilities.Chat | ModelCapabilities.Vision,
                 IsDefault: false,
-                ReasoningEffort: _config.ProviderReasoningEffort); // 推理模型必须关闭思考，否则 token 全被消耗
-            model = new OpenAiCompatibleModelProvider(pc, _credentials);
+                ReasoningEffort: config.ProviderReasoningEffort); // 推理模型必须关闭思考，否则 token 全被消耗
+            model = new OpenAiCompatibleModelProvider(
+                pc, _credentials, _providerHttp, requestTimeout: Timeout.InfiniteTimeSpan);
         }
 
-        _engine = new AnalysisEngine(_capture, model, () => CurrentConfig(), _captureInterval);
-        _engine.EventRaised += e => _ = PushEventAsync(e);
-        _engineCts = new CancellationTokenSource();
-        _engineTask = _engine.RunAsync(_engineCts.Token);
+        var engine = new AnalysisEngine(_capture, model, CurrentConfig, _captureIntervalOverride);
+        engine.CaptureFaulted += ex => _logger.Info("Agent", $"capture fault: {ex.GetType().Name}: {ex.Message}");
+        engine.EventRaised += e =>
+        {
+            if (!_eventQueue.Writer.TryWrite(new QueuedScreenEvent(generation, config.Revision, e)))
+            {
+                var dropped = Interlocked.Increment(ref _droppedEventCount);
+                if ((dropped & 0x0F) == 1) _logger.Info("Agent", $"screen event queue full; dropped={dropped}");
+            }
+        };
+        var engineCts = new CancellationTokenSource();
+        _engine = engine;
+        _engineCts = engineCts;
+        _engineTask = engine.RunAsync(engineCts.Token);
+    }
+
+    private async Task StopEngineCoreAsync()
+    {
+        var cts = _engineCts;
+        var task = _engineTask;
+        _engine = null;
+        _engineCts = null;
+        _engineTask = null;
+
+        cts?.Cancel();
+        if (task is not null)
+        {
+            try { await task.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
+        cts?.Dispose();
     }
 
     private AgentConfig CurrentConfig()
@@ -167,23 +337,34 @@ public sealed class AgentService : IAsyncDisposable
         lock (_configLock) return _config;
     }
 
-    internal static void AgentLog(string msg)
+    private async Task SendEventsAsync(CancellationToken ct)
     {
-        try
+        await foreach (var queued in _eventQueue.Reader.ReadAllAsync(ct).ConfigureAwait(false))
         {
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "desktoppet-agent.log"),
-                $"{DateTime.Now:HH:mm:ss.fff} {msg}" + Environment.NewLine);
+            if (queued.Generation != Volatile.Read(ref _engineGeneration)
+                || !CurrentConfig().ScreenAnalysis)
+            {
+                Interlocked.Increment(ref _droppedEventCount);
+                continue;
+            }
+            var screenEvent = queued.Event;
+            _logger.Info("Agent", $"push event: kind={screenEvent.Kind} revision={queued.ConfigRevision}");
+            var payload = JsonSerializer.SerializeToElement(new ScreenEventPayload(
+                screenEvent.Timestamp.ToString("o"),
+                screenEvent.Kind.ToString(),
+                screenEvent.Summary,
+                screenEvent.FrameHash,
+                queued.ConfigRevision), ConfigJsonOptions);
+            await _server.SendAsync(new RpcMessage(RpcType.ScreenEvent, payload), ct).ConfigureAwait(false);
         }
-        catch (Exception) { }
     }
 
-    private async Task PushEventAsync(ScreenEvent e)
+    private static async Task ObserveSessionLoopEndAsync(Task task)
     {
-        AgentLog($"push event: kind={e.Kind} summary={e.Summary}");
-        var payload = JsonSerializer.SerializeToElement(new ScreenEventPayload(
-            e.Timestamp.ToString("o"), e.Kind.ToString(), e.Summary, e.FrameHash), ConfigJsonOptions);
-        await SafeSendAsync(new RpcMessage(RpcType.ScreenEvent, payload), CancellationToken.None).ConfigureAwait(false);
+        try { await task.ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+        catch (IOException) { }
+        catch (ObjectDisposedException) { }
     }
 
     private async Task SafeSendAsync(RpcMessage msg, CancellationToken ct)
@@ -192,33 +373,69 @@ public sealed class AgentService : IAsyncDisposable
         {
             await _server.SendAsync(msg, ct).ConfigureAwait(false);
         }
-        catch (IOException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // 对端断连：事件丢弃（App 重启会重连新 Agent）
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            // 对端断连：会话循环或 heartbeat 随后结束。
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        _shutdown.Cancel();
-        lock (_configLock)
+        lock (_disposeSync)
         {
-            _engineCts?.Cancel();
-            _engineCts?.Dispose();
-            _engineCts = null;
+            if (_disposeTask is not null) return new ValueTask(_disposeTask);
+            _disposeStarted = true;
+            _disposeTask = DisposeCoreAsync(_runTask);
+            return new ValueTask(_disposeTask);
         }
-        if (_engineTask is not null)
+    }
+
+    private async Task DisposeCoreAsync(Task? runTask)
+    {
+        var failures = new List<Exception>();
+        try { _shutdown.Cancel(); }
+        catch (Exception ex) { failures.Add(ex); }
+        Interlocked.Increment(ref _engineGeneration);
+        _eventQueue.Writer.TryComplete();
+
+        try { await _server.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception ex) { failures.Add(ex); }
+        if (runTask is not null)
         {
-            try { await _engineTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
+            try { await runTask.ConfigureAwait(false); }
+            catch (Exception ex) { failures.Add(ex); }
         }
-        if (_capture is IDisposable disposableCapture)
+        else
         {
-            disposableCapture.Dispose();
+            try { await StopEngineAndCaptureAsync().ConfigureAwait(false); }
+            catch (Exception ex) { failures.Add(ex); }
         }
-        await _server.DisposeAsync().ConfigureAwait(false);
-        _shutdown.Dispose();
+
+        try
+        {
+            if (_capture is IDisposable disposableCapture) disposableCapture.Dispose();
+        }
+        catch (Exception ex) { failures.Add(ex); }
+        try { _providerHttp.Dispose(); }
+        catch (Exception ex) { failures.Add(ex); }
+        try { _engineLifecycle.Dispose(); }
+        catch (Exception ex) { failures.Add(ex); }
+        try { _shutdown.Dispose(); }
+        catch (Exception ex) { failures.Add(ex); }
+
+        if (failures.Count > 0) throw new AggregateException("AgentService 释放失败", failures);
     }
 }
 
 /// <summary>屏幕事件管道载荷（IPC 契约：明确字段名，枚举转字符串）。</summary>
-public sealed record ScreenEventPayload(string Timestamp, string Kind, string Summary, ulong FrameHash);
+public sealed record ScreenEventPayload(
+    string Timestamp,
+    string Kind,
+    string Summary,
+    ulong FrameHash,
+    long ConfigRevision);
+
+internal sealed record QueuedScreenEvent(long Generation, long ConfigRevision, ScreenEvent Event);

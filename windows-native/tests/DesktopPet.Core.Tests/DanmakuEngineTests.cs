@@ -101,6 +101,32 @@ public class DanmakuEngineTests
     }
 
     [Fact]
+    public void Tick_ReturnsFalseWhenLastItemLeavesScreen()
+    {
+        var engine = new DanmakuEngine(width: 1000, minSpeed: 1000, maxSpeed: 1000);
+        engine.Enqueue("once", DateTime.Now);
+
+        Assert.False(engine.Tick(2.0));
+        Assert.Equal(0, engine.ActiveCount);
+    }
+
+    [Fact]
+    public void Clear_ReleasesActiveAndPooledTextReferences()
+    {
+        var engine = new DanmakuEngine(width: 1000, minSpeed: 1000, maxSpeed: 1000);
+        var active = engine.Enqueue("active", DateTime.Now)!;
+        engine.Tick(2.0);
+        var pooled = active;
+        engine.Enqueue("active-again", DateTime.Now);
+
+        engine.Clear();
+
+        Assert.Equal(0, engine.ActiveCount);
+        Assert.Equal(0, engine.PoolSize);
+        Assert.Equal("", pooled.Text);
+    }
+
+    [Fact]
     public void Enqueue_RespectsTrackCount()
     {
         var engine = new DanmakuEngine(width: 1000, trackCount: 3);

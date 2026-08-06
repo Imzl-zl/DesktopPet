@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Text;
 using System.Threading;
 using DesktopPet.Infra.Tts;
@@ -171,6 +172,7 @@ public class EdgeTtsTests
 /// Phase 6g：SAPI 离线 TTS（默认语音实现——Edge 端点对 SChannel 风控，见 EdgeTtsProvider 注释）。
 /// 依赖系统 zh-CN 语音；无语音时回退默认（断言仅 WAV 结构）。
 /// </summary>
+[SupportedOSPlatform("windows")]
 public class SapiTtsProviderTests
 {
     [Fact]

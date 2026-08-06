@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "af54f0bc-f2ce-41aa-a86d-b8852e5c08ba",
+  "title": "你是资深 .NET 架构审查专家。审查 C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Infra 与 DesktopPet.Co...",
+  "goal": "你是资深 .NET 架构审查专家。审查 C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Infra 与 DesktopPet.Core 的服务类，只读不改。\n\n文件清单：\n- src/DesktopPet.Infra/Providers/OpenAiCompatibleModelProvider.cs, OpenAiCompatibleImageProvider.cs, ProviderConfig.cs\n- src/DesktopPet.Infra/Tts/EdgeTts.cs, SapiTtsProvider.cs\n- src/DesktopPet.Core/Scheduling/ModelRequestScheduler.cs\n- src/DesktopPet.Core/Ai/ChatPipeline.cs\n- src/DesktopPet.Core/Memory/ConversationMemory.cs, MemoryStore.cs\n- src/DesktopPet.Core/Interaction/InteractionEngine.cs, QuickBubbleController.cs\n- src/DesktopPet.Core/Care/CareEngine.cs, IntimacyEngine.cs\n- src/DesktopPet.Core/Personas/PersonaEngine.cs, BuiltinPersonas.cs, PersonasFileModel.cs\n- src/DesktopPet.Core/Storage/TauriMigration.cs\n- src/DesktopPet.Core/Pets/Pause.cs, PetAnimationSettings.cs, StateMapping.cs, PetStoreModel.cs\n\n重点找：\n1. HttpClient 使用问题（未复用、超时处理、重试指数退避实现错误）\n2. 硬编码的用户可配置值（默认值是否与设置项对接：ModelRequestScheduler 并发数、超时、token 上限、温度、间隔等；设置文件中有的字段是否真被消费）\n3. 并发/竞态（SemaphoreSlim 使用、取消令牌、共享状态）\n4. 错误处理问题（吞异常、误导性降级）\n5. 设计缺陷（接口抽象泄漏、依赖倒置破坏、重复逻辑）\n6. 数据一致性（读-改-写竞态、持久化时机）\n\n输出格式：按严重程度分组列出发现（Critical / Important / Minor），每条含 文件:行号、问题描述、为何是问题、修复建议。没有发现的类别不要硬凑。最后给 1-2 行总体结论。",
+  "status": "completed",
+  "createdAt": "2026-08-06T00:13:21.526Z",
+  "updatedAt": "2026-08-06T00:21:12.850Z",
+  "runs": [
+    {
+      "runId": "686ae5a3-be7c-4654-85dd-0adef29370e6",
+      "mode": "single",
+      "asyncDir": "C:\\Users\\zhanglu\\AppData\\Local\\Temp\\pi-subagents-user-zhanglu\\async-subagent-runs\\686ae5a3-be7c-4654-85dd-0adef29370e6",
+      "status": "complete",
+      "startedAt": "2026-08-06T00:13:21.579Z",
+      "completedAt": "2026-08-06T00:21:12.850Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "status",
+      "path": "C:\\Users\\zhanglu\\AppData\\Local\\Temp\\pi-subagents-user-zhanglu\\async-subagent-runs\\686ae5a3-be7c-4654-85dd-0adef29370e6\\status.json"
+    },
+    {
+      "kind": "other",
+      "path": "C:\\Users\\zhanglu\\AppData\\Local\\Temp\\pi-subagents-user-zhanglu\\async-subagent-runs\\686ae5a3-be7c-4654-85dd-0adef29370e6\\events.jsonl",
+      "description": "Lifecycle events"
+    },
+    {
+      "kind": "output",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\686ae5a3-be7c-4654-85dd-0adef29370e6_reviewer_output.md"
+    }
+  ],
+  "receipts": [],
+  "cwd": "C:\\sudy\\github\\DesktopPet",
+  "ownerSessionId": "C:\\Users\\zhanglu\\.pi\\agent\\sessions\\--C--sudy-github-DesktopPet--\\2026-08-06T00-06-41-208Z_019fd464-c338-741a-840d-0a087789a3da.jsonl",
+  "summary": "reviewer:\n审查完成。以下按严重程度给出发现（所有结论均有代码证据支撑，审查为只读，未做任何修改）。\n\n---\n\n## Review\n\n### Critical（必须修复）\n\n**C1. 并发闸形同虚设：单 worker 循环把所有请求串行化**\n- 位置：`ModelRequestScheduler.cs:74, 79-115`；相关：`AiCoordinator.cs:446-449`\n- 问题：`_loop ??= Task.Run(() => RunLoopAsync(_loopCts.Token))` 只启动**一个**循环任务，而 `RunLoopAsync` 在循环体内 `dequeue → _gate.WaitAsync → ExecuteWithPolicyAsync（完整 await）→ _gate.Release` 内联执行，一个 job 跑完才取下一个。因此任何时刻只有 1 个请求在执行，`concurrency=3` 与 `_gate`（:58）完全失效——`_gate` 永远只有一个持有者，`concurrency` 参数是死代码。\n- 为何是问题：违背三处既有承诺——本类注释\"SemaphoreSlim 并发闸（默认 3）\"、架构文档 §3.3、`AiCoordinator.cs:446`\"多宠物并行独立请求不被串行化\"。实际效果：`TryProactiveInteraction` 的多宠物并行（2 只 × 8s 超时）被串行化成最多 16s；P0 对话会被正在执行的 P1/P2 头阻塞（head-of-line blocking）。测试 `SchedulerTests.cs:66-78` 只断言 `MaxInFlight <= 2`，串行执行 MaxInFlight=1 也能通过，**测试无法暴露该缺陷**。\n- 修复：按经典有界并行 worker 模式——循环 dequeue 后 `_ = ProcessJobAsync(job)` 生成独立任务，由 `_gate` 限流；或删除并发承诺改为显式单线程文档化。\n\n**C2. ScreenEventLog 跨线程无锁访问（正常运行必然并发）**\n- 位置：`FrameHasher.cs:121`（`_events.Enqueue`）、`:126`（`Recent()` → `_events.ToArray()`）\n- 问题：写入方是 RPC 接收循环线程（`AiCoordinator.cs:426` `OnAgentEvent` → `_eventLog.Add`），读取方是 Timer 线程（`AiCoordinator.cs:526` `TryProactiveInteraction`、`:619` `TryDailySummary`）和 UI 线程（`SendChatAsync` → `ChatPipeline` → `_eventLog.Recent()`）。`Queue<T>` 非线程安全，`Add` 与 `ToArray` 交错会导致内部状态损坏或抛异常；调用点外层 try/catch 吞掉后表现为事件丢失/偶发失败，行为非确定性。\n- 修复：加锁或改用 `ConcurrentQueue<T>`（容量裁剪逻辑保持）。\n\n**C3. 并发对话的读-改-写竞态：token/XP/亲密度/画像丢账 + List 竞态**\n- 位置：`AiCoordinator.cs:190-197`（`SendChatAsync` 无任何串行化）、`ConversationMemory.cs:32-49`、`App.xaml.cs:272-275`\n- 问题：scheduler 并发（即使按 C1 修复后）允许多个对话同时在飞。`_conversation.Append`/`BuildContext` 对 `List<ChatMessage>` 并发增/遍历可损坏状态；`RecordChatSuccess` 并发 `MergeProfile` + `SaveMemoryProfile`、`_intimacy.RecordConversation` 都是读-改-写，后到者覆盖先到者。最严重的是 `App.xaml.cs:272-275` `RecordTokens`：`LoadCare() → FeedTokens(care) → SaveCare(states)` 整段读-改-写，两个并发记账保存互相覆盖 → **token/XP 静默丢账**（这正是评审点 6 的典型）。\n- 修复：对\"管道执行 + 记账/持久化\"整体加一把异步锁（或每 petId 串行化）；持久化走单写队列。\n\n---\n\n### Important（明确缺陷，触发条件较窄或影响"
+}

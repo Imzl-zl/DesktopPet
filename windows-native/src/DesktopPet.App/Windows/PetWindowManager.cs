@@ -1,11 +1,16 @@
 using System.IO;
 using System.Windows;
+using DesktopPet.App.Hotkeys;
 using DesktopPet.App.Interop;
+using DesktopPet.App.Localization;
 using DesktopPet.App.Rendering;
+using DesktopPet.Core.Hotkeys;
+using DesktopPet.Core.I18n;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Rendering;
 using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
+using DesktopPet.Infra.Diagnostics;
 
 namespace DesktopPet.App.Windows;
 
@@ -20,10 +25,15 @@ public sealed class PetWindowManager
     private Ai.AiCoordinator? _aiCoordinator;
     private Action<string>? _setOutputMode;
     private Action? _openChat;
+    private Func<HotkeySettings, HotkeySettingsUpdateResult>? _applyHotkeys;
+    private Func<AppLang, CancellationToken, Task<LanguageChangeResult>>? _changeLanguage;
+    private DiagnosticExporter? _diagnosticExporter;
+    private Func<CancellationToken, Task<FactoryResetResult>>? _factoryReset;
     private readonly Dictionary<string, PetWindow> _windows = new();
     private readonly Dictionary<string, PetPosition> _positions;
     private readonly IJsonStore _store;
     private readonly SpriteLoader _spriteLoader;
+    private readonly IAppLogger _logger;
     private bool _globallyVisible = true;
     private bool _chatVisible;
     private bool _settingsForeground;
@@ -42,10 +52,11 @@ public sealed class PetWindowManager
     public event Action<bool>? GlobalVisibilityChanged;
     public event Action<bool>? SettingsForegroundChanged;
 
-    public PetWindowManager(IJsonStore store, SpriteLoader spriteLoader)
+    public PetWindowManager(IJsonStore store, SpriteLoader spriteLoader, IAppLogger? logger = null)
     {
         _store = store;
         _spriteLoader = spriteLoader;
+        _logger = logger ?? NullAppLogger.Instance;
         _positions = store.LoadPositions();
         _globallyVisible = store.LoadGlobalVisibility();
     }
@@ -55,13 +66,18 @@ public sealed class PetWindowManager
     {
         _globallyVisible = globallyVisible;
         var wantedIds = new HashSet<string>(store.Instances.Select(i => i.Id));
+        var retainedSlugs = store.Instances
+            .Select(instance => instance.SpriteSlug)
+            .ToHashSet(StringComparer.Ordinal);
 
         foreach (var (id, window) in _windows.ToList())
         {
             if (!wantedIds.Contains(id))
             {
+                var slug = window.SpriteSlug;
                 window.Close();
                 _windows.Remove(id);
+                if (!retainedSlugs.Contains(slug)) _spriteLoader.Evict(slug);
             }
         }
 
@@ -70,7 +86,7 @@ public sealed class PetWindowManager
         {
             if (!_windows.TryGetValue(instance.Id, out var window))
             {
-                window = new PetWindow(instance, _spriteLoader, _store, OnDragFinished);
+                window = new PetWindow(instance, _spriteLoader, _store, OnDragFinished, _logger);
                 window.SetImportHandler(ImportSprite);
                 window.SetBroadcastQuickBubble(BroadcastQuickBubble);
                 if (_settings is not null) window.ApplySettings(_settings); // 全量（点击/气泡池/外观/漫游等）
@@ -109,11 +125,13 @@ public sealed class PetWindowManager
     /// 隐藏后恢复位置不漂移（窗口坐标不变，只切 Visibility）。</summary>
     public void SetGlobalVisible(bool visible)
     {
-        _globallyVisible = visible;
         _store.SaveGlobalVisibility(visible);
+        _globallyVisible = visible;
         foreach (var window in _windows.Values)
         {
-            window.Visibility = visible ? Visibility.Visible : Visibility.Hidden;
+            window.Visibility = visible && window.PetVisible
+                ? Visibility.Visible
+                : Visibility.Hidden;
         }
         GlobalVisibilityChanged?.Invoke(visible);
     }
@@ -135,7 +153,7 @@ public sealed class PetWindowManager
             WanderPauseMaxMs = Pause.DefaultWanderPauseMaxMs,
             ReactsToActivity = false,
         };
-        var window = new PetWindow(instance, _spriteLoader, _store, OnDragFinished);
+        var window = new PetWindow(instance, _spriteLoader, _store, OnDragFinished, _logger);
         window.SetImportHandler(ImportSprite);
         window.SetBroadcastQuickBubble(BroadcastQuickBubble);
         window.SetClickAction("none");
@@ -151,8 +169,9 @@ public sealed class PetWindowManager
     private void OnDragFinished(PetWindow window, int x, int y)
     {
         var position = new PetPosition(x, y);
+        var next = PetPositionsFile.Update(_positions, window.PetId, position);
+        _store.SavePositions(next);
         _positions[window.PetId] = position;
-        _store.SavePositions(PetPositionsFile.Update(_positions, window.PetId, position));
     }
 
     /// <summary>
@@ -161,7 +180,6 @@ public sealed class PetWindowManager
     public void ImportSprite(byte[] bytes, string suggestedName)
     {
         var id = PetStoreModel.NewPetInstanceId();
-        _spriteLoader.SaveLocal(id, bytes);
         var instance = new PetInstance
         {
             Id = id,
@@ -176,10 +194,26 @@ public sealed class PetWindowManager
             WanderPauseMaxMs = Pause.DefaultWanderPauseMaxMs,
             ReactsToActivity = true,
         };
-        var store = _store.LoadPetStore() ?? PetStoreModel.EmptyPetStore();
-        store = PetStoreModel.CreatePetInstance(store, instance);
-        _store.SavePetStore(store);
-        Reconcile(store, _globallyVisible);
+        var current = _store.LoadPetStore() ?? PetStoreModel.EmptyPetStore();
+        var next = PetStoreModel.CreatePetInstance(current, instance);
+
+        _spriteLoader.SaveLocal(id, bytes);
+        try
+        {
+            _store.SavePetStore(next);
+        }
+        catch (JsonStoreException saveError)
+        {
+            try { _spriteLoader.DeleteLocal(id); }
+            catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException)
+            {
+                throw new IOException(
+                    "Sprite import persistence failed and the staged sprite could not be removed",
+                    new AggregateException(saveError, cleanupError));
+            }
+            throw;
+        }
+        Reconcile(next, _globallyVisible);
     }
 
     /// <summary>设置窗口入口（托盘/浮球右键）。</summary>
@@ -187,8 +221,18 @@ public sealed class PetWindowManager
     {
         if (_settingsWindow is null)
         {
-            var settingsWindow = new DesktopPet.App.Settings.SettingsWindow(_store, this, _spriteLoader,
-                _i18n ?? new DesktopPet.Core.I18n.I18nService(), _aiCoordinator);
+            var settingsWindow = new DesktopPet.App.Settings.SettingsWindow(
+                _store,
+                this,
+                _spriteLoader,
+                _i18n ?? new I18nService(),
+                _aiCoordinator,
+                _applyHotkeys,
+                _changeLanguage,
+                () => _aiCoordinator?.AgentProcessId,
+                _diagnosticExporter,
+                _factoryReset,
+                _logger);
             _settingsWindow = settingsWindow;
             settingsWindow.IsVisibleChanged += (_, _) => UpdateDesktopOverlayZOrder();
             settingsWindow.StateChanged += (_, _) => UpdateDesktopOverlayZOrder();
@@ -242,15 +286,45 @@ public sealed class PetWindowManager
         }
     }
 
-    /// <summary>注入 i18n（App bootstrap）。</summary>
-    public void SetI18n(DesktopPet.Core.I18n.I18nService i18n) => _i18n = i18n;
+    /// <summary>注入 i18n，并初始化已创建窗口的静态文案。</summary>
+    public void SetI18n(I18nService i18n)
+    {
+        _i18n = i18n;
+        foreach (var window in _windows.Values) window.ApplyLocalization(i18n);
+    }
+
+    public void ApplyLocalization()
+    {
+        if (_i18n is null) return;
+        foreach (var window in _windows.Values) window.ApplyLocalization(_i18n);
+        _floatingBall?.ApplyLocalization(_i18n);
+        _settingsWindow?.ApplyLocalization();
+    }
 
     /// <summary>设置窗跳转 AI 助手页（对话窗人格快捷切换入口）。</summary>
     public void NavigateSettingsToAi()
         => (_settingsWindow as DesktopPet.App.Settings.SettingsWindow)?.NavigateTo("ai");
 
+    /// <summary>外部路径（浮球/热键）改动设置后通知设置窗刷新（防旧快照回滚）。</summary>
+    public void RefreshSettingsWindow()
+        => (_settingsWindow as DesktopPet.App.Settings.SettingsWindow)?.RefreshFromStore();
+
     /// <summary>注入 AI 编排器（设置窗口 AI 页用）。</summary>
     public void SetAiCoordinator(Ai.AiCoordinator? coordinator) => _aiCoordinator = coordinator;
+
+    /// <summary>注入完整快捷键集合提交回调。</summary>
+    public void SetHotkeySettingsHandler(Func<HotkeySettings, HotkeySettingsUpdateResult>? handler)
+        => _applyHotkeys = handler;
+
+    public void SetLanguageChangeHandler(
+        Func<AppLang, CancellationToken, Task<LanguageChangeResult>>? handler)
+        => _changeLanguage = handler;
+
+    public void SetDiagnosticExporter(DiagnosticExporter? exporter)
+        => _diagnosticExporter = exporter;
+
+    public void SetFactoryResetHandler(Func<CancellationToken, Task<FactoryResetResult>>? handler)
+        => _factoryReset = handler;
 
     /// <summary>注入浮球 AI 输出模式切换回调（danmaku/chat/silent）。</summary>
     public void SetOutputModeHandler(Action<string>? handler) => _setOutputMode = handler;
@@ -267,6 +341,7 @@ public sealed class PetWindowManager
     public void ApplySettings(AppSettings settings)
     {
         _settings = settings;
+        _settingsWindow?.ApplySettingsSnapshot(settings);
         PresetPoolJson = System.Text.Json.JsonSerializer.Serialize(settings.QuickBubblePresets);
         foreach (var window in _windows.Values)
         {
@@ -303,7 +378,9 @@ public sealed class PetWindowManager
             OpenSettings,
             dataDirectory,
             _setOutputMode,
-            _openChat);
+            _openChat,
+            _i18n,
+            _logger);
         _floatingBall.Show();
         UpdateDesktopOverlayZOrder();
     }
@@ -326,5 +403,6 @@ public sealed class PetWindowManager
             window.Close();
         }
         _windows.Clear();
+        _spriteLoader.Dispose();
     }
 }

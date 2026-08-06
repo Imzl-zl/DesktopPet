@@ -1,3 +1,4 @@
+using DesktopPet.Core.Hotkeys;
 using DesktopPet.Core.I18n;
 using DesktopPet.Core.Roaming;
 
@@ -25,7 +26,8 @@ public sealed record AppSettings(
     string[] HungryLines,            // 饥饿台词池（空数组 = 不显示饥饿台词）
     RoamConfig Roam,
     AppLang Lang,
-    AiSettings Ai)                   // Phase 5：AI 设置（旧 JSON 无此字段 → 归一化给默认）
+    AiSettings Ai,                  // Phase 5：AI 设置（旧 JSON 无此字段 → 归一化给默认）
+    HotkeySettings Hotkeys = null!) // 全局快捷键；旧 JSON 缺字段时 Normalize 恢复历史默认
 {
     /// <summary>闲谈台词池默认值（旧 JSON 缺字段时回退；用户清空 [] 则保留空 = 不显示）。</summary>
     public static readonly string[] DefaultIdleChatterLines =
@@ -52,7 +54,8 @@ public sealed record AppSettings(
         HungryLines: DefaultHungryLines,
         Roam: new RoamConfig(true, RoamMode.Wander, 5, 1200, 3500),
         Lang: detectedLang,
-        Ai: AiSettings.Defaults);
+        Ai: AiSettings.Defaults,
+        Hotkeys: HotkeySettings.Defaults);
 
     public static AppSettings Normalize(AppSettings raw)
     {
@@ -78,6 +81,7 @@ public sealed record AppSettings(
             raw.HungryLines ?? DefaultHungryLines,
             roam with { Speed = roam.Speed },
             raw.Lang,
-            AiSettings.Normalize(raw.Ai));
+            AiSettings.Normalize(raw.Ai),
+            raw.Hotkeys ?? HotkeySettings.Defaults);
     }
 }

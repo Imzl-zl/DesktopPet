@@ -84,6 +84,20 @@ public class PipeRpcTests
     }
 
     [Fact]
+    public async Task Server_ReportsConnectedClientProcessId()
+    {
+        var pipe = PipeName();
+        await using var server = new PipeRpcServer(pipe);
+        var connectTask = server.WaitForConnectionAsync(CancellationToken.None);
+        await using var client = new PipeRpcClient(pipe);
+
+        await client.ConnectAsync(CancellationToken.None);
+        await connectTask;
+
+        Assert.Equal(Environment.ProcessId, server.GetConnectedClientProcessId());
+    }
+
+    [Fact]
     public async Task ClientDisconnect_ServerReceiveThrows()
     {
         var pipe = PipeName();

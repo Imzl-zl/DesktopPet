@@ -11,7 +11,9 @@ public sealed record AgentConfig(
     string? ProviderModel,
     string? ProviderApiKeyRef,
     string? ProviderReasoningEffort,   // 推理模型开关（如 "none"；空 = 不发送，token 可能被思考耗尽）
-    int MinAnalysisIntervalSeconds)    // 云端分析限频（默认 5）
+    int MinAnalysisIntervalSeconds,    // 云端模型最小分析间隔（默认 5）
+    int CaptureIntervalSeconds = 1,    // 昂贵 surface copy cadence；与模型限频独立
+    long Revision = 0)                 // App 生成的单调配置版本（事件跨配置排序）
 {
     public static AgentConfig Defaults => new(
         ScreenAnalysis: false,
@@ -20,5 +22,7 @@ public sealed record AgentConfig(
         ProviderModel: null,
         ProviderApiKeyRef: null,
         ProviderReasoningEffort: null,
-        MinAnalysisIntervalSeconds: 5);
+        MinAnalysisIntervalSeconds: 5,
+        CaptureIntervalSeconds: 1,
+        Revision: 0);
 }

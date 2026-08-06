@@ -7,24 +7,55 @@ public interface ICredentialStore
 {
     string? Get(string key);
     void Set(string key, string value);
+    bool Delete(string key);
+}
+
+public interface ICredentialNamespaceCleaner
+{
+    int DeleteAll();
+}
+
+public sealed class CredentialStoreException : IOException
+{
+    public CredentialStoreException(string operation, int nativeError)
+        : base($"Windows 凭据{operation}失败（系统错误 {nativeError}）")
+    {
+        Operation = operation;
+        NativeError = nativeError;
+    }
+
+    public string Operation { get; }
+    public int NativeError { get; }
 }
 
 /// <summary>内存实现（测试用）。</summary>
-public sealed class InMemoryCredentialStore : ICredentialStore
+public sealed class InMemoryCredentialStore : ICredentialStore, ICredentialNamespaceCleaner
 {
     private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
 
     public string? Get(string key) => _values.TryGetValue(key, out var v) ? v : null;
     public void Set(string key, string value) => _values[key] = value;
+    public bool Delete(string key) => _values.Remove(key);
+    public int DeleteAll()
+    {
+        var count = _values.Count;
+        _values.Clear();
+        return count;
+    }
 }
 
 /// <summary>Windows Credential Manager 实现（CredRead/CredWrite，target="DesktopPet/{key}"）。</summary>
-public sealed class WindowsCredentialStore : ICredentialStore
+public sealed class WindowsCredentialStore : ICredentialStore, ICredentialNamespaceCleaner
 {
     public string? Get(string key)
     {
         var target = "DesktopPet/" + key;
-        if (!CredNative.CredRead(target, CredNative.CredTypeGeneric, 0, out var ptr)) return null;
+        if (!CredNative.CredRead(target, CredNative.CredTypeGeneric, 0, out var ptr))
+        {
+            var error = Marshal.GetLastWin32Error();
+            if (error == CredNative.ErrorNotFound) return null;
+            throw new CredentialStoreException("读取", error);
+        }
         try
         {
             var cred = Marshal.PtrToStructure<CredNative.Credential>(ptr);
@@ -70,12 +101,60 @@ public sealed class WindowsCredentialStore : ICredentialStore
         try
         {
             Marshal.Copy(bytes, 0, cred.CredentialBlob, bytes.Length);
-            CredNative.CredWrite(ref cred, 0);
+            if (!CredNative.CredWrite(ref cred, 0))
+                throw new CredentialStoreException("写入", Marshal.GetLastWin32Error());
         }
         finally
         {
             Marshal.FreeCoTaskMem(cred.CredentialBlob);
         }
+    }
+
+    public bool Delete(string key)
+    {
+        if (CredNative.CredDelete("DesktopPet/" + key, CredNative.CredTypeGeneric, 0)) return true;
+        var error = Marshal.GetLastWin32Error();
+        if (error == CredNative.ErrorNotFound) return false;
+        throw new CredentialStoreException("删除", error);
+    }
+
+    public int DeleteAll()
+    {
+        if (!CredNative.CredEnumerate("DesktopPet/*", 0, out var count, out var credentials))
+        {
+            var error = Marshal.GetLastWin32Error();
+            if (error == CredNative.ErrorNotFound) return 0;
+            throw new CredentialStoreException("枚举", error);
+        }
+
+        var targets = new List<string>(count);
+        try
+        {
+            for (var index = 0; index < count; index++)
+            {
+                var credentialPointer = Marshal.ReadIntPtr(credentials, index * IntPtr.Size);
+                var credential = Marshal.PtrToStructure<CredNative.Credential>(credentialPointer);
+                if (!string.IsNullOrEmpty(credential.TargetName)) targets.Add(credential.TargetName);
+            }
+        }
+        finally
+        {
+            CredNative.CredFree(credentials);
+        }
+
+        var deleted = 0;
+        foreach (var target in targets)
+        {
+            if (CredNative.CredDelete(target, CredNative.CredTypeGeneric, 0))
+            {
+                deleted++;
+                continue;
+            }
+            var error = Marshal.GetLastWin32Error();
+            if (error != CredNative.ErrorNotFound)
+                throw new CredentialStoreException("删除", error);
+        }
+        return deleted;
     }
 }
 
@@ -83,6 +162,7 @@ internal static class CredNative
 {
     public const int CredTypeGeneric = 1;
     public const int CredPersistLocalMachine = 2;
+    public const int ErrorNotFound = 1168;
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct Credential
@@ -106,6 +186,16 @@ internal static class CredNative
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern bool CredWrite(ref Credential credential, int flags);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool CredDelete(string target, int type, int flags);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool CredEnumerate(
+        string filter,
+        int flags,
+        out int count,
+        out IntPtr credentials);
 
     [DllImport("advapi32.dll")]
     public static extern void CredFree(IntPtr cred);

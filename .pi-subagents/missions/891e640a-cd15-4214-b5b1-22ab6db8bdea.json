@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "891e640a-cd15-4214-b5b1-22ab6db8bdea",
+  "title": "你是资深 WPF/Win32 桌面应用审查专家。审查 C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App 下的渲染与窗口模块，...",
+  "goal": "你是资深 WPF/Win32 桌面应用审查专家。审查 C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App 下的渲染与窗口模块，只读不改。\n\n文件清单：\n- Rendering/SpriteLoader.cs, Rendering/SpriteFrameBitmapSourceCache.cs, Rendering/PixelBuffer.cs, Rendering/ReusablePixelBuffer.cs, Rendering/PlaceholderPet.cs\n- Windows/PetWindow.cs, Windows/FloatingBallWindow.cs, Windows/DanmakuWindow.cs, Windows/BubbleView.cs, Windows/XamlIslandHost.cs, Windows/PetWindowManager.cs, Windows/SpritePreviewWindow.cs, Windows/WelcomeWindow.cs\n- Interop/NativeMethods.cs（已确认基本合理，可跳过）\n- src/DesktopPet.Infra/Hotkey/HotkeyManager.cs（在 windows-native/src 下）\n- src/DesktopPet.Core/Rendering/OverlayRenderer.cs, PetRenderer.cs, SpriteSheet.cs（纯逻辑，可快速扫）\n\n重点找：\n1. Win32 API / WPF 官方 API 的误用（如 DispatcherTimer 使用不当、WriteableBitmap 写像素方式错误、HWND 生命周期、WndProc 泄漏、SetWindowPos/WS_EX_TRANSPARENT 用法、XAML Islands 用法）\n2. 硬编码的用户可配置值（尺寸、时间、颜色、频率、路径写死在源码里且没有设置项对接）\n3. 资源泄漏（timer 未释放、事件未退订、位图缓存无上限、句柄泄漏）\n4. 线程问题（UI 线程阻塞、跨线程访问、Dispatcher.Invoke 死锁风险）\n5. 设计缺陷（重复代码、职责混乱、状态不同步）\n\n输出格式：按严重程度分组列出发现（Critical / Important / Minor），每条含 文件:行号、问题描述、为何是问题、修复建议。没有发现的类别不要硬凑。最后给 1-2 行总体结论。",
+  "status": "completed",
+  "createdAt": "2026-08-06T00:13:21.308Z",
+  "updatedAt": "2026-08-06T00:19:23.630Z",
+  "runs": [
+    {
+      "runId": "ab7e8020-1798-4eed-800d-b2d7ce5b20da",
+      "mode": "single",
+      "asyncDir": "C:\\Users\\zhanglu\\AppData\\Local\\Temp\\pi-subagents-user-zhanglu\\async-subagent-runs\\ab7e8020-1798-4eed-800d-b2d7ce5b20da",
+      "status": "complete",
+      "startedAt": "2026-08-06T00:13:21.435Z",
+      "completedAt": "2026-08-06T00:19:23.630Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "status",
+      "path": "C:\\Users\\zhanglu\\AppData\\Local\\Temp\\pi-subagents-user-zhanglu\\async-subagent-runs\\ab7e8020-1798-4eed-800d-b2d7ce5b20da\\status.json"
+    },
+    {
+      "kind": "other",
+      "path": "C:\\Users\\zhanglu\\AppData\\Local\\Temp\\pi-subagents-user-zhanglu\\async-subagent-runs\\ab7e8020-1798-4eed-800d-b2d7ce5b20da\\events.jsonl",
+      "description": "Lifecycle events"
+    },
+    {
+      "kind": "output",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\ab7e8020-1798-4eed-800d-b2d7ce5b20da_reviewer_output.md"
+    }
+  ],
+  "receipts": [],
+  "cwd": "C:\\sudy\\github\\DesktopPet",
+  "ownerSessionId": "C:\\Users\\zhanglu\\.pi\\agent\\sessions\\--C--sudy-github-DesktopPet--\\2026-08-06T00-06-41-208Z_019fd464-c338-741a-840d-0a087789a3da.jsonl",
+  "summary": "reviewer:\n审查完成。以下是完整发现。\n\n---\n\n# 渲染与窗口模块审查报告\n\n## 审查范围\n- `DesktopPet.App/Rendering/*`（SpriteLoader / SpriteFrameBitmapSourceCache / PixelBuffer / ReusablePixelBuffer / PlaceholderPet）\n- `DesktopPet.App/Windows/*`（PetWindow / FloatingBallWindow / DanmakuWindow / BubbleView / XamlIslandHost / PetWindowManager / SpritePreviewWindow / WelcomeWindow）\n- `DesktopPet.Infra/Hotkey/HotkeyManager.cs`、`DesktopPet.Core/Rendering/*`（OverlayRenderer / PetRenderer / SpriteSheet）\n- 交叉核查：`App.xaml.cs`（hotkey/Danmaku 接线）、`ModeService.cs`、`DanmakuEngine.cs`、`QuickBubbleController.cs`、`AppSettings.cs`\n\n## Correct（做得好的地方）\n- **WndProc 钩子生命周期管理正确**：`PetWindow.cs:474-477` 在 OnLoaded AddHook、OnClosed RemoveHook；`FloatingBallWindow`、`App.xaml.cs:HotkeyHook` 同样对称，且符合「钩子弱引用」的官方语义。\n- **拖拽不抢焦点**：`NativeMethods.MoveWindow` 用 `SetWindowPos(SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE)`，正确。\n- **WriteableBitmap 用法正确**：`PetWindow.cs:689-695` 的 `WritePixels(Int32Rect, byte[], stride, 0)` 签名与 stride 均正确；RGBA→BGRA 就地交换在写位图前完成，R/B 错位防护到位。\n- **Timer 生命周期**：三个 DispatcherTimer 在 OnClosed 全部 Stop；`AnimationEnabled`/`SetDesktopInteractionSuspended`/`IsVisibleChanged` 的启停逻辑一致。\n- **SpriteFrameBitmapSourceCache**：8MB LRU 有界、帧冻结、按实例作 key（record 对 byte[] 字段为引用相等，与调用方传同一实例一致）——设计正确。\n- **HotkeyManager**：私有 id 范围（0xC000+）、幂等重注册、Dispose 全注销，无问题。\n\n---\n\n## Critical\n\n### C1. SpritePreviewWindow.cs:46-48 — 用「编码后的文件字节」当原始像素缓冲构建预览图\n```csharp\nvar source = BitmapSource.Create(\n    sheet.SourceWidth, sheet.SourceHeight, 96, 96, PixelFormats.Bgra32, null,\n    RgbaToBgra(_sourceBytes), sheet.SourceWidth * 4);   // _sourceBytes 是 PNG/WebP 文件字节！\n```\n- **问题**：`PetWindow.cs:257/264/272` 传入的 `bytes` 是 `File.ReadAllBytesAsync` 读出的**压缩编码文件**，不是解码后的原始 RGBA。`RgbaToBgra` 只做 R/B 交换不做解码。\n- **为何是问题**：a) 常规 PNG/WebP 文件体积 < `SourceWidth×SourceHeight×4` 时，`BitmapSource.Create` 校验缓冲不足会抛 `ArgumentException`；该异常发生在 `async void OnDrop`（PetWindow.cs:243）里且**无全局 UnhandledException 兜底**（已 grep 确认），直接进程崩溃；b) 文件较大时预览显示的是 PNG 头部字节解释出的垃圾像素。即：拖入精灵导入的预览功能实际不可用/可崩溃。\n"
+}

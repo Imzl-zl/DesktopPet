@@ -9,8 +9,11 @@ using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using DesktopPet.App.Interop;
+using DesktopPet.App.Localization;
 using DesktopPet.App.Rendering;
+using DesktopPet.Core.I18n;
 using DesktopPet.Core.Rendering;
+using DesktopPet.Infra.Diagnostics;
 
 namespace DesktopPet.App.Windows;
 
@@ -29,6 +32,8 @@ public sealed class FloatingBallWindow : Window
     private readonly Action _openSettings;
     private readonly Action<string>? _setOutputMode; // danmaku/chat/silent（AI 输出模式）
     private Action? _openChat;                        // 打开对话窗（用户主动聊天入口；回调后置需可写）
+    private I18nService _i18n;
+    private readonly IAppLogger _logger;
     private readonly Image _petImage = new();
     private WriteableBitmap? _petBitmap;
     private ReusablePixelBuffer? _petBuffer;
@@ -52,7 +57,9 @@ public sealed class FloatingBallWindow : Window
         Action openSettings,
         string dataDirectory,
         Action<string>? setOutputMode = null,
-        Action? openChat = null)
+        Action? openChat = null,
+        I18nService? i18n = null,
+        IAppLogger? logger = null)
     {
         _sendQuickBubble = sendQuickBubble;
         _readPresetPool = readPresetPool;
@@ -60,6 +67,8 @@ public sealed class FloatingBallWindow : Window
         _openSettings = openSettings;
         _setOutputMode = setOutputMode;
         _openChat = openChat;
+        _i18n = i18n ?? new I18nService();
+        _logger = logger ?? NullAppLogger.Instance;
         _positionFilePath = Path.Combine(dataDirectory, "ball-pos");
 
         Width = 80;
@@ -111,6 +120,13 @@ public sealed class FloatingBallWindow : Window
             UpdatePetTimer();
         };
         IsVisibleChanged += (_, _) => UpdatePetTimer();
+    }
+
+    public void ApplyLocalization(I18nService i18n)
+    {
+        _i18n = i18n;
+        if (_menu?.Child is DependencyObject content)
+            WpfLocalizer.RefreshTracked(content, i18n);
     }
 
     /// <summary>前台窗口交互期间暂停浮球内宠物的动画计时器。</summary>
@@ -248,9 +264,12 @@ public sealed class FloatingBallWindow : Window
         try
         {
             var (x, y) = PhysicalPosition();
-            File.WriteAllText(_positionFilePath, $"{x},{y}");
+            AtomicFileWriter.WriteAllText(_positionFilePath, $"{x},{y}");
         }
-        catch (IOException) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.Error("FloatingBall", $"position save failed: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private void RestorePosition()
@@ -264,7 +283,10 @@ public sealed class FloatingBallWindow : Window
             var y = int.Parse(parts[1]);
             NativeMethods.MoveWindow(_hwnd, x, y);
         }
-        catch (Exception) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or OverflowException)
+        {
+            _logger.Error("FloatingBall", $"position restore failed: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     // ---- 左键菜单（快速气泡：输入 + 预设胶囊 + 发送）----
@@ -315,13 +337,13 @@ public sealed class FloatingBallWindow : Window
             {
                 var chip = new Button
                 {
-                    Content = preset,
                     FontSize = 11.5,
                     Margin = new Thickness(0, 0, 6, 6),
                     Padding = new Thickness(10, 4, 10, 4),
                     Height = 26,
                     Style = (Style)Application.Current.FindResource("ButtonGhostStyle"),
                 };
+                WpfLocalizer.SetDynamicContent(chip, preset);
                 chip.Click += (_, _) => SendAndClose(preset);
                 wrap.Children.Add(chip);
             }
@@ -403,6 +425,7 @@ public sealed class FloatingBallWindow : Window
         }
 
         card.Child = stack;
+        WpfLocalizer.ApplyNew(card, _i18n);
         _menu = new Popup
         {
             PlacementTarget = this,

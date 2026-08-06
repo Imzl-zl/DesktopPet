@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
+using DesktopPet.App.Localization;
 using DesktopPet.App.Windows;
+using DesktopPet.Core.I18n;
 using H.NotifyIcon;
 
 namespace DesktopPet.App.Tray;
@@ -13,8 +15,9 @@ public sealed class TrayController : IDisposable
 {
     private readonly TaskbarIcon _icon;
     private readonly MenuItem _toggleItem;
+    private readonly ContextMenu _menu;
 
-    public TrayController(PetWindowManager manager)
+    public TrayController(PetWindowManager manager, I18nService? i18n = null)
     {
         _icon = new TaskbarIcon
         {
@@ -37,10 +40,15 @@ public sealed class TrayController : IDisposable
         menu.Items.Add(_toggleItem);
         menu.Items.Add(new Separator());
         menu.Items.Add(quitItem);
+        _menu = menu;
         _icon.ContextMenu = menu;
+        WpfLocalizer.ApplyNew(menu, i18n ?? new I18nService());
 
         manager.GlobalVisibilityChanged += OnGlobalVisibilityChanged;
     }
+
+    public void ApplyLocalization(I18nService i18n)
+        => WpfLocalizer.RefreshTracked(_menu, i18n);
 
     private void OnGlobalVisibilityChanged(bool visible)
     {

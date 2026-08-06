@@ -17,13 +17,14 @@ public class AnalysisEngineTests
         public ModelCapabilities Capabilities => ModelCapabilities.Chat | ModelCapabilities.Vision;
         public int CallCount { get; private set; }
         public Exception? Throw { get; set; }
+        public Func<CancellationToken, Task<ChatResult>>? Handler { get; set; }
         public string Response { get; set; } = "你好像在写代码";
 
         public Task<ChatResult> CompleteAsync(ChatRequest request, CancellationToken ct)
         {
             CallCount++;
             if (Throw is not null) throw Throw;
-            return Task.FromResult(new ChatResult(Response, 9));
+            return Handler?.Invoke(ct) ?? Task.FromResult(new ChatResult(Response, 9));
         }
 
         public Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken ct)
@@ -122,6 +123,74 @@ public class AnalysisEngineTests
 
         Assert.NotNull(evt);
         Assert.Equal(ScreenEventKind.Unknown, evt!.Kind); // 显式降级，不崩溃
+    }
+
+    [Fact]
+    public async Task Tick_CallerCancellation_Propagates()
+    {
+        var model = new FakeModel
+        {
+            Handler = async ct =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                return new ChatResult("never", 0);
+            },
+        };
+        var source = new OfflineFrameSource([Frame(100), GradientFrame()]);
+        var engine = MakeEngine(source, model);
+        Assert.Null(await engine.TickAsync(T0, CancellationToken.None));
+        using var cts = new CancellationTokenSource(50);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => engine.TickAsync(T0.AddSeconds(1), cts.Token));
+    }
+
+    [Fact]
+    public async Task Tick_AnalysisDeadline_FallsBackToUnknownEvent()
+    {
+        var model = new FakeModel
+        {
+            Handler = async ct =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                return new ChatResult("never", 0);
+            },
+        };
+        var source = new OfflineFrameSource([Frame(100), GradientFrame()]);
+        var engine = new AnalysisEngine(
+            source,
+            model,
+            () => new AgentConfig(true, null, null, null, null, null, MinAnalysisIntervalSeconds: 0),
+            analysisTimeout: TimeSpan.FromMilliseconds(50));
+        Assert.Null(await engine.TickAsync(T0, CancellationToken.None));
+
+        var evt = await engine.TickAsync(T0.AddSeconds(1), CancellationToken.None);
+
+        Assert.NotNull(evt);
+        Assert.Equal(ScreenEventKind.Unknown, evt!.Kind);
+        Assert.Equal(1, model.CallCount);
+    }
+
+    [Fact]
+    public async Task Tick_AnalysisDeadline_CompletesWhenModelIgnoresCancellation()
+    {
+        var completion = new TaskCompletionSource<ChatResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var model = new FakeModel { Handler = _ => completion.Task };
+        var source = new OfflineFrameSource([Frame(100), GradientFrame()]);
+        var engine = new AnalysisEngine(
+            source,
+            model,
+            () => new AgentConfig(true, null, null, null, null, null, MinAnalysisIntervalSeconds: 0),
+            analysisTimeout: TimeSpan.FromMilliseconds(50));
+        Assert.Null(await engine.TickAsync(T0, CancellationToken.None));
+
+        var evt = await engine.TickAsync(T0.AddSeconds(1), CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.NotNull(evt);
+        Assert.Equal(ScreenEventKind.Unknown, evt!.Kind);
+        completion.TrySetResult(new ChatResult("late", 0));
     }
 
     [Fact]

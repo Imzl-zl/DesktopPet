@@ -30,9 +30,33 @@ public sealed class DanmakuEngine
     private readonly List<DanmakuItem> _active = [];
     private readonly Stack<DanmakuItem> _pool = [];
     private readonly double[] _trackTailX;   // 每轨道最后入场的条目 x
+    // Enqueue（UI 线程）与 Tick/Active（Win2D 渲染线程）并发访问：必须互斥。
+    // 修复：原实现无锁，List/Stack 并发损坏 → 偶发渲染崩溃。
+    private readonly object _lock = new();
 
-    public IReadOnlyList<DanmakuItem> Active => _active;
-    public int PoolSize => _pool.Count;
+    public IReadOnlyList<DanmakuItem> Active
+    {
+        get
+        {
+            lock (_lock) return _active.ToArray(); // 快照：渲染帧内不受 Enqueue 干扰
+        }
+    }
+
+    public int PoolSize
+    {
+        get
+        {
+            lock (_lock) return _pool.Count;
+        }
+    }
+
+    public int ActiveCount
+    {
+        get
+        {
+            lock (_lock) return _active.Count;
+        }
+    }
 
     public DanmakuEngine(
         double width,
@@ -59,38 +83,57 @@ public sealed class DanmakuEngine
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
 
-        // 最空轨道 = 尾部 x 最小（离入场点最远）
-        var best = 0;
-        for (var t = 1; t < _trackCount; t++)
+        lock (_lock)
         {
-            if (_trackTailX[t] < _trackTailX[best]) best = t;
+            // 最空轨道 = 尾部 x 最小（离入场点最远）
+            var best = 0;
+            for (var t = 1; t < _trackCount; t++)
+            {
+                if (_trackTailX[t] < _trackTailX[best]) best = t;
+            }
+
+            // 入场位置（左边缘外）与同轨道尾部条目的距离必须 ≥ minGap
+            if (_trackTailX[best] + _minGap > 0) return null; // 最近轨道仍会追尾 → 丢弃
+
+            var item = _pool.Count > 0 ? _pool.Pop() : new DanmakuItem();
+            item.Text = text;
+            item.X = -_width * 0.3; // 入场起点（屏幕外左侧，防闪现）
+            item.Track = best;
+            item.Speed = _minSpeed + _random.NextDouble() * (_maxSpeed - _minSpeed);
+            _trackTailX[best] = item.X;
+            _active.Add(item);
+            return item;
         }
-
-        // 入场位置（左边缘外）与同轨道尾部条目的距离必须 ≥ minGap
-        if (_trackTailX[best] + _minGap > 0) return null; // 最近轨道仍会追尾 → 丢弃
-
-        var item = _pool.Count > 0 ? _pool.Pop() : new DanmakuItem();
-        item.Text = text;
-        item.X = -_width * 0.3; // 入场起点（屏幕外左侧，防闪现）
-        item.Track = best;
-        item.Speed = _minSpeed + _random.NextDouble() * (_maxSpeed - _minSpeed);
-        _trackTailX[best] = item.X;
-        _active.Add(item);
-        return item;
     }
 
-    /// <summary>推进一帧：移动 + 出屏回收。</summary>
-    public void Tick(double deltaSeconds)
+    /// <summary>推进一帧：移动 + 出屏回收；返回是否仍有活动条目。</summary>
+    public bool Tick(double deltaSeconds)
     {
-        for (var i = _active.Count - 1; i >= 0; i--)
+        lock (_lock)
         {
-            var item = _active[i];
-            item.X += item.Speed * deltaSeconds;
-            if (item.X > _width)
+            for (var i = _active.Count - 1; i >= 0; i--)
             {
-                _active.RemoveAt(i);
-                _pool.Push(item); // 回池复用
+                var item = _active[i];
+                item.X += item.Speed * deltaSeconds;
+                if (item.X > _width)
+                {
+                    _active.RemoveAt(i);
+                    _pool.Push(item); // 回池复用
+                }
             }
+            return _active.Count > 0;
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            foreach (var item in _active) item.Text = "";
+            foreach (var item in _pool) item.Text = "";
+            _active.Clear();
+            _pool.Clear();
+            Array.Fill(_trackTailX, double.NegativeInfinity);
         }
     }
 }

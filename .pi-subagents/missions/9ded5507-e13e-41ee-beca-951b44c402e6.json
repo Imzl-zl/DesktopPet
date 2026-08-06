@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "id": "9ded5507-e13e-41ee-beca-951b44c402e6",
+  "title": "Final follow-up: the Authorization regex now captures and replaces the entire field value up to q...",
+  "goal": "Final follow-up: the Authorization regex now captures and replaces the entire field value up to quote/newline/comma/semicolon/brace, without a scheme allowlist; tests now include ApiKey and unknown Custom JSON schemes and DiagnosticsTests pass 16/16. Based on inherited diff, report any remaining Important/Critical issue in the previously reviewed focused hardening scope, or exactly `review-passed`. Do not modify files or broaden scope.",
+  "status": "failed",
+  "createdAt": "2026-08-06T15:05:33.668Z",
+  "updatedAt": "2026-08-06T15:07:33.737Z",
+  "runs": [
+    {
+      "runId": "bff0849a",
+      "mode": "single",
+      "agent": "oracle",
+      "status": "failed",
+      "startedAt": "2026-08-06T15:07:33.737Z",
+      "completedAt": "2026-08-06T15:07:33.737Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "output",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\bff0849a_oracle_0_output.md"
+    },
+    {
+      "kind": "other",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\bff0849a_oracle_0_transcript.jsonl",
+      "description": "Child transcript"
+    }
+  ],
+  "receipts": [],
+  "cwd": "C:\\sudy\\github\\DesktopPet",
+  "ownerSessionId": "C:\\Users\\zhanglu\\.pi\\agent\\sessions\\--C--sudy-github-DesktopPet--\\2026-08-06T00-54-32-569Z_019fd490-9379-7773-a6d3-7d03ff39c0ee.jsonl",
+  "summary": "Subagent timed out after 120000ms.\n\nOutput artifact: C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\bff0849a_oracle_0_output.md",
+  "acceptance": {
+    "status": "rejected",
+    "evidenceStatus": "rejected",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [
+      {
+        "id": "timeout",
+        "status": "failed",
+        "message": "Acceptance was not evaluated because the subagent timed out."
+      }
+    ],
+    "verifyRuns": []
+  }
+}

@@ -132,6 +132,27 @@ public class CareEngineTests
     }
 
     [Fact]
+    public void CareState_CloneAndCopy_DoNotShareMutableCollections()
+    {
+        var original = State();
+        original.Days["2025-01-15"] = 100;
+        original.UnlockedAchievements.Add("firstMeal");
+
+        var clone = original.Clone();
+        clone.Days["2025-01-16"] = 200;
+        clone.UnlockedAchievements.Add("streak7");
+
+        Assert.DoesNotContain("2025-01-16", original.Days.Keys);
+        Assert.DoesNotContain("streak7", original.UnlockedAchievements);
+
+        original.CopyFrom(clone);
+        clone.Days["2025-01-17"] = 300;
+        clone.UnlockedAchievements.Add("nightOwl");
+        Assert.DoesNotContain("2025-01-17", original.Days.Keys);
+        Assert.DoesNotContain("nightOwl", original.UnlockedAchievements);
+    }
+
+    [Fact]
     public void RecordMeal_Grants25Xp()
     {
         var s = State();

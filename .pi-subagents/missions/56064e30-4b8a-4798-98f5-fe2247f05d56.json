@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "id": "56064e30-4b8a-4798-98f5-fe2247f05d56",
+  "title": "Independent read-only Important/Critical review of current uncommitted Windows product-hardening ...",
+  "goal": "Independent read-only Important/Critical review of current uncommitted Windows product-hardening and I15 closeout. Focus only on: windows-native/src/DesktopPet.Infra/Diagnostics/*.cs; Infra/Providers/ProviderConfig.cs credential DeleteAll; AgentHost/Program.cs and Agent/AgentService.cs logging; App/Diagnostics/ProcessMetricsMonitor.cs, App/Fullscreen/FullscreenSuppression.cs, Ai/ModeService.cs, App.xaml.cs factory reset/restart/fullscreen wiring, SettingsWindow About diagnostics/reset UI, Rendering/SpriteLoader.cs, Windows/FloatingBallWindow.cs, Windows/PetWindowManager.ImportSprite, and AiCoordinator daily summary publication. Validate requirements: bounded rolling redacted logs and secret-free ZIP; no model/user content or secrets in logs; sampled CPU/current working set and timer disposal; reset confirmation, Agent/request stop, log handles close, sandbox root, DesktopPet credential prefix cleanup, idempotence, failure reporting and reliable restart; borderless/maximized/negative-coordinate/mixed-DPI fullscreen and in-flight proactive/danmaku suppression while capture/analysis continues; file/JSON persistence compensation and no silent I/O swallowing. Inspect focused tests and run them if useful. Do not modify files. Report findings by severity with exact file:line, or review-passed, plus residual native smoke gaps.",
+  "status": "completed",
+  "createdAt": "2026-08-06T14:02:38.584Z",
+  "updatedAt": "2026-08-06T14:13:00.956Z",
+  "runs": [
+    {
+      "runId": "c3f7b541",
+      "mode": "single",
+      "agent": "reviewer",
+      "status": "completed",
+      "startedAt": "2026-08-06T14:13:00.956Z",
+      "completedAt": "2026-08-06T14:13:00.956Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "output",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\c3f7b541_reviewer_0_output.md"
+    },
+    {
+      "kind": "other",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\c3f7b541_reviewer_0_transcript.jsonl",
+      "description": "Child transcript"
+    }
+  ],
+  "receipts": [],
+  "cwd": "C:\\sudy\\github\\DesktopPet",
+  "ownerSessionId": "C:\\Users\\zhanglu\\.pi\\agent\\sessions\\--C--sudy-github-DesktopPet--\\2026-08-06T00-54-32-569Z_019fd490-9379-7773-a6d3-7d03ff39c0ee.jsonl",
+  "summary": "## Review\n- Correct:\n  - [RollingFileLogger.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Infra/Diagnostics/RollingFileLogger.cs:83) 在写入前对 component/message 做脱敏并移除换行；滚动文件数量由 `maxFiles` 限制。相关 rolling/export 测试通过。\n  - [DiagnosticExporter.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Infra/Diagnostics/DiagnosticExporter.cs:27) 生成临时 ZIP、逐个日志条目再次脱敏，并在完成后原子替换目标 ZIP。\n  - [AgentService.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Agent/AgentService.cs:265) 的日志只记录配置元数据；[AgentService.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Agent/AgentService.cs:351) 只记录事件类型和 revision，没有把 `screenEvent.Summary` 写入日志。屏幕摘要仅作为 IPC payload 传输到 App。\n  - [ProcessMetricsMonitor.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Diagnostics/ProcessMetricsMonitor.cs:35) 正确计算按处理器数归一化的 CPU，并采样当前 working set；`Stop`/`Dispose` 清理前一采样状态。对应 3 个测试通过。\n  - [SettingsWindow.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:1910) 诊断页按 1 秒采样 App/Agent CPU 和 working set；[SettingsWindow.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:1948) 停止 timer、解绑 Tick 并释放 monitor；窗口关闭路径也调用 `StopDiagnostics`。\n  - [FullscreenSuppression.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Fullscreen/FullscreenSuppression.cs:48) 使用物理屏幕坐标、负坐标 monitor bounds、最大化状态和按 DPI 缩放的容差；[ModeService.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Ai/ModeService.cs:70) 在发布前再次检查全屏状态。全屏只关闭弹幕和抑制主动输出，不停止 Agent/capture。相关 5 个测试通过。\n  - [AiCoordinator.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Ai/AiCoordinator.cs:977) 先原子写每日总结文本，图片失败时保留文本，最后才保存完成日期；失败时不更新 `_lastDiaryDate`，下一次 tick 可重试。\n  - [PetWindowManager.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Windows/PetWindowManager.cs:197) 精灵导入在 JSON 保存失败时删除已暂存 PNG，并在补偿删除失败时报告聚合错误。\n  - [FactoryResetService.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.Infra/Diagnostics/F...",
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "已对目标未提交 Windows 文件及 focused tests 完成只读审查，列出具体 Important findings，均带绝对文件路径和行号；同时明确无 Blocker/Critical 发现及剩余 native smoke 风险。"
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "dotnet test windows-native/tests/DesktopPet.Infra.Tests/DesktopPet.Infra.Tests.csproj -p:Platform=x64 --no-restore --filter \"FullyQualifiedName~DiagnosticsTests|FullyQualifiedName~FactoryResetServiceTests|FullyQualifiedName~ProviderCredentialMigratorTests\"",
+          "result": "passed",
+          "summary": "17/17 tests passed"
+        },
+        {
+          "command": "dotnet test windows-native/tests/DesktopPet.App.Tests/DesktopPet.App.Tests.csproj -p:Platform=x64 --no-restore --filter \"FullyQualifiedName~ProcessMetricsMonitorTests|FullyQualifiedName~FullscreenSuppressionTests|FullyQualifiedName~SpriteSheetCacheTests\"",
+          "result": "failed",
+          "summary": "并行构建期间 VBCSCompiler 锁定 DesktopPet.Core.dll；随后串行重跑通过"
+        },
+        {
+          "command": "dotnet test windows-native/tests/DesktopPet.App.Tests/DesktopPet.App.Tests.csproj -p:Platform=x64 --no-restore --filter \"FullyQualifiedName~ProcessMetricsMonitorTests|FullyQualifiedName~FullscreenSuppressionTests|FullyQualifiedName~SpriteSheetCacheTests\"",
+          "result": "passed",
+          "summary": "14/14 tests passed"
+        },
+        {
+          "command": "dotnet test windows-native/tests/DesktopPet.Agent.Tests/DesktopPet.Agent.Tests.csproj -p:Platform=x64 --no-restore --filter \"FullyQualifiedName~AgentServiceTests\"",
+          "result": "passed",
+          "summary": "14/14 tests passed"
+        },
+        {
+          "command": "git diff --check",
+          "result": "passed",
+          "summary": "未发现 whitespace errors"
+        }
+      ],
+      "validationOutput": [
+        "日志、诊断 ZIP、factory reset、凭据清理、精灵导入补偿、进程指标和全屏逻辑均完成源码核对。",
+        "全屏逻辑测试覆盖负坐标、最大化、DPI 容差、仅抑制主动输出及状态监视器停止。",
+        "Infra focused tests 覆盖 rolling/redaction/ZIP、reset idempotence、凭据失败恢复。",
+        "未执行真实 Windows Credential Manager、GraphicsCapture、mixed-DPI HWND、文件锁和父子进程重启 smoke。"
+      ],
+      "residualRisks": [
+        "RollingFileLogger 轮转失败后可能留下 null stream，后续日志写入抛出 NullReferenceException；单条大消息也可突破 maxBytes。",
+        "SecretRedactor 覆盖的 secret 形态有限，DiagnosticExporter 对历史 *.log* 的 secret-free 保证不完整。",
+        "Factory reset 后 Process.Start 失败及子进程读取已退出父进程的竞态可能导致可靠重启失败。",
+        "迁移 JSON 损坏/结构错误仅 Debug.WriteLine 后继续启动，用户不可见且未进入正式诊断日志。",
+        "真实 Windows 原生 reset、Credential Manager、GraphicsCapture、mixed-DPI fullscreen 和重启 smoke 尚未验证。"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "本次仅进行独立只读审查，未修改工作区；当前未提交 diff 包含 Windows diagnostics、reset、logging、fullscreen、metrics、sprite persistence 和 daily summary closeout。",
+      "reviewFindings": [
+        "important: windows-native/src/DesktopPet.Infra/Diagnostics/RollingFileLogger.cs:95-120 - 单条消息可突破 maxBytes，且轮转失败后 _stream 置 null，后续写入可能抛出 NullReferenceException；诊断导出并发读日志可触发轮转失败。",
+        "important: windows-native/src/DesktopPet.Infra/Diagnostics/SecretRedactor.cs:20-30 - 只覆盖有限 secret 形态，无法严格保证包含历史日志的 ZIP secret-free。",
+        "important: windows-native/src/DesktopPet.App/App.xaml.cs:380-394 - reset 后重启失败没有独立恢复/报告路径，失败分支还会再次无保护地调用 RestartApplication。",
+        "important: windows-native/src/DesktopPet.App/App.xaml.cs:443-450 - 父进程在子进程检查前退出时 Process.GetProcessById 直接失败，存在 reset 重启竞态。",
+        "important: windows-native/src/DesktopPet.App/App.xaml.cs:257-265 - 损坏或结构错误的迁移 JSON 仅 Debug.WriteLine 后继续启动，属于静默 JSON 持久化失败。",
+        "note: windows-native/src/DesktopPet.Infra/Diagnostics/FactoryResetService.cs:111-127 - 历史 reset 残留目录没有 reparse point 复核，需 native smoke 覆盖。",
+        "note: windows-native/src/DesktopPet.App/Ai/AiCoordinator.cs:875-885 - 主动互动 Task 未被跟踪，shutdown/reset 时存在发布竞态；全屏发布路径本身已复查并通过。",
+        "blocker: none found"
+      ],
+      "manualNotes": "审查结论为有条件通过，不能称为无风险 closeout；至少应先处理 logger 轮转状态损坏和 reset restart race，再进行原生 smoke。"
+    }
+  }
+}

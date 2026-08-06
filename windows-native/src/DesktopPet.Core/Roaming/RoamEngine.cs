@@ -119,6 +119,16 @@ public sealed class RoamEngine
 
     public void FinishManualDrag() => SetDragging(false);
 
+    /// <summary>系统夺走鼠标捕获或窗口取消时，终止拖拽且不产生抛掷/点击。</summary>
+    public void CancelManualDrag()
+    {
+        _dragging = false;
+        _releasePending = false;
+        _physics.ClearSamples();
+        _pet?.ClearRow();
+        Wake();
+    }
+
     /// <summary>一个 tick。返回 true = 活跃（30ms 快 tick）。</summary>
     public bool Step(long nowMs)
     {

@@ -5,6 +5,8 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using DesktopPet.App.Localization;
+using DesktopPet.Core.I18n;
 
 namespace DesktopPet.App.Windows;
 
@@ -75,12 +77,15 @@ public sealed class ChatWindow : Window
         VerticalAlignment = VerticalAlignment.Center,
     };
     private readonly DispatcherTimer _typewriterTimer;
+    private I18nService _i18n;
     private string _pendingAssistantText = "";
     private int _typewriterIndex;
     private TextBlock? _typingBlock;
     private string _currentPersonaName = "桌宠";
+    private bool _usesDefaultPersonaName = true;
     private bool _screenContextEnabled;
     private bool _ttsEnabled;
+    private bool _thinking;
 
     /// <summary>发送消息（App 接线：走 ChatPipeline）。参数：文本 + 是否带屏幕上下文。</summary>
     public event Action<string, bool>? SendRequested;
@@ -91,13 +96,28 @@ public sealed class ChatWindow : Window
     /// <summary>从此重新开始（清空会话上下文；记忆/亲密度不受影响）。</summary>
     public event Action? RestartRequested;
 
+    /// <summary>朗读开关切换（会话内；设置页保存会重置）。App 接线到 AiCoordinator 生效状态。</summary>
+    public event Action<bool>? TtsToggled;
+
     public string CurrentPersonaName
     {
         get => _currentPersonaName;
         set
         {
-            _currentPersonaName = string.IsNullOrWhiteSpace(value) ? "桌宠" : value;
-            _personaButton.Content = _currentPersonaName + "  v";
+            _usesDefaultPersonaName = string.IsNullOrWhiteSpace(value) || value == "桌宠";
+            _currentPersonaName = _usesDefaultPersonaName ? _i18n.T("桌宠") : value;
+            if (_usesDefaultPersonaName)
+            {
+                WpfLocalizer.SetFormattedContent(
+                    _personaButton,
+                    "{0}  v",
+                    _i18n,
+                    WpfLocalizer.Localize("桌宠"));
+            }
+            else
+            {
+                WpfLocalizer.SetDynamicContent(_personaButton, _currentPersonaName + "  v");
+            }
         }
     }
 
@@ -122,8 +142,9 @@ public sealed class ChatWindow : Window
         }
     }
 
-    public ChatWindow()
+    public ChatWindow(I18nService? i18n = null)
     {
+        _i18n = i18n ?? new I18nService();
         Title = "DesktopPet 对话";
         Width = 400;
         Height = 540;
@@ -180,11 +201,28 @@ public sealed class ChatWindow : Window
             ClearMessages();
             RestartRequested?.Invoke();
         };
-        _ttsButton.Click += (_, _) => TtsEnabled = !TtsEnabled;
+        _ttsButton.Click += (_, _) =>
+        {
+            TtsEnabled = !TtsEnabled;
+            TtsToggled?.Invoke(_ttsEnabled);
+        };
 
         _typewriterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
         _typewriterTimer.Tick += (_, _) => TypewriterStep();
         SizeChanged += (_, _) => UpdateBubbleMaxWidths();
+        WpfLocalizer.ApplyNew(this, _i18n);
+    }
+
+    public void ApplyLocalization(I18nService i18n)
+    {
+        _i18n = i18n;
+        WpfLocalizer.RefreshTracked(this, i18n);
+        if (_usesDefaultPersonaName) CurrentPersonaName = "桌宠";
+        AutomationProperties.SetName(_screenContextButton, i18n.T("切换屏幕上下文"));
+        AutomationProperties.SetName(_restartButton, i18n.T("重新开始对话"));
+        AutomationProperties.SetName(_ttsButton, i18n.T("切换朗读回复"));
+        AutomationProperties.SetName(_sendButton, i18n.T("发送消息"));
+        SetThinking(_thinking);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -218,8 +256,9 @@ public sealed class ChatWindow : Window
 
     public void SetThinking(bool thinking)
     {
+        _thinking = thinking;
         _statusDot.Fill = Brush(thinking ? "ThinkingBrush" : "InfoBrush");
-        _statusDot.ToolTip = thinking ? "正在思考" : "在线";
+        _statusDot.ToolTip = _i18n.T(thinking ? "正在思考" : "在线");
     }
 
     private Border BuildToolbar()

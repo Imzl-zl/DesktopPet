@@ -16,6 +16,16 @@ public class ProviderTests
 
     private sealed class MockHandler : HttpMessageHandler
     {
+        public MockHandler()
+        {
+            Client = new HttpClient(this, disposeHandler: false)
+            {
+                Timeout = Timeout.InfiniteTimeSpan,
+            };
+        }
+
+        public HttpClient Client { get; }
+
         public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> Handler { get; set; }
             = static (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
 
@@ -32,6 +42,40 @@ public class ProviderTests
             return await Handler(request, ct);
         }
     }
+
+    private sealed class BlockingReadStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async Task<int> ReadAsync(
+            byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private static HttpResponseMessage BlockingResponse()
+        => new(HttpStatusCode.OK) { Content = new StreamContent(new BlockingReadStream()) };
 
     private static HttpResponseMessage JsonResponse(string json, HttpStatusCode status = HttpStatusCode.OK)
         => new(status)
@@ -53,7 +97,7 @@ public class ProviderTests
         var creds = new InMemoryCredentialStore();
         if (apiKey is not null) creds.Set("openai-key", apiKey);
         return new OpenAiCompatibleModelProvider(
-            Config, creds, handler, timeout: TimeSpan.FromSeconds(30));
+            Config, creds, handler.Client, requestTimeout: TimeSpan.FromSeconds(30));
     }
 
     private static JsonElement BodyOf(MockHandler handler, int index = 0)
@@ -122,7 +166,8 @@ public class ProviderTests
         var creds = new InMemoryCredentialStore();
         creds.Set("openai-key", "sk-test");
         var provider = new OpenAiCompatibleModelProvider(
-            Config with { ReasoningEffort = "none" }, creds, handler, timeout: TimeSpan.FromSeconds(30));
+            Config with { ReasoningEffort = "none" }, creds, handler.Client,
+            requestTimeout: TimeSpan.FromSeconds(30));
 
         await provider.CompleteAsync(
             new ChatRequest("sys", [new ChatMessage(ChatRole.User, "你好")]),
@@ -160,7 +205,8 @@ public class ProviderTests
         var creds = new InMemoryCredentialStore();
         creds.Set("openai-key", "sk-test");
         var provider = new OpenAiCompatibleModelProvider(
-            Config with { MaxOutputTokens = 4096 }, creds, handler, timeout: TimeSpan.FromSeconds(30));
+            Config with { MaxOutputTokens = 4096 }, creds, handler.Client,
+            requestTimeout: TimeSpan.FromSeconds(30));
 
         await provider.CompleteAsync(
             new ChatRequest("sys", [new ChatMessage(ChatRole.User, "你好")], MaxTokens: 120),
@@ -250,11 +296,109 @@ public class ProviderTests
             },
         };
         var provider = new OpenAiCompatibleModelProvider(
-            Config, new InMemoryCredentialStore(), handler, timeout: TimeSpan.FromMilliseconds(80));
+            Config, new InMemoryCredentialStore(), handler.Client,
+            requestTimeout: TimeSpan.FromMilliseconds(80));
 
         var ex = await Assert.ThrowsAsync<ProviderException>(() =>
             provider.CompleteAsync(new ChatRequest("s", [new ChatMessage(ChatRole.User, "x")]), CancellationToken.None));
         Assert.Equal("timeout", ex.Code);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_CallerCancellation_RemainsCancellation()
+    {
+        var handler = new MockHandler
+        {
+            Handler = async (_, ct) =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                return JsonResponse("""{"choices":[{"message":{"content":"never"}}]}""");
+            },
+        };
+        var provider = new OpenAiCompatibleModelProvider(
+            Config, new InMemoryCredentialStore(), handler.Client,
+            requestTimeout: TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(50);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.CompleteAsync(
+                new ChatRequest("s", [new ChatMessage(ChatRole.User, "x")]),
+                cts.Token));
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ResponseBodyCallerCancellation_RemainsCancellation()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(BlockingResponse()),
+        };
+        var provider = new OpenAiCompatibleModelProvider(
+            Config, new InMemoryCredentialStore(), handler.Client,
+            requestTimeout: TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource(50);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.CompleteAsync(
+                new ChatRequest("s", [new ChatMessage(ChatRole.User, "x")]),
+                cts.Token));
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ResponseBodyDeadline_ThrowsTimeoutError()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(BlockingResponse()),
+        };
+        var provider = new OpenAiCompatibleModelProvider(
+            Config, new InMemoryCredentialStore(), handler.Client,
+            requestTimeout: TimeSpan.FromMilliseconds(50));
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() =>
+            provider.CompleteAsync(
+                new ChatRequest("s", [new ChatMessage(ChatRole.User, "x")]),
+                CancellationToken.None));
+        Assert.Equal("timeout", ex.Code);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ErrorResponseBodyDeadline_ThrowsTimeoutError()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway)
+            {
+                Content = new StreamContent(new BlockingReadStream()),
+            }),
+        };
+        var provider = new OpenAiCompatibleModelProvider(
+            Config, new InMemoryCredentialStore(), handler.Client,
+            requestTimeout: TimeSpan.FromMilliseconds(50));
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() =>
+            provider.CompleteAsync(
+                new ChatRequest("s", [new ChatMessage(ChatRole.User, "x")]),
+                CancellationToken.None));
+
+        Assert.Equal("timeout", ex.Code);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_InvalidShape_ThrowsResponseError()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse("""{"choices":{}}""")),
+        };
+        var provider = MakeProvider(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() =>
+            provider.CompleteAsync(
+                new ChatRequest("s", [new ChatMessage(ChatRole.User, "x")]),
+                CancellationToken.None));
+
+        Assert.Equal("invalid-response", ex.Code);
     }
 
     [Fact]
@@ -324,6 +468,58 @@ public class ProviderTests
         Assert.False(models[2].Capabilities.HasFlag(ModelCapabilities.Vision));
     }
 
+    [Fact]
+    public async Task ListModelsAsync_ResponseBodyDeadline_ThrowsTimeoutError()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(BlockingResponse()),
+        };
+        var provider = new OpenAiCompatibleModelProvider(
+            Config, new InMemoryCredentialStore(), handler.Client,
+            requestTimeout: TimeSpan.FromMilliseconds(50));
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(
+            () => provider.ListModelsAsync(CancellationToken.None));
+
+        Assert.Equal("timeout", ex.Code);
+    }
+
+    [Fact]
+    public async Task ListModelsAsync_InvalidShape_ThrowsResponseError()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse("""{"data":{}}""")),
+        };
+        var provider = MakeProvider(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(
+            () => provider.ListModelsAsync(CancellationToken.None));
+
+        Assert.Equal("invalid-response", ex.Code);
+    }
+
+    [Fact]
+    public async Task Providers_ReuseInjectedTransportWithoutMutatingItsTimeout()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse(
+                """{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":1}}""")),
+        };
+        var first = MakeProvider(handler);
+        var second = MakeProvider(handler);
+
+        await first.CompleteAsync(
+            new ChatRequest("s", [new ChatMessage(ChatRole.User, "one")]), CancellationToken.None);
+        await second.CompleteAsync(
+            new ChatRequest("s", [new ChatMessage(ChatRole.User, "two")]), CancellationToken.None);
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(Timeout.InfiniteTimeSpan, handler.Client.Timeout);
+    }
+
     // ---- 连接配置模型 ----
 
     [Fact]
@@ -357,6 +553,81 @@ public class ProviderTests
         Assert.True(back.Models[0].IsDefault);
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests, "rate-limit")]
+    [InlineData(HttpStatusCode.InternalServerError, "server")]
+    [InlineData(HttpStatusCode.BadRequest, "http")]
+    [InlineData(HttpStatusCode.Unauthorized, "auth")]
+    public async Task ListModelsAsync_ClassifiesHttpFailures(HttpStatusCode status, string code)
+    {
+        const string secretBody = "server echoed sk-do-not-log";
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse(secretBody, status)),
+        };
+        var provider = MakeProvider(handler, "sk-do-not-log");
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(
+            () => provider.ListModelsAsync(CancellationToken.None));
+
+        Assert.Equal(code, ex.Code);
+        Assert.DoesNotContain(secretBody, ex.ToString());
+        Assert.DoesNotContain("sk-do-not-log", ex.ToString());
+    }
+
+    [Fact]
+    public async Task RemoteHttpWithSecret_IsBlocked_ButLoopbackHttpIsAllowed()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse("""{"data":[]}""")),
+        };
+        var creds = new InMemoryCredentialStore();
+        creds.Set("key", "secret");
+        var remote = new OpenAiCompatibleModelProvider(
+            Config with { BaseUrl = "http://example.com/v1", ApiKeyRef = "key" },
+            creds, handler.Client);
+
+        var blocked = await Assert.ThrowsAsync<ProviderException>(
+            () => remote.ListModelsAsync(CancellationToken.None));
+        Assert.Equal("insecure-transport", blocked.Code);
+        Assert.Empty(handler.Requests);
+
+        var loopback = new OpenAiCompatibleModelProvider(
+            Config with { BaseUrl = "http://127.0.0.1:11434/v1", ApiKeyRef = "key" },
+            creds, handler.Client);
+        Assert.Empty(await loopback.ListModelsAsync(CancellationToken.None));
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ModelConnectionTester_UsesDraftSecretWithoutPersistingIt()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (request, _) =>
+            {
+                Assert.Equal("Bearer draft-secret", request.Headers.Authorization!.ToString());
+                return Task.FromResult(JsonResponse("""{"data":[{"id":"draft-model"}]}"""));
+            },
+        };
+        var credentials = new InMemoryCredentialStore();
+        var tester = new ModelConnectionTester(credentials, handler.Client);
+        var draft = new ModelConnectionDraft(
+            "https://draft.example/v1",
+            "unsaved-model",
+            "",
+            "draft-secret",
+            ModelCapabilities.Chat);
+
+        var result = await tester.TestAsync(draft, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Single(result.Models);
+        Assert.Null(credentials.Get("__connection-test-draft__"));
+        Assert.Equal("https://draft.example/v1/models", handler.Requests[0].RequestUri!.ToString());
+    }
+
     [Fact]
     public void CredentialStore_InMemory_Roundtrips()
     {
@@ -366,5 +637,8 @@ public class ProviderTests
         Assert.Equal("v1", store.Get("k1"));
         store.Set("k1", "v2");
         Assert.Equal("v2", store.Get("k1"));
+        Assert.True(store.Delete("k1"));
+        Assert.False(store.Delete("k1"));
+        Assert.Null(store.Get("k1"));
     }
 }

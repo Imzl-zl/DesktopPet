@@ -16,23 +16,32 @@ public sealed class AnalysisEngine
     private readonly IScreenCaptureSource _capture;
     private readonly IModelProvider? _model;
     private readonly Func<AgentConfig> _config;
-    private readonly TimeSpan _captureInterval;
+    private readonly TimeSpan? _captureIntervalOverride;
+    private readonly TimeSpan _analysisTimeout;
     private readonly ChangeDetector _detector = new();
     private ulong? _previousHash;
     private AnalysisThrottle _throttle;
 
     public event Action<ScreenEvent>? EventRaised;
+    public event Action<Exception>? CaptureFaulted;
 
     public AnalysisEngine(
         IScreenCaptureSource capture,
         IModelProvider? model,
         Func<AgentConfig> config,
-        TimeSpan? captureInterval = null)
+        TimeSpan? captureInterval = null,
+        TimeSpan? analysisTimeout = null)
     {
         _capture = capture ?? throw new ArgumentNullException(nameof(capture));
         _model = model;
         _config = config ?? throw new ArgumentNullException(nameof(config));
-        _captureInterval = captureInterval ?? TimeSpan.FromSeconds(1);
+        _captureIntervalOverride = captureInterval;
+        if (_captureIntervalOverride is { } configuredCaptureInterval
+            && configuredCaptureInterval <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(captureInterval));
+        _analysisTimeout = analysisTimeout ?? TimeSpan.FromSeconds(30);
+        if (_analysisTimeout <= TimeSpan.Zero && _analysisTimeout != Timeout.InfiniteTimeSpan)
+            throw new ArgumentOutOfRangeException(nameof(analysisTimeout));
         _throttle = new AnalysisThrottle(TimeSpan.FromSeconds(config().MinAnalysisIntervalSeconds));
     }
 
@@ -75,13 +84,17 @@ public sealed class AnalysisEngine
             {
                 break;
             }
+            catch (CaptureSourceUnavailableException ex)
+            {
+                CaptureFaulted?.Invoke(ex);
+            }
             catch (Exception)
             {
                 // 单帧分析失败不拖垮循环（下一拍重试）；错误已由 AnalyzeAsync 降级处理
             }
             try
             {
-                await Task.Delay(_captureInterval, ct).ConfigureAwait(false);
+                await Task.Delay(GetCaptureInterval(), ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -135,14 +148,53 @@ public sealed class AnalysisEngine
                 Temperature: PersonaEngine.Temperature,
                 MaxTokens: PersonaEngine.MaxTokens);
 
-            var result = await _model.CompleteAsync(request, ct).ConfigureAwait(false);
-            return new ScreenEvent(DateTime.Now, Classify(result.Text), result.Text, hash);
+            using var deadline = CreateAnalysisDeadline(ct);
+            var requestCt = deadline?.Token ?? ct;
+            var operation = _model.CompleteAsync(request, requestCt);
+            try
+            {
+                var result = await operation.WaitAsync(requestCt).ConfigureAwait(false);
+                return new ScreenEvent(DateTime.Now, Classify(result.Text), result.Text, hash);
+            }
+            finally
+            {
+                if (requestCt.IsCancellationRequested)
+                    ObserveDetachedTask(operation);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception)
         {
-            // 模型失败显式降级为纯变化事件（限频已挡频次；UI 有默认台词）
+            // 分析 deadline 或模型失败显式降级为纯变化事件（限频已挡频次；UI 有默认台词）
             return new ScreenEvent(DateTime.Now, ScreenEventKind.Unknown, "", hash);
         }
+    }
+
+    private static void ObserveDetachedTask(Task task)
+    {
+        _ = task.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private CancellationTokenSource? CreateAnalysisDeadline(CancellationToken ct)
+    {
+        if (_analysisTimeout == Timeout.InfiniteTimeSpan) return null;
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_analysisTimeout);
+        return deadline;
+    }
+
+    private TimeSpan GetCaptureInterval()
+    {
+        if (_captureIntervalOverride is { } configured) return configured;
+        var seconds = Math.Clamp(_config().CaptureIntervalSeconds, 1, 30);
+        return TimeSpan.FromSeconds(seconds);
     }
 
     private void SyncThrottle(AgentConfig cfg)

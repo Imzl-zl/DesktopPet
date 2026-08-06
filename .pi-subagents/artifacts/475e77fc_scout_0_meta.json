@@ -1,0 +1,147 @@
+{
+  "runId": "475e77fc",
+  "agent": "scout",
+  "task": "只读分析 Task2 capture ownership/cadence：GraphicsCaptureSource.cs, SwitchableScreenCaptureSource.cs, AgentService/AnalysisEngine/AgentConfig/AgentHost/tests。报告 I2/I6/I7 根因、最小结构性方案、可测 seam、风险，勿修改。\n\n---\n**Output:**\nWrite your findings to exactly this path: C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\outputs\\475e77fc\\context.md\nThis path is authoritative for this run.\nIgnore any other output filename or output path mentioned elsewhere, including output destinations in the base agent prompt, system prompt, or task instructions.",
+  "exitCode": 0,
+  "usage": {
+    "input": 64745,
+    "output": 6547,
+    "cacheRead": 162814,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 6
+  },
+  "model": "cus-openai/gpt-5.6-sol:low",
+  "attemptedModels": [
+    "cus-openai/gpt-5.6-sol:low"
+  ],
+  "modelAttempts": [
+    {
+      "model": "cus-openai/gpt-5.6-sol:low",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 64745,
+        "output": 6547,
+        "cacheRead": 162814,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 6
+      }
+    }
+  ],
+  "durationMs": 163213,
+  "toolCount": 30,
+  "launchContractDigest": "d16cdccfe5a4ef699237b73fdce9b2d655383c50ee9720fa74f960526d26428c",
+  "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "configured": [],
+    "effective": [
+      "sha256:02238cd38c5231b0"
+    ],
+    "omitted": {
+      "runtime": 0,
+      "configured": 0,
+      "effective": 0
+    }
+  },
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "review-findings: 已用精确文件与行范围核实 I2、I6、I7 均为 Important，并分别给出根因、最小结构性方案、可测 seam 和 residual-risks。"
+        }
+      ],
+      "changedFiles": [
+        ".pi-subagents/artifacts/outputs/475e77fc/context.md"
+      ],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "只读 find/grep/read 与 nl -ba 定位目标源码、Host 和测试",
+          "result": "passed",
+          "summary": "完成 capture ownership/cadence 数据流与测试覆盖核实；未运行构建或测试，因任务要求只读分析。"
+        }
+      ],
+      "validationOutput": [
+        "review-findings: I2 - AgentConfigBuilder 的 3-30 秒值只进入 AnalysisThrottle；AgentService/AnalysisEngine 保持独立 1 秒循环，GraphicsCaptureSource 更在每个 FrameArrived 做全尺寸 surface copy。",
+        "review-findings: I6 - GraphicsCaptureSource.cs:184-190 未释放 CreateDirect3D11DeviceFromDXGIDevice 返回的 graphicsDevice owning ABI pointer。",
+        "review-findings: I7 - GraphicsCaptureSource.cs:45-95 不保存/订阅 item Closed 且吞掉捕获异常，AnalysisEngine.cs:83-86 再吞异常，owner 无法观察并重建。",
+        "residual-risks: CsWinRT 引用计数、STA 线程亲和、真实 device-lost/显示拓扑恢复只能在 Windows 真机与 D3D debug layer 下最终验证。"
+      ],
+      "residualRisks": [
+        "WinRT capture 对象跨线程 Dispose/重建可能违反线程亲和，需 Dispatcher executor 和真机验证。",
+        "FrameArrived 与 Dispose/fault 并发可能产生 use-after-dispose 或死锁，需显式 in-flight 生命周期测试。",
+        "持续设备故障若没有可取消 backoff 会形成重建风暴。",
+        "现有测试不观察 CreateCopyFromSurfaceAsync 次数或 COM live objects，不能单独作为 I2/I6 验收证据。"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "未修改产品源码或测试；仅写入指定只读分析产物 context.md。",
+      "reviewFindings": [
+        "important: windows-native/src/DesktopPet.Agent/Analysis/AnalysisEngine.cs:37-89, windows-native/src/DesktopPet.Agent/Capture/GraphicsCaptureSource.cs:78-90 - I2 配置仅节流模型，未约束固定消费循环，更未约束 FrameArrived 的全尺寸 GPU-to-CPU 复制。",
+        "important: windows-native/src/DesktopPet.Agent/Capture/GraphicsCaptureSource.cs:184-190 - I6 graphicsDevice owning ABI pointer 在 FromAbi 后未 Release。",
+        "important: windows-native/src/DesktopPet.Agent/Capture/GraphicsCaptureSource.cs:45-95, windows-native/src/DesktopPet.Agent/Analysis/AnalysisEngine.cs:83-86 - I7 Closed/device fault 不可观察且异常被吞，捕获可永久静默死亡。"
+      ],
+      "manualNotes": "建议实施顺序：先建立 switchable 单一 owner/fault seam，再修 I6 引用平衡和构造失败释放，随后把配置 cadence 下推到 GraphicsCaptureSource producer copy gate。"
+    }
+  },
+  "effects": {
+    "fileMutation": {
+      "status": "not-applicable",
+      "expected": false,
+      "attempted": true
+    }
+  },
+  "transcriptPath": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\475e77fc_scout_0_transcript.jsonl",
+  "timestamp": 1786004357636
+}

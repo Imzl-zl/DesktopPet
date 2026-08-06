@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "id": "7cc71f5a-193d-4e2e-b10b-7a4bd47d64c9",
+  "title": "Re-review only the localization changes after the previous review. Verify current four JSON catal...",
+  "goal": "Re-review only the localization changes after the previous review. Verify current four JSON catalogs have identical key sets and placeholders; WpfLocalizer now supports formatted/static/dynamic exclusions; Settings custom pet/persona/diary/provider values cannot be translated even when equal to a key; builtin persona labels are localized; Welcome combo, SpritePreview header, Danmaku, and owned modal windows refresh after language publication; LanguageCoordinator still save-before-publish. Inspect exact current files/tests and report only remaining Important/Critical findings with file:line, or review-passed. Do not modify files. Native GUI smoke gaps may be noted separately.",
+  "status": "completed",
+  "createdAt": "2026-08-06T14:29:48.729Z",
+  "updatedAt": "2026-08-06T14:36:30.015Z",
+  "runs": [
+    {
+      "runId": "b934104e",
+      "mode": "single",
+      "agent": "reviewer",
+      "status": "completed",
+      "startedAt": "2026-08-06T14:36:30.015Z",
+      "completedAt": "2026-08-06T14:36:30.015Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "output",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\b934104e_reviewer_0_output.md"
+    },
+    {
+      "kind": "other",
+      "path": "C:\\sudy\\github\\DesktopPet\\.pi-subagents\\artifacts\\b934104e_reviewer_0_transcript.jsonl",
+      "description": "Child transcript"
+    }
+  ],
+  "receipts": [],
+  "cwd": "C:\\sudy\\github\\DesktopPet",
+  "ownerSessionId": "C:\\Users\\zhanglu\\.pi\\agent\\sessions\\--C--sudy-github-DesktopPet--\\2026-08-06T00-54-32-569Z_019fd490-9379-7773-a6d3-7d03ff39c0ee.jsonl",
+  "summary": "## Review\n- Correct: 四份 catalog 独立校验均为 730 个键、24 个含占位符的值；键集完全一致，所有占位符集合一致。\n- Correct: `WpfLocalizer` 已支持静态、格式化、动态排除及本地化参数，见 [WpfLocalizer.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Localization/WpfLocalizer.cs:34)。\n- Correct: 自定义宠物名、人格描述、Provider URL、日记日期/正文等路径使用动态排除或原始格式化参数，未发现会因值恰好等于 catalog key 而被翻译。\n- Correct: Welcome 人格 combo、SpritePreview header、Danmaku 窗口及 Settings 直接拥有的 modal windows 已接入刷新路径，见 [App.xaml.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/App.xaml.cs:568) 和 [SettingsWindow.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:249)。\n- Correct: 内置人格卡片与 Welcome combo 使用 `i18n.T(...)`，见 [SettingsWindow.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:2283) 和 [WelcomeWindow.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Windows/WelcomeWindow.cs:168)。\n- Correct: [LanguageCoordinator.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Localization/LanguageCoordinator.cs:47) 仍先保存，成功后才设置语言并发布。\n- Blocker: 无。\n- Important: [SettingsWindow.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:1017) 和 [SettingsWindow.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:2628) 直接向 `ComboBox.Items` 添加字符串；[WpfLocalizer.cs](C:/sudy/github/DesktopPet/windows-native/src/DesktopPet.App/Localization/WpfLocalizer.cs:126) 只遍历逻辑树中的 `DependencyObject`，不会翻译这些 item 字符串。结果是宠物卡片的人格选择器中的“跟随全局”和所有内置人格名，以及模型连接编辑器中的“关闭思考/跟随模型默认”，在英文等语言下仍显示中文；语言切换后也不会刷新。对应翻译键已存在于 catalog，因此这是当前仍未处理的用户可见本地化缺口。\n- Note: 未运行原生 Windows GUI smoke；自动化测试不能覆盖真实 ComboBox item、Win2D/XAML Island、托盘及跨窗口刷新行为。\n\n已运行并通过：\n- 四 catalog 键集/占位符独立 Node 校验\n- `dotnet test ...DesktopPet.Core.Tests.csproj ... --filter FullyQualifiedName~I18nTests`，13/13\n- `dotnet test ...DesktopPet.App.Tests.csproj ... --filter \"FullyQualifiedName~WpfLocalizerTests|FullyQualifiedName~LanguageCoordinatorTests\"`，7/7\n- `git d...",
+  "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "已返回一个 Important 级别的剩余问题，包含具体文件路径、行号、影响和依据；无 Critical/Blocker。"
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "independent Node validation of windows-native/src/DesktopPet.Core/Resources/i18n*.json",
+          "result": "passed",
+          "summary": "四份 catalog 均为 730 keys、24 placeholder-bearing values；键集和占位符完全一致。"
+        },
+        {
+          "command": "dotnet test windows-native/tests/DesktopPet.Core.Tests/DesktopPet.Core.Tests.csproj -p:Platform=x64 --no-restore --filter FullyQualifiedName~I18nTests",
+          "result": "passed",
+          "summary": "13/13 tests passed."
+        },
+        {
+          "command": "dotnet test windows-native/tests/DesktopPet.App.Tests/DesktopPet.App.Tests.csproj -p:Platform=x64 --no-restore --filter \"FullyQualifiedName~WpfLocalizerTests|FullyQualifiedName~LanguageCoordinatorTests\"",
+          "result": "passed",
+          "summary": "7/7 tests passed."
+        },
+        {
+          "command": "git diff --check -- localization files",
+          "result": "passed",
+          "summary": "未发现 whitespace errors。"
+        }
+      ],
+      "validationOutput": [
+        "i18n.en.json、i18n.vi.json、i18n.zh-TW.json、i18n.zh.json 键数均为 730。",
+        "四份 catalog 的键集差异为 0，placeholder mismatches 为 0。",
+        "本次为只读复审，未修改文件。"
+      ],
+      "residualRisks": [
+        "SettingsWindow 中直接添加到 ComboBox.Items 的字符串未被 WpfLocalizer 翻译或刷新，导致内置人格标签和模型 reasoning 选项在非中文语言下仍显示中文。",
+        "未运行原生 Windows GUI smoke；真实 ComboBox item、托盘、Win2D/XAML Island 和跨窗口行为仍缺少手工验证。"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "本地化实现、四份 JSON catalog、刷新路径和定向测试已复审；未对工作树做任何修改。",
+      "reviewFindings": [
+        "important: windows-native/src/DesktopPet.App/Settings/SettingsWindow.cs:1017-1018,2628-2631 - ComboBox.Items 中的静态/内置人格字符串未经过 WpfLocalizer，非中文语言和语言切换后仍显示中文。"
+      ],
+      "manualNotes": "除上述 ComboBox item 本地化缺口外，四份 catalog、占位符、动态排除、Welcome/SpritePreview/Danmaku/owned modal 刷新及 save-before-publish 均已验证；原生 GUI smoke 未运行。"
+    }
+  }
+}

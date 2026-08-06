@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text.Json;
 
 using DesktopPet.Core.Rendering;
+using DesktopPet.Infra.Diagnostics;
 
 namespace DesktopPet.App.Rendering;
 
@@ -11,22 +12,28 @@ namespace DesktopPet.App.Rendering;
 /// CDN 目录（pets.thenightwatcher.online，同 windows/src/catalog.ts）下载并缓存。
 /// 全部失败返回 null（调用方回退占位精灵）。异步执行，不阻塞 UI 线程。
 /// </summary>
-public sealed class SpriteLoader
+public sealed class SpriteLoader : IDisposable
 {
     private const string ManifestUrl = "https://pets.thenightwatcher.online/manifest.json";
+    public const long DefaultDecodedCacheBytes = 32L * 1024 * 1024;
 
     private readonly string _spritesDir;
     private readonly string _manifestPath;
     private readonly HttpClient _http;
+    private readonly SpriteSheetCache _sheetCache;
+    private readonly IAppLogger _logger;
+    private bool _disposed;
 
-    private readonly object _cacheLock = new();
-    private readonly Dictionary<string, SpriteSheet> _sheetCache = new(StringComparer.Ordinal);
-
-    public SpriteLoader(string dataDirectory)
+    public SpriteLoader(
+        string dataDirectory,
+        long maxDecodedCacheBytes = DefaultDecodedCacheBytes,
+        IAppLogger? logger = null)
     {
         _spritesDir = Path.Combine(dataDirectory, "sprites");
         _manifestPath = Path.Combine(dataDirectory, "catalog.json");
         Directory.CreateDirectory(_spritesDir);
+        _sheetCache = new SpriteSheetCache(maxDecodedCacheBytes);
+        _logger = logger ?? NullAppLogger.Instance;
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         // CDN 拒绝无 UA 请求（curl/浏览器 UA 可过）
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("DesktopPet/0.1 (Windows; .NET 8)");
@@ -35,22 +42,19 @@ public sealed class SpriteLoader
     public string SpritesDirectory => _spritesDir;
 
     /// <summary>同步读取已解码的精灵；不会触发磁盘或网络 I/O。</summary>
-    public SpriteSheet? TryGetCached(string slug)
-    {
-        lock (_cacheLock)
-        {
-            return _sheetCache.TryGetValue(slug, out var sheet) ? sheet : null;
-        }
-    }
+    public SpriteSheet? TryGetCached(string slug) => _sheetCache.Get(slug);
 
     /// <summary>导入的本地精灵写入缓存目录（slug 为实例 id）。</summary>
     public void SaveLocal(string slug, byte[] bytes)
     {
-        File.WriteAllBytes(Path.Combine(_spritesDir, $"{slug}.png"), bytes);
-        lock (_cacheLock)
-        {
-            _sheetCache.Remove(slug);
-        }
+        AtomicFileWriter.WriteAllBytes(LocalPath(slug), bytes);
+        _sheetCache.Remove(slug);
+    }
+
+    public void DeleteLocal(string slug)
+    {
+        File.Delete(LocalPath(slug));
+        _sheetCache.Remove(slug);
     }
 
     /// <summary>
@@ -62,7 +66,7 @@ public sealed class SpriteLoader
         var cached = TryGetCached(slug);
         if (cached is not null) return cached;
 
-        var localPath = Path.Combine(_spritesDir, $"{slug}.png");
+        var localPath = LocalPath(slug);
         if (!File.Exists(localPath)) return null;
 
         var sheet = SpriteSheet.Decode(await File.ReadAllBytesAsync(localPath, ct), slug);
@@ -87,10 +91,14 @@ public sealed class SpriteLoader
                 return null;
             }
             var bytes = await _http.GetByteArrayAsync(url, ct);
-            await File.WriteAllBytesAsync(Path.Combine(_spritesDir, $"{slug}.png"), bytes, ct);
+            await Task.Run(() => AtomicFileWriter.WriteAllBytes(LocalPath(slug), bytes), ct);
             var sheet = SpriteSheet.Decode(bytes, slug);
             if (sheet is not null) Cache(sheet, slug);
             return sheet;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -99,12 +107,18 @@ public sealed class SpriteLoader
         }
     }
 
-    private void Cache(SpriteSheet sheet, string slug)
+    private void Cache(SpriteSheet sheet, string slug) => _sheetCache.Put(slug, sheet);
+
+    public void Evict(string slug) => _sheetCache.Remove(slug);
+
+    public long CachedBytes => _sheetCache.CurrentBytes;
+
+    public void Dispose()
     {
-        lock (_cacheLock)
-        {
-            _sheetCache[slug] = sheet;
-        }
+        if (_disposed) return;
+        _disposed = true;
+        _sheetCache.Clear();
+        _http.Dispose();
     }
 
     /// <summary>从目录 manifest 解析 slug 的 spritesheet URL（manifest 本地缓存）。</summary>
@@ -135,8 +149,12 @@ public sealed class SpriteLoader
         try
         {
             var json = await _http.GetStringAsync(ManifestUrl, ct);
-            await File.WriteAllTextAsync(_manifestPath, json, ct);
+            await Task.Run(() => AtomicFileWriter.WriteAllText(_manifestPath, json), ct);
             return json;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -145,15 +163,7 @@ public sealed class SpriteLoader
         }
     }
 
-    private static void Log(string message)
-    {
-        try
-        {
-            var path = Path.Combine(Path.GetTempPath(), "desktoppet-sprite.log");
-            System.IO.File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
-        }
-        catch (IOException)
-        {
-        }
-    }
+    private string LocalPath(string slug) => Path.Combine(_spritesDir, $"{slug}.png");
+
+    private void Log(string message) => _logger.Info("SpriteLoader", message);
 }

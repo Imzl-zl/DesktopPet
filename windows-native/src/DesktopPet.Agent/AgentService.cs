@@ -82,7 +82,8 @@ public sealed class AgentService : IAsyncDisposable
             }
             catch (IOException)
             {
-                return; // 对端断连：等下一次连接（简化：本轮退出）
+                _shutdown.Cancel(); // App 客户端已断开，宿主没有独立工作可继续执行
+                return;
             }
 
             switch (msg.Type)
@@ -134,6 +135,11 @@ public sealed class AgentService : IAsyncDisposable
         _engineCts?.Cancel();
         _engineCts?.Dispose();
         _engineCts = null;
+
+        if (_capture is IActivatableScreenCaptureSource activatableCapture)
+        {
+            activatableCapture.SetEnabled(_config.ScreenAnalysis);
+        }
 
         IModelProvider? model = null;
         if (!string.IsNullOrEmpty(_config.ProviderBaseUrl) && !string.IsNullOrEmpty(_config.ProviderModel))
@@ -204,6 +210,10 @@ public sealed class AgentService : IAsyncDisposable
         if (_engineTask is not null)
         {
             try { await _engineTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
+        }
+        if (_capture is IDisposable disposableCapture)
+        {
+            disposableCapture.Dispose();
         }
         await _server.DisposeAsync().ConfigureAwait(false);
         _shutdown.Dispose();

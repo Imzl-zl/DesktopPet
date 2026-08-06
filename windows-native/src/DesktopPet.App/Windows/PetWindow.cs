@@ -18,23 +18,25 @@ using DesktopPet.Core.Storage;
 namespace DesktopPet.App.Windows;
 
 /// <summary>
-/// 宠物窗口：透明 + 置顶 + 无边框，WriteableBitmap 直写像素 + 帧率自适应
-/// 渲染循环（对齐迁移计划 §6.1/§6.2）。拖拽为原生实现：alpha hitTest 命中
-/// 才按下 → CaptureMouse → SetWindowPos 直移（无 WPF 布局开销，无 Tauri
-/// hit-rect 补丁层）。位置持久化由 manager 回调（物理像素，对齐 Rust
+/// 宠物窗口：透明 + 置顶 + 无边框。普通精灵帧使用冻结 `BitmapSource` 缓存，
+/// 动态成长叠加回退至可复用的 `WriteableBitmap` 帧缓冲；动画和漫游保持状态机
+/// 定义的节奏。拖拽为原生实现：alpha hitTest 命中才按下 → CaptureMouse → SetWindowPos
+/// 直移（无 Tauri hit-rect 补丁）。位置持久化由 manager 回调（物理像素，对齐 Rust
 /// pet-positions.json 语义）。
 /// </summary>
 public sealed class PetWindow : Window
 {
     private const double DragThresholdPx = 4;
 
-    private readonly PetInstance _instance;
+    private PetInstance _instance;
     private readonly Action<PetWindow, int, int> _onDragFinished;
     private readonly SpriteLoader _spriteLoader;
     private readonly IJsonStore _store;
     private CareState _careState = null!;
     private readonly Image _image = new();
     private readonly WriteableBitmap _bitmap;
+    private readonly ReusablePixelBuffer _frameBuffer;
+    private readonly SpriteFrameBitmapSourceCache _frameSourceCache = new();
     private readonly double _dpiScale;
     private readonly int _bufferWidth;
     private readonly int _bufferHeight;
@@ -44,6 +46,7 @@ public sealed class PetWindow : Window
     private readonly DispatcherTimer _animationTimer;
     private int _frameIndex;
     private bool _animationEnabled = true;
+    private bool _desktopInteractionSuspended;
 
     // ---- 漫游引擎（Phase 2）----
     private readonly RoamEngine _roamEngine = null!; // 构造中初始化
@@ -65,6 +68,19 @@ public sealed class PetWindow : Window
     private bool _wasCelebrating;
     private string _celebrateText = "";
 
+    // ---- 外观/漫游设置（ApplySettings 全量下发；renderer 未就绪时暂存，精灵加载后套用）----
+    private AppSettings _settings = null!;
+    private bool _showIdleChatter = true;
+    private RoamConfig? _roamConfig;
+
+    // ---- 待机动作轮播（列表/间隔/开关由实例动作配置解析，renderer 持有；窗口只计时）----
+    private long _lastIdleSwitchMs;
+    // ---- 点击动作行播放（时长由实例动作配置解析，超时自动释放；拖拽可打断）----
+    private long _clickRowUntilMs;
+    // ---- 用户设置：精灵帧动画开关 / 闲谈台词重选间隔 ----
+    private bool _userAnimationEnabled = true;
+    private long _idleChatterIntervalMs = 15_000;
+
     // 拖拽状态（对齐 windows/src/window-drag.ts 语义：阈值区分点击/拖拽）
     private bool _pressed;
     private bool _dragging;
@@ -73,6 +89,7 @@ public sealed class PetWindow : Window
     private long _pressTickMs;
     private (int X, int Y) _grabOffset;
     private nint _hwnd;
+    private HwndSource? _hwndSource; // AddHook 的承载源（OnClosed 时 RemoveHook，管理钩子生命周期）
 
     // 拖拽延迟采样（bench 用）：处理耗时（消息到达 → SetWindowPos 完成）+
     // 端到端（消息时间戳 → 完成，含系统队列等待）
@@ -89,7 +106,7 @@ public sealed class PetWindow : Window
 
     public IReadOnlyList<double> EndToEndLatencySamples => _endToEndLatencyMs;
 
-    /// <summary>静止时停掉渲染循环（bench-idle / 全局隐藏时置 false，CPU 归零）。</summary>
+    /// <summary>静止或前台窗口交互时停止桌宠计时器，避免后台工作争用资源。</summary>
     public bool AnimationEnabled
     {
         get => _animationEnabled;
@@ -97,9 +114,17 @@ public sealed class PetWindow : Window
         {
             if (_animationEnabled == value) return;
             _animationEnabled = value;
-            if (value) RestartAnimation();
+            if (value) UpdateTimerState();
             else _animationTimer.Stop();
         }
+    }
+
+    /// <summary>前台窗口交互期间暂停桌宠计时器，避免后台绘制和漫游争用资源。</summary>
+    public void SetDesktopInteractionSuspended(bool suspended)
+    {
+        if (_desktopInteractionSuspended == suspended) return;
+        _desktopInteractionSuspended = suspended;
+        UpdateTimerState();
     }
 
     public PetWindow(PetInstance instance, SpriteLoader spriteLoader, IJsonStore store, Action<PetWindow, int, int> onDragFinished)
@@ -132,6 +157,7 @@ public sealed class PetWindow : Window
         _bitmap = new WriteableBitmap(
             _bufferWidth, _bufferHeight, 96 * _dpiScale, 96 * _dpiScale,
             PixelFormats.Bgra32, null);
+        _frameBuffer = new ReusablePixelBuffer(_bufferWidth * _bufferHeight * 4);
 
         _image.Source = _bitmap;
         _image.Stretch = Stretch.Fill;
@@ -153,7 +179,7 @@ public sealed class PetWindow : Window
         };
         _animationTimer.Tick += (_, _) => AdvanceFrame();
 
-        // 漫游 tick（对齐 roam engine：活跃 30ms / 静止 200ms）
+        // 漫游 tick（活跃 30ms / 静止 200ms）
         _roamTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(RoamEngine.IdleTickMs) };
         _roamTimer.Tick += (_, _) =>
         {
@@ -183,6 +209,8 @@ public sealed class PetWindow : Window
             environmentSource,
             () =>
             {
+                // 全局漫游设置优先（设置页漫游页）；未下发时回退实例字段（导入默认）
+                if (_roamConfig is not null) return _roamConfig;
                 var instance = _instance;
                 var stage = CareEngine.StageIndex(CareEngine.LevelForXp(_careState.Xp));
                 var caps = StageCapabilitiesFor.For(stage);
@@ -198,7 +226,7 @@ public sealed class PetWindow : Window
             },
             _roamClock,
             () => Random.Shared.NextDouble(),
-            pet: null, // 动画行由 render 循环管理，Phase 2 漫游行控制通过 SetRow
+            pet: new RoamPetAdapter(this), // 行走/睡眠行 → 实例动作绑定（roamLeft/roamRight；无绑定回退语义行）
             sleepRowOverride: null,
             cursorProvider: () =>
             {
@@ -206,21 +234,7 @@ public sealed class PetWindow : Window
                 return new RoamPoint(x / _dpiScale, y / _dpiScale);
             });
         Loaded += OnLoaded;
-        IsVisibleChanged += (_, _) =>
-        {
-            if (!IsVisible)
-            {
-                _animationTimer.Stop();
-                _roamTimer.Stop();
-                _renderTimer.Stop();
-            }
-            else
-            {
-                RestartAnimation();
-                _roamTimer.Start();
-                _renderTimer.Start();
-            }
-        };
+        IsVisibleChanged += (_, _) => UpdateTimerState();
     }
 
     /// <summary>导入自定义精灵：拖 PNG/WebP 文件到宠物窗口 → 切片预览 → 确认导入。</summary>
@@ -285,6 +299,53 @@ public sealed class PetWindow : Window
         _quickBubbleDurationSeconds = Math.Clamp(seconds, 1, 10);
     }
 
+    /// <summary>
+    /// 全量下发设置（对齐 Tauri 版 listen/emit 语义）：点击动作/气泡池/时长 +
+    /// 外观（主题/不透明度/字号/字体）、宠物尺寸、待机浮动、闲谈气泡、漫游。
+    /// renderer 未就绪时暂存，精灵加载后套用。
+    /// </summary>
+    public void ApplySettings(AppSettings settings)
+    {
+        _settings = settings;
+        _clickAction = settings.LeftClickAction switch { "self" => "self", "all" => "all", _ => "none" };
+        _quickPresetPool = System.Text.Json.JsonSerializer.Serialize(settings.QuickBubblePresets);
+        _quickBubbleDurationSeconds = Math.Clamp(settings.QuickBubbleDurationSeconds, 1, 10);
+        _showIdleChatter = settings.ShowIdleChatter;
+        _bubble.ApplyAppearance(settings.Theme, settings.BubbleOpacity, settings.FontSize, settings.FontFamily);
+        _roamConfig = settings.Roam;
+        _userAnimationEnabled = settings.AnimationEnabled;
+        _idleChatterIntervalMs = settings.IdleChatterIntervalSeconds * 1000L;
+        // 台词池替换（空数组 = 不显示闲谈/饥饿台词）
+        _idleChatterLines = settings.IdleChatterLines is { Length: > 0 } lines ? lines : [];
+        _hungryLines = settings.HungryLines is { Length: > 0 } hungry ? hungry : [];
+
+        if (_renderer is not null)
+        {
+            _renderer.SetSizePercent(settings.PetSizePercent / 100.0);
+            _renderer.SetBob(settings.BobAnimation);
+            // 播放列表完整替换（间隔/模式/开关即时生效；未配置 → 默认策略）
+            _renderer.SetIdlePlaylist(PetAnimationResolver.ResolveIdle(_instance.Actions, _renderer.ClipCount));
+        }
+
+        // 动画总开关即时生效（关 = 静态显示当前帧）
+        if (_userAnimationEnabled) UpdateTimerState();
+        else _animationTimer.Stop();
+
+        // 闲谈开关变化 → 强制重选台词（ShowIdleChatter 关时 PickMoodLine 返回空）
+        _moodLine = null;
+        _renderSignature = null;
+        RenderBubble();
+    }
+
+    /// <summary>精灵就绪后套用已保存的外观设置（加载发生在 ApplySettings 之后的场景）。</summary>
+    private void ApplyPendingRenderSettings()
+    {
+        if (_settings is null || _renderer is null) return;
+        _renderer.SetSizePercent(_settings.PetSizePercent / 100.0);
+        _renderer.SetBob(_settings.BobAnimation);
+        _renderer.SetIdlePlaylist(PetAnimationResolver.ResolveIdle(_instance.Actions, _renderer.ClipCount));
+    }
+
     private long QuickBubbleDurationMs => _quickBubbleDurationSeconds * 1000L;
 
     /// <summary>点击行为配置（ap_left_click_action：none/self/all）。</summary>
@@ -339,10 +400,28 @@ public sealed class PetWindow : Window
         const string resolved = "idle";
         var celebrating = now < _celebrateUntil;
         var mood = celebrating ? "celebrate" : resolved;
-        _renderer?.SetState(mood);
+        if (celebrating)
+        {
+            // 庆祝行绑定（无绑定/越界 → 默认 celebrate 行）
+            var bound = PetAnimationResolver.ResolveBind(
+                _instance.Actions, PetActionTriggers.Celebrate, _renderer?.ClipCount ?? 0);
+            _renderer?.SetState(mood, bound);
+        }
+        else
+        {
+            _renderer?.SetState(mood);
+        }
+        // 闲谈台词节奏：庆祝结束过渡 / 首次 / 每 _idleChatterIntervalMs 换一句
+        //（PickMoodLine 内部遵守"显示闲谈"开关）
         if (celebrating && _wasCelebrating && now >= _celebrateUntil)
         {
             PickMoodLine(resolved);
+            _moodLinePickedAtMs = now;
+        }
+        else if (!celebrating && (_moodLine is null || now - _moodLinePickedAtMs > _idleChatterIntervalMs))
+        {
+            PickMoodLine(resolved);
+            _moodLinePickedAtMs = now;
         }
         _wasCelebrating = celebrating;
 
@@ -366,23 +445,36 @@ public sealed class PetWindow : Window
         SnugBubble();
     }
 
-    private static readonly string[] DefaultIdleLines =
-        ["…", "♪", "Zzz…", "(*´∀`*)", "呼~", "盯——"];
+    /// <summary>闲谈台词池（设置页「气泡」可编辑；空数组 = 不显示闲谈）。</summary>
+    private string[] _idleChatterLines = AppSettings.DefaultIdleChatterLines;
+    /// <summary>饥饿台词池（同上；空数组 = 饥饿时不额外提示）。</summary>
+    private string[] _hungryLines = AppSettings.DefaultHungryLines;
 
-    private static readonly string[] HungryLines =
-        ["饿了…", "想吃小鱼干~", "好饿哦…", "投喂时间到！"];
+    /// <summary>闲谈台词重选间隔（设置页可调 5-120s，默认 15s）。</summary>
+    private long _moodLinePickedAtMs;
 
+    /// <summary>
+    /// 选闲谈台词：遵守设置页"显示闲谈气泡"开关；饥饿时有概率说饿话（对齐 care）。
+    /// 调用方负责节奏（首次/定期/庆祝结束过渡）。
+    /// </summary>
     private void PickMoodLine(string mood)
     {
-        // Phase 3：饥饿感知台词（对齐 care 饥饿状态影响气泡文案）
-        var hunger = CareEngine.HungerAt(_careState, DateTime.Now);
-        if (hunger >= Hunger.Peckish && Random.Shared.Next(3) == 0)
+        if (!_showIdleChatter)
         {
-            _moodLine = HungryLines[Random.Shared.Next(HungryLines.Length)];
+            _moodLine = null; // 设置页"显示闲谈气泡"关闭 → 无闲谈台词
             return;
         }
-        // Phase 2 内置台词池；Phase 4 接 i18n / activity.ts 台词
-        _moodLine = DefaultIdleLines[Random.Shared.Next(DefaultIdleLines.Length)];
+        // Phase 3：饥饿感知台词（对齐 care 饥饿状态影响气泡文案）
+        var hunger = CareEngine.HungerAt(_careState, DateTime.Now);
+        if (_hungryLines.Length > 0 && hunger >= Hunger.Peckish && Random.Shared.Next(3) == 0)
+        {
+            _moodLine = _hungryLines[Random.Shared.Next(_hungryLines.Length)];
+            return;
+        }
+        // 台词池（设置页可编辑）；空池 = 不显示闲谈
+        _moodLine = _idleChatterLines.Length > 0
+            ? _idleChatterLines[Random.Shared.Next(_idleChatterLines.Length)]
+            : null;
     }
 
     private void SnugBubble()
@@ -394,11 +486,12 @@ public sealed class PetWindow : Window
         }
     }
 
-    /// <summary>升级/成就庆祝爆发（Phase 3 care 接入后调用）。</summary>
+    /// <summary>升级/成就庆祝爆发（Phase 3 care 接入后调用；时长由实例动作配置解析）。</summary>
     public void FlashCelebrate(string line)
     {
         _celebrateText = line;
-        _celebrateUntil = _roamClock.NowMs() + 3000;
+        _celebrateUntil = _roamClock.NowMs() +
+                          (long)PetAnimationResolver.ResolveCelebrateDurationMs(_instance.Actions);
         RenderBubble();
     }
 
@@ -437,8 +530,8 @@ public sealed class PetWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         _hwnd = new WindowInteropHelper(this).Handle;
-        var source = HwndSource.FromHwnd(_hwnd);
-        source?.AddHook(WndProcHook);
+        _hwndSource = HwndSource.FromHwnd(_hwnd);
+        _hwndSource?.AddHook(WndProcHook);
         DrawFrame(0);
         RestartAnimation();
         LoadSpriteAsync();
@@ -454,7 +547,11 @@ public sealed class PetWindow : Window
             var sheet = await Task.Run(() => _spriteLoader.LoadAsync(_instance.SpriteSlug));
             if (sheet is not null && _hwnd != 0 && IsVisible)
             {
-                _renderer = new PetRenderer(sheet);
+                // 待机动作轮播：由实例动作配置解析（未配置 = 全行随机 5s；关闭 = null）
+                var idle = PetAnimationResolver.ResolveIdle(_instance.Actions, sheet.Clips.Count);
+                _renderer = new PetRenderer(sheet, idle);
+                _lastIdleSwitchMs = _roamClock.NowMs();
+                ApplyPendingRenderSettings(); // 尺寸/浮动/播放列表设置（可能先于精灵加载到达）
                 _renderer.SetState("idle");
                 _animationTimer.Interval = TimeSpan.FromMilliseconds(1000.0 / _renderer.Fps);
                 DrawFrame(0);
@@ -528,6 +625,7 @@ public sealed class PetWindow : Window
         if (!_dragging && MovedBeyondThreshold(client))
         {
             _dragging = true;
+            ApplyDragRow(true); // 拖拽动作行（最高优先级，无绑定则保持当前动作）
             BenchTrace("raw drag started");
         }
         if (!_dragging) return;
@@ -553,6 +651,7 @@ public sealed class PetWindow : Window
         if (_dragging)
         {
             _dragging = false;
+            ApplyDragRow(false); // 释放拖拽动作行 → 回 idle/漫游
             _roamEngine.FinishManualDrag(); // releasePending → 引擎 tick 抛掷/下落
             var (x, y) = PhysicalPosition();
             _onDragFinished(this, x, y);
@@ -565,9 +664,36 @@ public sealed class PetWindow : Window
         }
     }
 
+    /// <summary>拖拽动作行：越过 4px 阈值后激活（最高优先级），松开释放；无绑定保持当前动作。</summary>
+    private void ApplyDragRow(bool active)
+    {
+        if (_renderer is null) return;
+        if (active)
+        {
+            var row = PetAnimationResolver.ResolveBind(_instance.Actions, PetActionTriggers.Drag, _renderer.ClipCount);
+            if (row is { } dragRow) _renderer.SetRow(dragRow, "drag", PetRenderer.PriorityDrag);
+        }
+        else
+        {
+            _renderer.ClearRow("drag");
+        }
+    }
+
     /// <summary>点击宠物（对齐 onPetClick：LEFT_CLICK_KEY none/self/all）。</summary>
     private void OnPetClick()
     {
+        // 点击动作行：播放一轮（时长由实例动作配置解析）后自动释放；拖拽可打断（优先级更高）
+        if (_renderer is not null)
+        {
+            var row = PetAnimationResolver.ResolveBind(_instance.Actions, PetActionTriggers.Click, _renderer.ClipCount);
+            if (row is { } clickRow)
+            {
+                _renderer.SetRow(clickRow, "click", PetRenderer.PriorityClick);
+                _clickRowUntilMs = _roamClock.NowMs() +
+                                   (long)PetAnimationResolver.ResolveClickDurationMs(_instance.Actions);
+            }
+        }
+
         if (_clickAction == "none") return;
         var text = RandomPreset();
         if (text is null) return;
@@ -591,10 +717,25 @@ public sealed class PetWindow : Window
         return (x, y);
     }
 
+    private void UpdateTimerState()
+    {
+        if (!IsVisible || _desktopInteractionSuspended)
+        {
+            _animationTimer.Stop();
+            _roamTimer.Stop();
+            _renderTimer.Stop();
+            return;
+        }
+
+        RestartAnimation();
+        _roamTimer.Start();
+        _renderTimer.Start();
+    }
+
     private void RestartAnimation()
     {
         _animationTimer.Stop();
-        if (_animationEnabled && IsVisible)
+        if (_animationEnabled && _userAnimationEnabled && IsVisible && !_desktopInteractionSuspended)
         {
             _animationTimer.Start();
         }
@@ -605,6 +746,22 @@ public sealed class PetWindow : Window
         if (!_animationEnabled || !IsVisible) return;
         if (_renderer is not null)
         {
+            // 点击动作行播放超时 → 释放（owner 匹配才清除，不影响拖拽/漫游持有）
+            if (_clickRowUntilMs > 0 && _roamClock.NowMs() >= _clickRowUntilMs)
+            {
+                _renderer.ClearRow("click");
+                _clickRowUntilMs = 0;
+            }
+            // 待机轮播节奏：间隔来自 renderer 的播放列表（设置页即时生效，唯一计时来源）
+            if (_renderer.IsIdleCycling && _renderer.IdleIntervalMs is { } intervalMs)
+            {
+                var now = _roamClock.NowMs();
+                if (now - _lastIdleSwitchMs >= intervalMs)
+                {
+                    _renderer.AdvanceIdleClip();
+                    _lastIdleSwitchMs = now;
+                }
+            }
             _renderer.AdvanceFrame();
             DrawFrame(0);
             var fps = _renderer.Fps;
@@ -645,10 +802,42 @@ public sealed class PetWindow : Window
         return (scale, (_bufferWidth - PlaceholderPet.FrameWidth * scale) / 2, _bufferHeight - PlaceholderPet.FrameHeight * scale);
     }
 
+    /// <summary>Displays cached retained frames when no dynamic stage overlay is active.</summary>
+    private bool TryPresentCachedSpriteFrame()
+    {
+        var stage = CareEngine.StageIndex(CareEngine.LevelForXp(_careState.Xp));
+        if (StageAppearances.For(stage).GlowColor is not null) return false;
+
+        var frame = _renderer!.PrepareFrame(_bufferWidth, _bufferHeight);
+        if (frame is null) return false;
+
+        var (x, y, width, height) = _renderer.SpriteRect;
+        _image.Source = _frameSourceCache.GetOrCreate(frame);
+        _image.Width = width / _dpiScale;
+        _image.Height = height / _dpiScale;
+        _image.Margin = new Thickness(x / _dpiScale, y / _dpiScale, 0, 0);
+        _image.HorizontalAlignment = HorizontalAlignment.Left;
+        _image.VerticalAlignment = VerticalAlignment.Top;
+        return true;
+    }
+
+    private void RestoreWriteableBitmapPresentation()
+    {
+        _image.Source = _bitmap;
+        _image.Width = double.NaN;
+        _image.Height = double.NaN;
+        _image.Margin = new Thickness();
+        _image.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _image.VerticalAlignment = VerticalAlignment.Stretch;
+    }
+
     /// <summary>把当前精灵帧绘制到帧缓冲（renderer）或占位精灵（回退）。</summary>
     private void DrawFrame(int frameIndex)
     {
-        var buffer = new byte[_bufferWidth * _bufferHeight * 4];
+        if (_renderer is not null && TryPresentCachedSpriteFrame()) return;
+
+        RestoreWriteableBitmapPresentation();
+        var buffer = _frameBuffer.Clear();
         if (_renderer is not null)
         {
             _renderer.DrawFrame(buffer, _bufferWidth, _bufferHeight);
@@ -800,11 +989,46 @@ public sealed class PetWindow : Window
         BenchTrace($"showat requested=({physicalX},{physicalY}) actual=({rect.Left},{rect.Top})");
     }
 
+    /// <summary>漫游动画行适配：引擎固定行号（1 右 / 2 左）→ 实例动作绑定；无绑定回退语义行。</summary>
+    internal void ApplyRoamRow(int? fixedRow)
+    {
+        if (_renderer is null) return;
+        if (fixedRow is not 1 and not 2)
+        {
+            _renderer.ClearRow("roam"); // sleep 等行无绑定 → 保持 idle
+            return;
+        }
+        var trigger = fixedRow == 1 ? PetActionTriggers.RoamRight : PetActionTriggers.RoamLeft;
+        var row = PetAnimationResolver.ResolveBind(_instance.Actions, trigger, _renderer.ClipCount);
+        if (row is { } roamRow) _renderer.SetRow(roamRow, "roam", PetRenderer.PriorityRoam);
+        else _renderer.ClearRow("roam");
+    }
+
+    /// <summary>实例配置更新（设置页动作保存后即时生效，无需重建窗口）。</summary>
+    public void ApplyInstance(PetInstance instance)
+    {
+        _instance = instance;
+        if (_renderer is not null)
+        {
+            _renderer.SetIdlePlaylist(PetAnimationResolver.ResolveIdle(instance.Actions, _renderer.ClipCount));
+        }
+    }
+
+    /// <summary>漫游引擎行控制适配（IRoamPet → renderer owner 覆盖）。</summary>
+    private sealed class RoamPetAdapter : IRoamPet
+    {
+        private readonly PetWindow _window;
+        public RoamPetAdapter(PetWindow window) => _window = window;
+        public void SetRow(int row) => _window.ApplyRoamRow(row);
+        public void ClearRow() => _window.ApplyRoamRow(null);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         _animationTimer.Stop();
         _roamTimer.Stop();
         _renderTimer.Stop();
+        _hwndSource?.RemoveHook(WndProcHook); // 钩子由弱引用持有（官方文档），窗口关闭显式摘除
         base.OnClosed(e);
     }
 }

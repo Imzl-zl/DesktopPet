@@ -17,6 +17,8 @@ public sealed record PetInstance
     public double WanderPauseMaxMs { get; init; }
     public bool ReactsToActivity { get; init; }
     public string? PersonaId { get; init; } = null;   // Phase 6d：每宠物独立人格覆盖（空 = 跟随全局）
+    /// <summary>动作配置（idle 播放列表 + click/celebrate/漫游/拖拽绑定）；null = 未配置 → 解析器默认。</summary>
+    public PetAnimationSettings? Actions { get; init; } = null;
 }
 
 public sealed record PetStore
@@ -42,6 +44,7 @@ public sealed record PetInstancePatch
     public double? WanderPauseMaxMs { get; init; }
     public bool? ReactsToActivity { get; init; }
     public string? PersonaId { get; init; }   // Phase 6d：null = 不修改
+    public PetAnimationSettings? Actions { get; init; }   // null = 不修改
 }
 
 /// <summary>
@@ -75,6 +78,7 @@ public static class PetStoreModel
         public double? WanderPauseMaxMs { get; init; }
         public bool? ReactsToActivity { get; init; }
         public string? PersonaId { get; init; }
+        public PetAnimationSettings? Actions { get; init; }
 
         public static RawPetInstance FromInstance(PetInstance value) => new()
         {
@@ -90,6 +94,7 @@ public static class PetStoreModel
             WanderPauseMaxMs = value.WanderPauseMaxMs,
             ReactsToActivity = value.ReactsToActivity,
             PersonaId = value.PersonaId,
+            Actions = value.Actions,
         };
     }
 
@@ -116,6 +121,7 @@ public static class PetStoreModel
             WanderPauseMaxMs = wanderPause.MaxMs,
             ReactsToActivity = value.ReactsToActivity == true,
             PersonaId = value.PersonaId,
+            Actions = value.Actions is null ? null : PetAnimationResolver.Normalize(value.Actions),
         };
     }
 
@@ -178,8 +184,74 @@ public static class PetStoreModel
             WanderPauseMaxMs = ReadNumber("wanderPauseMaxMs"),
             ReactsToActivity = ReadBool("reactsToActivity"),
             PersonaId = ReadString("personaId"),
+            Actions = ReadActions(value),
         };
     }
+
+    /// <summary>读取 actions 对象（旧 JSON 无此字段 → null；格式错误 → null 走默认）。</summary>
+    private static PetAnimationSettings? ReadActions(JsonElement value)
+    {
+        if (!value.TryGetProperty("actions", out var el) || el.ValueKind != JsonValueKind.Object) return null;
+
+        var idleEnabled = !el.TryGetProperty("idleEnabled", out var enabledEl) ||
+                          enabledEl.ValueKind == JsonValueKind.True;
+        var idleMode = el.TryGetProperty("idleMode", out var modeEl) &&
+                       modeEl.ValueKind == JsonValueKind.String
+            ? modeEl.GetString()
+            : "random";
+        var interval = el.TryGetProperty("idleIntervalSeconds", out var intervalEl)
+            ? ReadNumber(intervalEl)
+            : null;
+        var clickDuration = el.TryGetProperty("clickDurationSeconds", out var clickEl)
+            ? ReadNumber(clickEl)
+            : null;
+        var celebrateDuration = el.TryGetProperty("celebrateDurationSeconds", out var celebrateEl)
+            ? ReadNumber(celebrateEl)
+            : null;
+
+        var clips = new List<int>();
+        if (el.TryGetProperty("idleClips", out var clipsEl) && clipsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var clipEl in clipsEl.EnumerateArray())
+            {
+                if (clipEl.ValueKind == JsonValueKind.Number && clipEl.TryGetInt32(out var clip) && clip >= 0)
+                {
+                    clips.Add(clip);
+                }
+            }
+        }
+
+        var bind = new Dictionary<string, int>();
+        if (el.TryGetProperty("bind", out var bindEl) && bindEl.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in bindEl.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.Number &&
+                    property.Value.TryGetInt32(out var row) && row >= 0)
+                {
+                    bind[property.Name] = row;
+                }
+            }
+        }
+
+        return new PetAnimationSettings(
+            idleEnabled,
+            clips,
+            idleMode ?? "random",
+            interval is { } i ? (int)i : PetAnimationResolver.DefaultIdleIntervalSeconds,
+            clickDuration is { } c ? (int)c : PetAnimationResolver.DefaultClickDurationSeconds,
+            celebrateDuration is { } cd ? (int)cd : PetAnimationResolver.DefaultCelebrateDurationSeconds,
+            bind);
+    }
+
+    private static double? ReadNumber(JsonElement el)
+        => el.ValueKind switch
+        {
+            JsonValueKind.Number => el.GetDouble(),
+            JsonValueKind.String when double.TryParse(el.GetString(), out var d) => d,
+            JsonValueKind.Null => 0,
+            _ => double.NaN,
+        };
 
     public static PetStore? ParsePetStore(JsonElement value)
     {
@@ -272,6 +344,7 @@ public static class PetStoreModel
             WanderPauseMaxMs = patch.WanderPauseMaxMs ?? current.WanderPauseMaxMs,
             ReactsToActivity = patch.ReactsToActivity ?? current.ReactsToActivity,
             PersonaId = patch.PersonaId ?? current.PersonaId,
+            Actions = patch.Actions ?? current.Actions,
         };
         var updated = Normalize(merged) ?? throw new InvalidOperationException("invalid pet instance update");
         var instances = store.Instances.ToList();

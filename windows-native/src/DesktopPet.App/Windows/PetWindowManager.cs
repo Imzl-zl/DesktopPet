@@ -25,6 +25,9 @@ public sealed class PetWindowManager
     private readonly IJsonStore _store;
     private readonly SpriteLoader _spriteLoader;
     private bool _globallyVisible = true;
+    private bool _chatVisible;
+    private bool _settingsForeground;
+    private AppSettings _settings = null!;
     private FloatingBallWindow? _floatingBall;
     private DesktopPet.App.Settings.SettingsWindow? _settingsWindow;
     private DesktopPet.Core.I18n.I18nService? _i18n;
@@ -34,8 +37,10 @@ public sealed class PetWindowManager
         "[\"辛苦了~\",\"摸摸头\",\"加油！\",\"休息一下吧\",\"盯——\",\"(*´∀`*)\"]";
 
     public bool GloballyVisible => _globallyVisible;
+    public bool IsSettingsForeground => _settingsForeground;
 
     public event Action<bool>? GlobalVisibilityChanged;
+    public event Action<bool>? SettingsForegroundChanged;
 
     public PetWindowManager(IJsonStore store, SpriteLoader spriteLoader)
     {
@@ -68,8 +73,7 @@ public sealed class PetWindowManager
                 window = new PetWindow(instance, _spriteLoader, _store, OnDragFinished);
                 window.SetImportHandler(ImportSprite);
                 window.SetBroadcastQuickBubble(BroadcastQuickBubble);
-                window.SetClickAction("none"); // Phase 4 设置页配置 LEFT_CLICK_KEY
-                window.SetQuickPresetPool(PresetPoolJson);
+                if (_settings is not null) window.ApplySettings(_settings); // 全量（点击/气泡池/外观/漫游等）
                 window.SpriteLoaded += () => _floatingBall?.ReloadPet(); // 精灵就绪 → 浮球球体刷新
                 _windows[instance.Id] = window;
                 PositionAndShow(window, instance, index);
@@ -81,6 +85,7 @@ public sealed class PetWindowManager
             }
             index++;
         }
+        UpdateDesktopOverlayZOrder();
     }
 
     private void PositionAndShow(PetWindow window, PetInstance instance, int index)
@@ -182,16 +187,58 @@ public sealed class PetWindowManager
     {
         if (_settingsWindow is null)
         {
-            _settingsWindow = new DesktopPet.App.Settings.SettingsWindow(_store, this, _spriteLoader,
+            var settingsWindow = new DesktopPet.App.Settings.SettingsWindow(_store, this, _spriteLoader,
                 _i18n ?? new DesktopPet.Core.I18n.I18nService(), _aiCoordinator);
+            _settingsWindow = settingsWindow;
+            settingsWindow.IsVisibleChanged += (_, _) => UpdateDesktopOverlayZOrder();
+            settingsWindow.StateChanged += (_, _) => UpdateDesktopOverlayZOrder();
+            settingsWindow.Closed += (_, _) =>
+            {
+                _settingsWindow = null;
+                UpdateDesktopOverlayZOrder();
+            };
         }
         if (_settingsWindow.IsVisible)
         {
             _settingsWindow.Activate();
+            return;
         }
-        else
+
+        SetDesktopOverlaysTopmost(false);
+        _settingsWindow.Show();
+        UpdateDesktopOverlayZOrder();
+    }
+
+    /// <summary>聊天或设置处于前台时，让桌宠留在窗口后方，避免遮挡交互控件。</summary>
+    public void SetChatVisible(bool visible)
+    {
+        _chatVisible = visible;
+        UpdateDesktopOverlayZOrder();
+    }
+
+    private void UpdateDesktopOverlayZOrder()
+    {
+        var settingsWindow = _settingsWindow;
+        var settingsVisible = settingsWindow is { IsVisible: true }
+            && settingsWindow.WindowState != WindowState.Minimized;
+        SetDesktopOverlaysTopmost(!settingsVisible && !_chatVisible);
+        if (_settingsForeground == settingsVisible) return;
+
+        _settingsForeground = settingsVisible;
+        SettingsForegroundChanged?.Invoke(settingsVisible);
+    }
+
+    private void SetDesktopOverlaysTopmost(bool topmost)
+    {
+        foreach (var window in _windows.Values)
         {
-            _settingsWindow.Show();
+            window.Topmost = topmost;
+            window.SetDesktopInteractionSuspended(!topmost);
+        }
+        if (_floatingBall is not null)
+        {
+            _floatingBall.Topmost = topmost;
+            _floatingBall.SetDesktopInteractionSuspended(!topmost);
         }
     }
 
@@ -215,17 +262,25 @@ public sealed class PetWindowManager
         _floatingBall?.SetOpenChat(handler);
     }
 
-    /// <summary>应用设置到所有宠物窗口（对齐 Tauri 版 listen/emit 语义）。</summary>
+    /// <summary>应用设置到所有宠物窗口（对齐 Tauri 版 listen/emit 语义）：
+    /// 点击动作/气泡池/时长 + 外观（主题/不透明度/字号/字体）/尺寸/浮动/闲谈/漫游。</summary>
     public void ApplySettings(AppSettings settings)
     {
-        var presetsJson = System.Text.Json.JsonSerializer.Serialize(settings.QuickBubblePresets);
+        _settings = settings;
+        PresetPoolJson = System.Text.Json.JsonSerializer.Serialize(settings.QuickBubblePresets);
         foreach (var window in _windows.Values)
         {
-            window.SetClickAction(settings.LeftClickAction);
-            window.SetQuickPresetPool(presetsJson);
-            window.ApplyQuickBubbleDuration(settings.QuickBubbleDurationSeconds);
+            window.ApplySettings(settings);
         }
-        PresetPoolJson = presetsJson;
+    }
+
+    /// <summary>实例配置变化（动作页保存）→ 对应用口即时生效（无需重建窗口）。</summary>
+    public void ApplyInstance(PetInstance instance)
+    {
+        if (_windows.TryGetValue(instance.Id, out var window))
+        {
+            window.ApplyInstance(instance);
+        }
     }
 
     /// <summary>快速气泡广播：浮球发送 → 全员同时说（对齐 emit(&quot;quick-bubble&quot; target all）。</summary>
@@ -250,6 +305,7 @@ public sealed class PetWindowManager
             _setOutputMode,
             _openChat);
         _floatingBall.Show();
+        UpdateDesktopOverlayZOrder();
     }
 
     /// <summary>选中实例的共享精灵（浮球内活体宠物，复用窗口缓存不重复解码）。</summary>

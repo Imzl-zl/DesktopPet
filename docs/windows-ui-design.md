@@ -245,7 +245,7 @@
 |---|---|
 | 毛玻璃 | Win11：`DWMWA_SYSTEMBACKDROP_TYPE` = Acrylic/Mica；Win10 1803+：`SetWindowCompositionAttribute` 模糊。**注意**：毛玻璃窗口不能用 `AllowsTransparency=true`，用 `WindowChrome` + 半透明背景 + DWM 模糊 |
 | 圆角窗口 | Win11 `DWMWA_WINDOW_CORNER_PREFERENCE`；老系统自绘圆角 + 透明区域 |
-| 宠物窗口（像素风） | 保持 `AllowsTransparency=true` + `WriteableBitmap`（不毛玻璃，避免与高频渲染打架） |
+| 宠物窗口（像素风） | 当前 WPF 兼容 presenter 保持 `AllowsTransparency=true`；普通精灵帧复用冻结 `BitmapSource`，动态成长叠加才走 `WriteableBitmap`。高频透明 presenter 迁移到原生 Composition HWND 时，精灵、气泡和效果必须同树渲染 |
 | 动效 | 自写轻量动画助手（`AnimationHelper`，TimeSpan + easing 曲线），不引重库；气泡弹簧用 `BackEase` 或贝塞尔关键帧 |
 | 图标 | Fluent System Icons 的 `Path` 数据转 `Geometry` 资源字典 |
 | 深色跟随 | WPF 监听系统主题（`SystemEvents.UserPreferenceChanged`）切换资源字典 |

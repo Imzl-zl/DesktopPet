@@ -32,7 +32,7 @@
 | 项 | 选择 | 理由 |
 |---|---|---|
 | 运行时 | **.NET 8 (LTS)** | 长期支持、WinRT 互操作好、WPF 生态成熟 |
-| UI 框架 | **WPF**（宠物窗口、浮球、设置、气泡） | 透明窗口 + 硬件加速、`DispatcherTimer`/`CompositionTarget.Rendering` 动画、成熟稳定 |
+| UI 框架 | **WPF**（设置、对话、兼容宠物 presenter） | 设置/对话成熟稳定；WDDM 下 layered window 可硬件加速，宠物高频透明渲染保留原生 Composition presenter 演进路径 |
 | 弹幕层 | 独立全屏透明窗口，**Win2D（Direct2D 封装）**渲染 | GPU 合成滚动文本，几百条弹幕 60fps |
 | 截屏 | **`Windows.Graphics.Capture`**（WinRT API，C# 一等公民） | Win11 原生、无需前台窗口、权限弹窗一次；Win10 回退 DXGI Desktop Duplication |
 | 图像解码/像素处理 | `System.Drawing.Common`（仅 Windows 用）或 `ImageSharp` | 精灵图切片需要逐像素 alpha 扫描 |
@@ -51,7 +51,7 @@
 
 | 现有模块（TS） | 行数 | 功能 | WPF 对应 | 工作量 |
 |---|---|---|---|---|
-| `pet.ts` | 325 | 精灵渲染、**自动切片**（alpha-gutter）、alpha hitTest | `SpriteSlicer.cs`（mac 版 `SpriteSlicer.swift` 可对照）+ `PetRenderer.cs`（帧缓存 + `WriteableBitmap`） | 中 |
+| `pet.ts` | 325 | 精灵渲染、**自动切片**（alpha-gutter）、alpha hitTest | `SpriteSlicer.cs`（mac 版 `SpriteSlicer.swift` 可对照）+ `PetRenderer.cs`（帧布局、冻结 `BitmapSource` 缓存、动态叠加回退） | 中 |
 | `roam/`（engine/modes/environment/physics） | ~800 | 漫游引擎：tick 循环、抛掷/下落物理、窗口边界感知、睡眠/漫步模式 | `MovementEngine.cs`（`DispatcherTimer` 或独立线程 + 位置插值） | 中 |
 | `window-drag.ts` + Rust `set_hit_rect` | 179 | 拖拽（Rust 侧忽略光标事件补丁） | WPF `Window.DragMove()` + 鼠标捕获 + `MoveWindow`，**无需补丁层** | 低 |
 | `pet-pointer-drag.ts` / `pet-interaction-lease.ts` | 145 | 指针拖拽 + 多宠物互斥 | 鼠标事件处理 + 全局互斥状态 | 低 |
@@ -137,7 +137,7 @@ windows-native/
 
 ### Phase 1 — 宠物核心：自定义宠物全保留（1 周）
 - `SpriteSlicer.cs`：alpha-gutter 切片（对照 `pet.ts:slice()` 与 `SpriteSlicer.swift`）+ 固定网格回退
-- `PetRenderer.cs`：帧缓存位图 + `WriteableBitmap` 逐帧绘制；动画行/idle 播放列表
+- `PetRenderer.cs`：帧布局 + 冻结 `BitmapSource` 缓存；仅动态阶段叠加使用 `WriteableBitmap` 回退；动画行/idle 播放列表
 - alpha hitTest（点击透明区不拖窗）
 - 导入自定义精灵图 UI（文件选择 + 切片预览）
 - **验收**：现有所有宠物包（CDN 目录 + 本地导入）切片结果与 TS 版一致（用同一批测试图做对照测试）
@@ -194,16 +194,25 @@ windows-native/
 
 ## 6. 关键技术实现要点
 
-### 6.1 透明置顶窗口（WPF）
+### 6.1 透明置顶窗口：兼容 presenter 与最终路径
+
+当前 WPF 兼容 presenter 使用：
 ```csharp
-// 核心三件套：无边框 + 透明 + 置顶
 WindowStyle = WindowStyle.None;
 AllowsTransparency = true;
 Background = Brushes.Transparent;
 Topmost = true;
 ShowInTaskbar = false;
 ```
-注意：`AllowsTransparency=true` 会关闭硬件加速的 DWM 合成部分路径，所以**动画用 `WriteableBitmap` 直写像素 + `CompositionTarget.Rendering`**，不要依赖 XAML 元素动画做高频精灵帧（XAML 元素级动画在透明窗口下性能一般）。弹幕层用 Win2D 绕过此限制。
+
+Microsoft 的 WPF Graphics Rendering Tiers 文档说明：在 WDDM 系统上，layered window 可以使用硬件加速，因此不能把 `AllowsTransparency=true` 当成“必然软件渲染”的结论。真正的热路径是每帧 CPU 像素处理和 `WriteableBitmap` 的系统内存前后缓冲复制。
+
+兼容 presenter 的规则：
+- 不降低既有动画行或漫游行为频率来取得性能数字。
+- 不变精灵帧使用冻结 `BitmapSource` 缓存和 `NearestNeighbor`；alpha 掩码仍是唯一的 hit test 真值。
+- 仅成长光晕、皇冠、星点等动态像素层回退到 `WriteableBitmap`，确保效果不丢失。
+
+高频透明桌宠的最终路径是专用原生 `WS_EX_NOREDIRECTIONBITMAP` HWND 绑定 `Windows.UI.Composition.DesktopWindowTarget`。该 presenter 必须把精灵、气泡和成长效果放在同一 Composition visual tree，不能把 Visual Layer 叠在 WPF layered window 上，因为两套渲染树存在官方定义的 airspace 边界。先以浮球进行完整功能等价验证，再迁移主宠物窗口。
 
 ### 6.2 精灵渲染
 - 切片结果缓存为每帧 `BitmapSource`（与 TS 版"每帧从大图裁剪"相比是净优化）
@@ -232,10 +241,10 @@ ShowInTaskbar = false;
 | 指标 | Tauri 现状（基线） | WPF 目标 |
 |---|---|---|
 | 空闲 CPU（单宠物，无动画） | 实测记录 | **< 1%** |
-| 动画时 CPU | 实测记录 | **< 5%**（60fps 时） |
+| 动画时 CPU | 实测记录 | 同场景按宠物数、DPI、阶段分别记录；不得以降低既有动画/漫游频率换取结果 |
 | 内存（常驻） | 实测记录 | **< 120MB**（WebView2 内核通常 100MB+） |
 | 拖拽延迟（鼠标 → 窗口位移） | 实测记录 | **< 16ms**（跟手） |
-| 动画帧率 | 实测记录 | **60fps 稳定** |
+| 动画节奏 | 实测记录 | 保持状态机定义的帧率和漫游物理；记录 p95 帧间隔/拖拽延迟，不以固定 60fps 替代业务语义 |
 | 弹幕（100 条滚动） | —（新功能） | **60fps** |
 | 启动到宠物可见 | 实测记录 | **< 2s** |
 

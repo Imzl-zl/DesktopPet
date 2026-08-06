@@ -86,9 +86,11 @@ public sealed class RoamModes
 
     private RoamPoint FallbackWander(RoamEnvironment env, RoamPoint pos, IRoamPet? pet)
     {
-        _restUntil = 0;
+        // 注意：不重置 _restUntil——模式切换的重置在 RunMode；若重置，回退模式下
+        // AdvanceWander 设置的休息会被下一次调用清掉，停顿永不生效（上游缺陷）。
+        var config = _configSource();
         return AdvanceWander(env, pos, pet,
-            new Pause.WanderPauseRange(RoamConstants.IdleMsMin, RoamConstants.IdleMsMax));
+            new Pause.WanderPauseRange(config.WanderPauseMinMs, config.WanderPauseMaxMs));
     }
 
     private RoamPoint AdvanceWander(RoamEnvironment env, RoamPoint pos, IRoamPet? pet, Pause.WanderPauseRange pauseRange)
@@ -142,16 +144,17 @@ public sealed class RoamModes
         }
         var standY = ClimbTopY(surface.Rect, env.WorkArea);
 
+        var config = _configSource();
         var dir = _climbDirection != 0 ? _climbDirection : (_random() < 0.5 ? -1 : 1);
         _climbDirection = dir;
-        var step = RoamConfigOps.PxPerSec(_configSource().Speed) * RoamConstants.DtSec;
+        var step = RoamConfigOps.PxPerSec(config.Speed) * RoamConstants.DtSec;
         var nextX = pos.X + dir * step;
         var onEdge = nextX < support.Value.Left - 2 || nextX > support.Value.Right + 2;
 
         if (onEdge)
         {
-            _restUntil = _clock.NowMs() + RoamConstants.IdleMsMin +
-                         _random() * (RoamConstants.IdleMsMax - RoamConstants.IdleMsMin);
+            _restUntil = _clock.NowMs() + Pause.SampleWanderPauseMs(
+                new Pause.WanderPauseRange(config.WanderPauseMinMs, config.WanderPauseMaxMs), _random);
             _climbDirection = dir == 1 ? -1 : 1;
             pet?.ClearRow();
             return new RoamPoint(

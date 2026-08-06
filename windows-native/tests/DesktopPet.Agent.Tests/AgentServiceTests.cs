@@ -94,6 +94,91 @@ public class AgentServiceTests
     }
 
     [Fact]
+    public async Task Config_DisablesAnActiveSwitchableCaptureSource()
+    {
+        var pipe = PipeName();
+        var created = 0;
+        var inner = new DisposableCaptureSource();
+        using var source = new SwitchableScreenCaptureSource(() =>
+        {
+            Interlocked.Increment(ref created);
+            return inner;
+        });
+        await using var service = new AgentService(pipe, source, new InMemoryCredentialStore(),
+            captureInterval: TimeSpan.FromMilliseconds(10));
+        var runTask = service.RunAsync(CancellationToken.None);
+
+        await using var client = new PipeRpcClient(pipe);
+        await client.ConnectAsync(CancellationToken.None);
+        _ = await client.ReceiveAsync(CancellationToken.None); // Hello
+
+        await client.SendAsync(new RpcMessage(RpcType.Config, ConfigPayload(screenAnalysis: true)), CancellationToken.None);
+        await WaitUntilAsync(() => Volatile.Read(ref created) == 1);
+
+        await client.SendAsync(new RpcMessage(RpcType.Config, ConfigPayload(screenAnalysis: false)), CancellationToken.None);
+        await WaitUntilAsync(() => inner.DisposeCount == 1);
+
+        await client.SendAsync(new RpcMessage(RpcType.Shutdown, null), CancellationToken.None);
+        await runTask.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private static JsonElement ConfigPayload(bool screenAnalysis)
+        => JsonSerializer.SerializeToElement(new
+        {
+            screenAnalysis,
+            analysisPersonaPrompt = (string?)null,
+            providerBaseUrl = (string?)null,
+            providerModel = (string?)null,
+            providerApiKeyRef = (string?)null,
+            minAnalysisIntervalSeconds = 0,
+        });
+
+    private static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (!predicate())
+        {
+            await Task.Delay(10, cts.Token);
+        }
+    }
+
+    private sealed class DisposableCaptureSource : IScreenCaptureSource, IDisposable
+    {
+        public int DisposeCount { get; private set; }
+
+        public Task<CapturedFrame?> CaptureAsync(CancellationToken ct)
+            => Task.FromResult<CapturedFrame?>(null);
+
+        public void Dispose() => DisposeCount++;
+    }
+
+    [Fact]
+    public async Task Dispose_ReleasesDisposableCaptureSource()
+    {
+        var source = new DisposableCaptureSource();
+        var service = new AgentService(PipeName(), source, new InMemoryCredentialStore());
+
+        await service.DisposeAsync();
+
+        Assert.Equal(1, source.DisposeCount);
+    }
+
+    [Fact]
+    public async Task EndToEnd_ClientDisconnect_TerminatesService()
+    {
+        var pipe = PipeName();
+        await using var service = new AgentService(pipe, new OfflineFrameSource([]), new InMemoryCredentialStore());
+        var runTask = service.RunAsync(CancellationToken.None);
+        var client = new PipeRpcClient(pipe);
+
+        await client.ConnectAsync(CancellationToken.None);
+        _ = await client.ReceiveAsync(CancellationToken.None); // Hello
+        await client.DisposeAsync();
+
+        await runTask.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
     public async Task EndToEnd_Shutdown_TerminatesService()
     {
         var pipe = PipeName();

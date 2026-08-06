@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using DesktopPet.App.Interop;
@@ -30,14 +31,17 @@ public sealed class FloatingBallWindow : Window
     private Action? _openChat;                        // 打开对话窗（用户主动聊天入口；回调后置需可写）
     private readonly Image _petImage = new();
     private WriteableBitmap? _petBitmap;
+    private ReusablePixelBuffer? _petBuffer;
     private PetRenderer? _petRenderer;
     private readonly DispatcherTimer _petTimer;
+    private bool _desktopInteractionSuspended;
 
     private bool _pressed;
     private bool _dragging;
     private (int X, int Y) _pressPoint;
     private (int X, int Y) _grabOffset;
     private nint _hwnd;
+    private HwndSource? _hwndSource; // AddHook 的承载源（OnClosed 时 RemoveHook，管理钩子生命周期）
     private readonly string _positionFilePath;
     private bool _menuOpen;
 
@@ -100,16 +104,27 @@ public sealed class FloatingBallWindow : Window
         Loaded += (_, _) =>
         {
             _hwnd = new WindowInteropHelper(this).Handle;
-            HwndSource.FromHwnd(_hwnd)?.AddHook(WndProcHook);
+            _hwndSource = HwndSource.FromHwnd(_hwnd);
+            _hwndSource?.AddHook(WndProcHook);
             RestorePosition();
             LoadBallPet();
-            _petTimer.Start();
+            UpdatePetTimer();
         };
-        IsVisibleChanged += (_, _) =>
-        {
-            if (!IsVisible) _petTimer.Stop();
-            else _petTimer.Start();
-        };
+        IsVisibleChanged += (_, _) => UpdatePetTimer();
+    }
+
+    /// <summary>前台窗口交互期间暂停浮球内宠物的动画计时器。</summary>
+    public void SetDesktopInteractionSuspended(bool suspended)
+    {
+        if (_desktopInteractionSuspended == suspended) return;
+        _desktopInteractionSuspended = suspended;
+        UpdatePetTimer();
+    }
+
+    private void UpdatePetTimer()
+    {
+        if (IsVisible && !_desktopInteractionSuspended) _petTimer.Start();
+        else _petTimer.Stop();
     }
 
     // ---- 球内活体宠物 ----
@@ -122,6 +137,7 @@ public sealed class FloatingBallWindow : Window
         _petRenderer.SetState("idle");
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         _petBitmap = new WriteableBitmap((int)(56 * dpi), (int)(56 * dpi), 96 * dpi, 96 * dpi, PixelFormats.Bgra32, null);
+        _petBuffer = new ReusablePixelBuffer(_petBitmap.PixelWidth * _petBitmap.PixelHeight * 4);
         _petImage.Source = _petBitmap;
         DrawBallPet();
     }
@@ -141,8 +157,8 @@ public sealed class FloatingBallWindow : Window
 
     private void DrawBallPet()
     {
-        if (_petBitmap is null || _petRenderer is null) return;
-        var buffer = new byte[_petBitmap.PixelWidth * _petBitmap.PixelHeight * 4];
+        if (_petBitmap is null || _petBuffer is null || _petRenderer is null) return;
+        var buffer = _petBuffer.Clear();
         _petRenderer.DrawFrame(buffer, _petBitmap.PixelWidth, _petBitmap.PixelHeight);
         PixelBuffer.RgbaToBgra(buffer); // Core 输出 RGBA，WriteableBitmap 是 Bgra32
         _petBitmap.WritePixels(new Int32Rect(0, 0, _petBitmap.PixelWidth, _petBitmap.PixelHeight), buffer, _petBitmap.PixelWidth * 4, 0);
@@ -263,41 +279,48 @@ public sealed class FloatingBallWindow : Window
 
         var card = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(0xF5, 0xFF, 0xFF, 0xFF)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x14, 0x1C, 0x20, 0x28)),
+            Background = new SolidColorBrush(Color.FromArgb(0xF7, 0xFF, 0xFF, 0xFF)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x1F, 0x1C, 0x20, 0x28)),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(12),
-            Width = 240,
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(16),
+            Width = 272,
+            Effect = (Effect)Application.Current.FindResource("ShadowFloat"),
         };
         var stack = new StackPanel();
 
-        var header = new TextBlock { Text = "跟宠物说点什么…", FontSize = 11, Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)), Margin = new Thickness(0, 0, 0, 6) };
+        var header = new TextBlock
+        {
+            Text = "跟宠物说点什么…",
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x1B, 0x1F, 0x26)),
+            Margin = new Thickness(0, 0, 0, 8),
+        };
         stack.Children.Add(header);
 
         _input = new TextBox
         {
             FontSize = 13,
-            Padding = new Thickness(8, 5, 8, 5),
-            Background = new SolidColorBrush(Color.FromArgb(0x14, 0x1C, 0x20, 0x28)),
-            BorderThickness = new Thickness(0),
+            Padding = new Thickness(10, 6, 10, 6),
+            Height = 32,
         };
         stack.Children.Add(_input);
 
         var presets = ReadPresets();
         if (presets.Count > 0)
         {
-            var wrap = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+            var wrap = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
             foreach (var preset in presets)
             {
                 var chip = new Button
                 {
                     Content = preset,
-                    FontSize = 11,
+                    FontSize = 11.5,
                     Margin = new Thickness(0, 0, 6, 6),
-                    Padding = new Thickness(8, 3, 8, 3),
-                    Background = new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0x8A, 0x65)),
-                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(10, 4, 10, 4),
+                    Height = 26,
+                    Style = (Style)Application.Current.FindResource("ButtonGhostStyle"),
                 };
                 chip.Click += (_, _) => SendAndClose(preset);
                 wrap.Children.Add(chip);
@@ -305,33 +328,17 @@ public sealed class FloatingBallWindow : Window
             stack.Children.Add(wrap);
         }
 
-        var send = new Button
-        {
-            Content = "发送",
-            FontSize = 12,
-            Margin = new Thickness(0, 8, 0, 0),
-            Padding = new Thickness(12, 5, 12, 5),
-            Background = new SolidColorBrush(Color.FromRgb(0xFF, 0x8A, 0x65)),
-            Foreground = Brushes.White,
-            BorderThickness = new Thickness(0),
-            HorizontalAlignment = HorizontalAlignment.Right,
-        };
-        send.Click += (_, _) => SendAndClose(_input.Text);
-        stack.Children.Add(send);
-
-        // 用户主动聊天入口（Phase 6 收尾）：想聊天随时打开对话窗，与 AI 输出模式无关
+        // 主操作行：聊天（主）+ 发送（次）
+        var actionRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         if (_openChat is not null)
         {
             var chatButton = new Button
             {
-                Content = "💬 聊天",
-                FontSize = 12,
-                Margin = new Thickness(0, 8, 0, 0),
-                Padding = new Thickness(12, 5, 12, 5),
-                Background = new SolidColorBrush(Color.FromRgb(0x4A, 0x90, 0xE0)),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0),
-                HorizontalAlignment = HorizontalAlignment.Right,
+                Content = "打开对话",
+                FontSize = 12.5,
+                Height = 30,
+                Margin = new Thickness(0, 0, 8, 0),
+                Style = (Style)Application.Current.FindResource("ButtonPrimaryStyle"),
             };
             System.Windows.Automation.AutomationProperties.SetAutomationId(chatButton, "ball-chat-btn");
             chatButton.Click += (_, _) =>
@@ -339,20 +346,39 @@ public sealed class FloatingBallWindow : Window
                 CloseMenu();
                 _openChat();
             };
-            stack.Children.Add(chatButton);
+            actionRow.Children.Add(chatButton);
         }
+        var send = new Button
+        {
+            Content = "发送",
+            FontSize = 12.5,
+            Height = 30,
+            Style = (Style)Application.Current.FindResource("ButtonDefaultStyle"),
+        };
+        send.Click += (_, _) => SendAndClose(_input.Text);
+        actionRow.Children.Add(send);
+        stack.Children.Add(actionRow);
 
         // AI 输出模式行（Phase 5）：弹幕 / 对话 / 静默；静默 = 停 Agent 无主动输出
         if (_setOutputMode is not null)
         {
-            var modeRow = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+            var divider = new Border
+            {
+                Height = 1,
+                Background = new SolidColorBrush(Color.FromArgb(0x18, 0x1C, 0x20, 0x28)),
+                Margin = new Thickness(0, 10, 0, 10),
+            };
+            stack.Children.Add(divider);
+
+            var modeRow = new WrapPanel();
             var label = new TextBlock
             {
-                Text = "AI 输出：",
+                Text = "AI 输出",
                 FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(Color.FromRgb(0x6A, 0x72, 0x80)),
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 6, 0),
+                Margin = new Thickness(0, 0, 8, 6),
             };
             modeRow.Children.Add(label);
             foreach (var (id, name) in new[] { ("bubble", "气泡"), ("danmaku", "弹幕"), ("chat", "对话"), ("silent", "仅聊天") })
@@ -360,11 +386,11 @@ public sealed class FloatingBallWindow : Window
                 var modeButton = new Button
                 {
                     Content = name,
-                    FontSize = 11,
-                    Margin = new Thickness(0, 0, 6, 0),
-                    Padding = new Thickness(10, 4, 10, 4),
-                    Background = new SolidColorBrush(Color.FromArgb(0x1F, 0x4A, 0x90, 0xE0)),
-                    BorderThickness = new Thickness(0),
+                    FontSize = 11.5,
+                    Margin = new Thickness(0, 0, 6, 6),
+                    Padding = new Thickness(10, 3, 10, 3),
+                    Height = 25,
+                    Style = (Style)Application.Current.FindResource("ButtonDefaultStyle"),
                 };
                 modeButton.Click += (_, _) =>
                 {
@@ -421,5 +447,12 @@ public sealed class FloatingBallWindow : Window
     private void ShowSettingsPlaceholder()
     {
         _openSettings();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _petTimer.Stop();
+        _hwndSource?.RemoveHook(WndProcHook); // 钩子由弱引用持有（官方文档），窗口关闭显式摘除
+        base.OnClosed(e);
     }
 }

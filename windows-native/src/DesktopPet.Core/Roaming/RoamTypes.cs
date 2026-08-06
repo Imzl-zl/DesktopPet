@@ -33,10 +33,11 @@ public static class RoamConstants
     public const double WinH = 320;
     public const double Margin = 40;
 
-    public const double IdleMsMin = 1200;
-    public const double IdleMsMax = 3500;
-
-    public const double PhysicsFriction = 0.9;
+    public const int PhysicsReferenceTickMs = 30;
+    public const double PhysicsFrictionAtReferenceTick = 0.9;
+    public static readonly double PhysicsFriction = Math.Pow(
+        PhysicsFrictionAtReferenceTick,
+        (double)TickMs / PhysicsReferenceTickMs);
     public const double PhysicsMinSpeed = 15;
     public const double PhysicsGravity = 1800;
     public const double SampleWindowMs = 120;

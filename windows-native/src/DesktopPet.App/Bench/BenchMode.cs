@@ -72,7 +72,7 @@ public static class BenchMode
     {
         foreach (var window in manager.VisibleWindows)
         {
-            window.AnimationEnabled = false; // 静止：画完首帧停渲染循环
+            window.SetDesktopInteractionSuspended(true); // 静止：停止动画、漫游和气泡时钟
         }
         var readyPath = Path.Combine(Path.GetTempPath(), "desktoppet-bench-idle.ready");
         File.WriteAllText(readyPath, "ready");

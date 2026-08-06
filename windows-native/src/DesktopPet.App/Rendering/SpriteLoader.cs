@@ -19,7 +19,8 @@ public sealed class SpriteLoader
     private readonly string _manifestPath;
     private readonly HttpClient _http;
 
-    private readonly Dictionary<string, SpriteSheet> _sheetCache = new();
+    private readonly object _cacheLock = new();
+    private readonly Dictionary<string, SpriteSheet> _sheetCache = new(StringComparer.Ordinal);
 
     public SpriteLoader(string dataDirectory)
     {
@@ -33,28 +34,49 @@ public sealed class SpriteLoader
 
     public string SpritesDirectory => _spritesDir;
 
-    /// <summary>同步加载已缓存的精灵（浮球等 UI 线程路径），无缓存返回 null。</summary>
+    /// <summary>同步读取已解码的精灵；不会触发磁盘或网络 I/O。</summary>
     public SpriteSheet? TryGetCached(string slug)
-        => _sheetCache.TryGetValue(slug, out var sheet) ? sheet : null;
+    {
+        lock (_cacheLock)
+        {
+            return _sheetCache.TryGetValue(slug, out var sheet) ? sheet : null;
+        }
+    }
 
     /// <summary>导入的本地精灵写入缓存目录（slug 为实例 id）。</summary>
     public void SaveLocal(string slug, byte[] bytes)
     {
         File.WriteAllBytes(Path.Combine(_spritesDir, $"{slug}.png"), bytes);
+        lock (_cacheLock)
+        {
+            _sheetCache.Remove(slug);
+        }
+    }
+
+    /// <summary>
+    /// 加载已落盘的精灵，但绝不触发网络请求。需要离线检查或避免主动下载的调用方
+    /// 使用此入口；常规界面通过 <see cref="LoadAsync"/> 在线补全缺失资源。
+    /// </summary>
+    public async Task<SpriteSheet?> LoadLocalAsync(string slug, CancellationToken ct = default)
+    {
+        var cached = TryGetCached(slug);
+        if (cached is not null) return cached;
+
+        var localPath = Path.Combine(_spritesDir, $"{slug}.png");
+        if (!File.Exists(localPath)) return null;
+
+        var sheet = SpriteSheet.Decode(await File.ReadAllBytesAsync(localPath, ct), slug);
+        if (sheet is not null) Cache(sheet, slug);
+        return sheet;
     }
 
     public async Task<SpriteSheet?> LoadAsync(string slug, CancellationToken ct = default)
     {
-        // 共享缓存：同 slug 只解码一次（多窗口/浮球共用，内存关键）
-        if (_sheetCache.TryGetValue(slug, out var cached)) return cached;
+        var cached = TryGetCached(slug);
+        if (cached is not null) return cached;
 
-        var localPath = Path.Combine(_spritesDir, $"{slug}.png");
-        if (File.Exists(localPath))
-        {
-            var sheet = SpriteSheet.Decode(await File.ReadAllBytesAsync(localPath, ct), slug);
-            if (sheet is not null) _sheetCache[slug] = sheet;
-            return sheet;
-        }
+        var local = await LoadLocalAsync(slug, ct);
+        if (local is not null) return local;
 
         try
         {
@@ -65,15 +87,23 @@ public sealed class SpriteLoader
                 return null;
             }
             var bytes = await _http.GetByteArrayAsync(url, ct);
-            await File.WriteAllBytesAsync(localPath, bytes, ct);
+            await File.WriteAllBytesAsync(Path.Combine(_spritesDir, $"{slug}.png"), bytes, ct);
             var sheet = SpriteSheet.Decode(bytes, slug);
-            if (sheet is not null) _sheetCache[slug] = sheet;
+            if (sheet is not null) Cache(sheet, slug);
             return sheet;
         }
         catch (Exception ex)
         {
             Log($"sprite download failed for {slug}: {ex.GetType().Name}: {ex.Message}");
             return null; // 网络失败 → 占位回退
+        }
+    }
+
+    private void Cache(SpriteSheet sheet, string slug)
+    {
+        lock (_cacheLock)
+        {
+            _sheetCache[slug] = sheet;
         }
     }
 

@@ -20,14 +20,70 @@ public sealed record IdlePlaylistOptions(IReadOnlyList<int> Clips, double Interv
 public sealed class PetRenderer
 {
     private readonly SpriteSheet _sheet;
-    private readonly IdlePlaylistOptions? _idle;
+    private IdlePlaylistOptions? _idle;   // 可变：完整替换（设置页即时生效）
     private int _row;                 // 情绪行（setState）
-    private int? _overrideRow;        // 漫游/交互覆盖行（setRow/clearRow）
+    private int? _overrideRow;        // 临时动作覆盖行（owner + 优先级仲裁）
+    private string? _overrideOwner;
+    private int _overridePriority;
     private int? _idleRow;            // idle playlist 当前行
     private int _idleIndex;
     private int _frame;
     private double _fps = 3;
     private int _lastDrawnRow = -1;
+
+    /// <summary>精灵缩放百分比（设置页 70-130%，1.0 = 填满缓冲）。</summary>
+    private double _sizePercent = 1.0;
+    /// <summary>待机浮动（bob）：独立相位计数器，行切换不跳变。</summary>
+    private bool _bobEnabled;
+    private int _bobPhase;
+
+    /// <summary>设置精灵尺寸百分比（0.7-1.3，越界钳制）。</summary>
+    public void SetSizePercent(double percent) => _sizePercent = Math.Clamp(percent, 0.7, 1.3);
+
+    /// <summary>开关待机上下浮动（设置页 ap_fx）。</summary>
+    public void SetBob(bool enabled) => _bobEnabled = enabled;
+
+    /// <summary>动作覆盖优先级（高者持有；拖拽 > 庆祝 > 点击 > 漫游 > 待机）。</summary>
+    public const int PriorityRoam = 2;
+    public const int PriorityClick = 3;
+    public const int PriorityDrag = 4;
+
+    public int ClipCount => _sheet.Clips.Count;
+
+    /// <summary>当前播放列表的轮播间隔（毫秒）；无播放列表 → null（窗口计时的唯一来源）。</summary>
+    public double? IdleIntervalMs => _idle?.IntervalMs;
+
+    /// <summary>idle 播放列表激活中（窗口驱动轮播节奏时用）。</summary>
+    public bool IsIdleCycling => _idle is { Clips.Count: > 0 } && _idleRow is not null;
+
+    /// <summary>
+    /// 完整替换 idle 播放列表（设置页即时生效，无需重建渲染器）：
+    /// null/空列表 → 关闭轮播并回 idle 行首帧；从关闭启用 → 立即开始；
+    /// clip 集变化 → 校验/去重后重置索引（当前行失效时回第一项）。
+    /// </summary>
+    public void SetIdlePlaylist(IdlePlaylistOptions? options)
+    {
+        var clips = options?.Clips
+            .Where(clip => clip >= 0 && clip < _sheet.Clips.Count)
+            .Distinct()
+            .ToList();
+        if (clips is not { Count: > 0 })
+        {
+            var wasActive = _idle is not null;
+            _idle = null;
+            StopIdleCycling();
+            if (wasActive) _frame = 0;
+            return;
+        }
+
+        _idle = options! with { Clips = clips };
+        if (_idleRow is null || !clips.Contains(_idleRow.Value))
+        {
+            _idleIndex = 0;
+            _idleRow = clips[0];
+            _frame = 0;
+        }
+    }
 
     public double Fps => _fps;
     public int ActiveRow => _overrideRow ?? _idleRow ?? _row;
@@ -57,18 +113,45 @@ public sealed class PetRenderer
         else StopIdleCycling();
     }
 
-    /// <summary>漫游行覆盖（setRow/clearRow，优先级高于 mood 行但低于 idle playlist 之外）。</summary>
-    public void SetRow(int row)
+    /// <summary>漫游行覆盖（无 owner 版本 = 最高优先级，兼容现有调用/测试）。</summary>
+    public void SetRow(int row) => SetRow(row, owner: null, priority: int.MaxValue);
+
+    /// <summary>
+    /// 带 owner 的动作覆盖：低优先级无法覆盖高优先级持有者；
+    /// 清除只允许同一 owner（避免点击/拖拽/漫游互相误清）。
+    /// </summary>
+    public void SetRow(int row, string? owner, int priority)
     {
-        if (_overrideRow != row) { _overrideRow = row; _frame = 0; }
+        if (_overrideOwner is not null && owner is not null && priority < _overridePriority) return;
+        if (_overrideRow != row || _overrideOwner != owner)
+        {
+            _overrideRow = row;
+            _overrideOwner = owner;
+            _overridePriority = priority;
+            _frame = 0;
+        }
     }
 
-    public void ClearRow()
+    public void ClearRow() => ClearRow(owner: null);
+
+    /// <summary>按 owner 清除覆盖；owner 为 null 时清除任意持有者（兼容旧语义）。</summary>
+    public void ClearRow(string? owner)
     {
-        if (_overrideRow is not null) { _overrideRow = null; _frame = 0; }
+        if (owner is not null && _overrideOwner is not null && _overrideOwner != owner) return;
+        if (_overrideRow is not null)
+        {
+            _overrideRow = null;
+            _overrideOwner = null;
+            _overridePriority = 0;
+            _frame = 0;
+        }
     }
 
-    public void AdvanceFrame() => _frame++;
+    public void AdvanceFrame()
+    {
+        _frame++;
+        _bobPhase++;
+    }
 
     /// <summary>推进 idle playlist（对齐 advanceIdleClip）；无 playlist 时不动。</summary>
     public void AdvanceIdleClip()
@@ -106,42 +189,65 @@ public sealed class PetRenderer
     }
 
     /// <summary>
+    /// Calculates the current frame placement without writing a pixel buffer. Presentation
+    /// layers use this to preserve sprite bounds, bubble anchors, and alpha hit testing.
+    /// </summary>
+    public SpriteFrame? PrepareFrame(int bufferWidth, int bufferHeight)
+    {
+        var activeRow = ActiveRow;
+        if (activeRow != _lastDrawnRow)
+        {
+            _lastDrawnRow = activeRow;
+            _frame = 0;
+        }
+
+        var frame = CurrentFrame();
+        if (frame is null) return null;
+
+        var rowIndex = Math.Min(activeRow, _sheet.Clips.Count - 1);
+        var scaleWidth = _sheet.ClipMaxWidths[rowIndex] > 0 ? _sheet.ClipMaxWidths[rowIndex] : frame.Width;
+        var fit = Math.Min((double)bufferWidth / scaleWidth, (double)bufferHeight / frame.Height) * _sizePercent;
+        var scale = fit >= 1 ? Math.Floor(fit) : fit;
+        _lastScale = scale;
+        var width = (int)(frame.Width * scale);
+        var height = (int)(frame.Height * scale);
+        // 待机浮动：以地面为轴向上 0-6px 正弦（不穿底），相位独立于行切换
+        var bobY = _bobEnabled ? (int)((Math.Sin(_bobPhase * 0.35) * 0.5 + 0.5) * -6) : 0;
+        Headroom = (bufferHeight - height) / (double)bufferHeight;
+        SpriteRect = ((bufferWidth - width) / 2, bufferHeight - height + bobY, width, height);
+        return frame;
+    }
+
+    /// <summary>
     /// 绘制一帧到帧缓冲：anchored bottom-center + 整数缩放；缩放来自该行最宽帧
     /// （per-CLIP，帧间同尺寸，气泡不跳动，对齐 pet.ts draw()）。行切换时帧号归零。
     /// </summary>
     public void DrawFrame(byte[] buffer, int bufferWidth, int bufferHeight)
     {
-        var activeRow = ActiveRow;
-        if (activeRow != _lastDrawnRow) { _lastDrawnRow = activeRow; _frame = 0; }
-
-        var frame = CurrentFrame();
+        var frame = PrepareFrame(bufferWidth, bufferHeight);
         if (frame is null) return;
 
-        var rowIndex = Math.Min(activeRow, _sheet.Clips.Count - 1);
-        var scaleW = _sheet.ClipMaxWidths[rowIndex] > 0 ? _sheet.ClipMaxWidths[rowIndex] : frame.Width;
-
-        var fit = Math.Min((double)bufferWidth / scaleW, (double)bufferHeight / frame.Height);
-        var scale = fit >= 1 ? Math.Floor(fit) : fit;
-        _lastScale = scale;
-        var dw = (int)(frame.Width * scale);
-        var dh = (int)(frame.Height * scale);
-        Headroom = (bufferHeight - dh) / (double)bufferHeight;
-        var dx = (bufferWidth - dw) / 2;
-        var dy = bufferHeight - dh;
-        SpriteRect = (dx, dy, dw, dh);
-
+        var (dx, dy, _, _) = SpriteRect;
+        var scale = _lastScale;
         for (var fy = 0; fy < frame.Height; fy++)
         {
             for (var fx = 0; fx < frame.Width; fx++)
             {
                 var src = (fy * frame.Width + fx) * 4;
                 if (frame.Rgba[src + 3] == 0) continue;
+                var dstX = dx + (int)(fx * scale);
+                var dstY = dy + (int)(fy * scale);
+                // 边界裁剪：130% 尺寸等溢出场景（负 Y/右侧越界）不能写穿缓冲
+                if (dstY >= bufferHeight || dstX >= bufferWidth) continue;
                 for (var sy = 0; sy < scale; sy++)
                 {
-                    var y = dy + (int)(fy * scale) + sy;
+                    var y = dstY + sy;
+                    if (y < 0 || y >= bufferHeight) continue;
                     for (var sx = 0; sx < scale; sx++)
                     {
-                        var dst = (y * bufferWidth + dx + (int)(fx * scale) + sx) * 4;
+                        var x = dstX + sx;
+                        if (x < 0 || x >= bufferWidth) continue;
+                        var dst = (y * bufferWidth + x) * 4;
                         buffer[dst] = frame.Rgba[src];
                         buffer[dst + 1] = frame.Rgba[src + 1];
                         buffer[dst + 2] = frame.Rgba[src + 2];

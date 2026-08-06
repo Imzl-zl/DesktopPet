@@ -114,6 +114,8 @@ public sealed class AiCoordinator : IDisposable
         _interaction.UpdateFrequency(settings.Ai.InteractionFrequency);
         _interaction.UpdateScreenAwareness(settings.Ai.ScreenAwareness);
         _chatWindow.TtsEnabled = settings.Ai.TtsEnabled; // 语音开关同步到对话窗按钮
+        // 屏幕上下文：设置页 AI 开关 = 持久默认值；对话窗按钮只切换本次会话（与 TtsEnabled 同模式）
+        _chatWindow.ScreenContextEnabled = settings.Ai.ScreenContextEnabled;
         _modeService.SetMode(settings.Ai.OutputMode switch
         {
             "danmaku" => OutputMode.Danmaku,
@@ -536,10 +538,11 @@ public sealed class AiCoordinator : IDisposable
         {
             var tasks = speakers.Select(petId => GenerateInteractionLineAsync(petId, trigger));
             var lines = await Task.WhenAll(tasks); // 并行独立请求：一次等待而非 N 倍延迟
-            foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
+            foreach (var line in lines)
             {
+                if (string.IsNullOrWhiteSpace(line)) continue;
                 DebugLog($"[p6] route output: {line[..Math.Min(20, line.Length)]}");
-                OnUiThread(() => _modeService.RouteOutput(new AiOutput(line!, FromAnalysis: true)));
+                OnUiThread(() => _modeService.RouteOutput(new AiOutput(line, FromAnalysis: true)));
             }
         });
     }

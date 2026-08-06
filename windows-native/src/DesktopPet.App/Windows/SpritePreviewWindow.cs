@@ -28,7 +28,7 @@ public sealed class SpritePreviewWindow : Window
         Height = 480;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ResizeMode = ResizeMode.NoResize;
-        Background = new SolidColorBrush(Color.FromRgb(0xF7, 0xF8, 0xFA));
+        Background = (Brush)Application.Current.FindResource("WindowBgBrush");
 
         var root = new StackPanel { Margin = new Thickness(16) };
 
@@ -101,7 +101,14 @@ public sealed class SpritePreviewWindow : Window
         };
         var cancel = new Button { Content = "取消", Width = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(4) };
         cancel.Click += (_, _) => { DialogResult = false; };
-        var confirm = new Button { Content = "导入此宠物", Width = 110, Padding = new Thickness(4), IsDefault = true };
+        var confirm = new Button
+        {
+            Content = "导入此宠物",
+            Width = 110,
+            Padding = new Thickness(4),
+            IsDefault = true,
+            Style = (Style)Application.Current.FindResource("ButtonPrimaryStyle"),
+        };
         confirm.Click += (_, _) => { DialogResult = true; };
         buttons.Children.Add(cancel);
         buttons.Children.Add(confirm);

@@ -139,4 +139,156 @@ public class PetStoreTests
         Assert.Equal(Pause.DefaultWanderPauseMinMs, store.Instances[0].WanderPauseMinMs);
         Assert.Equal(Pause.DefaultWanderPauseMaxMs, store.Instances[0].WanderPauseMaxMs);
     }
+
+    [Fact]
+    public void Actions_RoundTripsThroughParseAndSerialize()
+    {
+        var actions = new PetAnimationSettings(
+            IdleEnabled: true,
+            IdleClips: [0, 2, 1],
+            IdleMode: "sequential",
+            IdleIntervalSeconds: 10,
+            ClickDurationSeconds: 7,
+            CelebrateDurationSeconds: 9,
+            Bind: new Dictionary<string, int>
+            {
+                [PetActionTriggers.Click] = 3,
+                [PetActionTriggers.Celebrate] = 4,
+                [PetActionTriggers.Drag] = 7,
+            });
+        var store = PetStoreModel.CreatePetInstance(
+            PetStoreModel.EmptyPetStore(),
+            Pet("pet-a", "cat", "Miso") with { Actions = actions });
+
+        var json = JsonSerializer.Serialize(store, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        });
+        using var doc = JsonDocument.Parse(json);
+        var parsed = PetStoreModel.ParsePetStore(doc.RootElement);
+
+        Assert.NotNull(parsed);
+        var roundTripped = parsed.Instances[0].Actions;
+        Assert.NotNull(roundTripped);
+        Assert.True(roundTripped.IdleEnabled);
+        Assert.Equal([0, 2, 1], roundTripped.IdleClips);
+        Assert.Equal("sequential", roundTripped.IdleMode);
+        Assert.Equal(10, roundTripped.IdleIntervalSeconds);
+        Assert.Equal(7, roundTripped.ClickDurationSeconds);
+        Assert.Equal(9, roundTripped.CelebrateDurationSeconds);
+        Assert.Equal(3, roundTripped.Bind[PetActionTriggers.Click]);
+        Assert.Equal(4, roundTripped.Bind[PetActionTriggers.Celebrate]);
+        Assert.Equal(7, roundTripped.Bind[PetActionTriggers.Drag]);
+    }
+
+    [Fact]
+    public void Actions_MissingInLegacyJson_IsNullAndDefaultsApply()
+    {
+        var legacyJson = """
+            {"version":1,"selectedId":"miso","instances":[
+              {"id":"miso","name":"Miso","spriteSlug":"cat"}
+            ]}
+            """;
+        using var doc = JsonDocument.Parse(legacyJson);
+        var store = PetStoreModel.ParsePetStore(doc.RootElement);
+
+        Assert.Null(store!.Instances[0].Actions);
+        // 解析器默认策略：全 clip 随机 5s（素材 9 行时）
+        var idle = PetAnimationResolver.ResolveIdle(null, 9);
+        Assert.Equal(9, idle!.Clips.Count);
+        Assert.Equal(5000, idle.IntervalMs);
+        Assert.Equal(3, PetAnimationResolver.ResolveBind(null, PetActionTriggers.Click, 9));
+        // 时长默认：点击 2s / 庆祝 3s
+        Assert.Equal(2000, PetAnimationResolver.ResolveClickDurationMs(null));
+        Assert.Equal(3000, PetAnimationResolver.ResolveCelebrateDurationMs(null));
+    }
+
+    [Fact]
+    public void Actions_WithPartialJson_MissingDurationsFallBackToDefaults()
+    {
+        // 上一会话后的旧 JSON：有 actions 但无时长字段 → 缺省回退默认（2s/3s），不破坏旧文件
+        var json = """
+            {"version":1,"instances":[
+              {"id":"a","name":"A","spriteSlug":"cat","actions":{
+                "idleEnabled":true,"idleClips":[0,1],"idleMode":"random",
+                "idleIntervalSeconds":10,"bind":{"click":3}}}
+            ]}
+            """;
+        using var doc = JsonDocument.Parse(json);
+        var store = PetStoreModel.ParsePetStore(doc.RootElement);
+
+        var actions = store!.Instances[0].Actions;
+        Assert.NotNull(actions);
+        Assert.Equal(PetAnimationResolver.DefaultClickDurationSeconds, actions.ClickDurationSeconds);
+        Assert.Equal(PetAnimationResolver.DefaultCelebrateDurationSeconds, actions.CelebrateDurationSeconds);
+        Assert.Equal(2000, PetAnimationResolver.ResolveClickDurationMs(actions));
+        Assert.Equal(3000, PetAnimationResolver.ResolveCelebrateDurationMs(actions));
+    }
+
+    [Fact]
+    public void Actions_PatchUpdatesOnlyTargetInstance()
+    {
+        var store = PetStoreModel.EmptyPetStore();
+        store = PetStoreModel.CreatePetInstance(store, Pet("miso", "cat", "Miso"));
+        store = PetStoreModel.CreatePetInstance(store, Pet("nori", "cat", "Nori"));
+
+        var actions = new PetAnimationSettings(
+            IdleEnabled: false,
+            IdleClips: [],
+            IdleMode: "random",
+            IdleIntervalSeconds: 5,
+            ClickDurationSeconds: 2,
+            CelebrateDurationSeconds: 3,
+            Bind: new Dictionary<string, int> { [PetActionTriggers.Click] = 2 });
+        store = PetStoreModel.UpdatePetInstance(store, "miso", new PetInstancePatch { Actions = actions });
+
+        var updated = store.Instances[0].Actions;
+        Assert.NotNull(updated);
+        Assert.False(updated.IdleEnabled);
+        Assert.Empty(updated.IdleClips);
+        Assert.Equal("random", updated.IdleMode);
+        Assert.Equal(5, updated.IdleIntervalSeconds);
+        Assert.Equal(2, updated.Bind[PetActionTriggers.Click]);
+        Assert.Null(store.Instances[1].Actions);
+    }
+
+    [Fact]
+    public void Actions_InvalidJsonFields_AreSanitizedNotDropped()
+    {
+        var raw = JsonSerializer.Deserialize<JsonElement>("""
+            {
+              "version": 1,
+              "selectedId": "miso",
+              "instances": [
+                {
+                  "id": "miso",
+                  "name": "Miso",
+                  "spriteSlug": "cat",
+                  "actions": {
+                    "idleEnabled": true,
+                    "idleClips": [0, 1, -5, 99],
+                    "idleMode": "weird",
+                    "idleIntervalSeconds": 1000,
+                    "bind": { "click": -1, "drag": 4 }
+                  }
+                }
+              ]
+            }
+            """);
+
+        var store = PetStoreModel.ParsePetStore(raw);
+
+        Assert.NotNull(store);
+        var actions = store.Instances[0].Actions;
+        Assert.NotNull(actions);
+        // Normalize 只清洗负数；越界索引由解析器按 clipCount 过滤
+        Assert.Equal([0, 1, 99], actions.IdleClips);
+        Assert.Equal("random", actions.IdleMode);
+        Assert.Equal(60, actions.IdleIntervalSeconds);
+        Assert.False(actions.Bind.ContainsKey(PetActionTriggers.Click));
+        Assert.Equal(4, actions.Bind[PetActionTriggers.Drag]);
+        // 解析器按实际 clip 数过滤越界项
+        var idle = PetAnimationResolver.ResolveIdle(actions, 3);
+        Assert.Equal([0, 1], idle!.Clips);
+    }
 }

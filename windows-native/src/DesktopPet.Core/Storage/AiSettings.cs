@@ -31,6 +31,7 @@ public sealed record AiSettings(
     bool SummaryImage,          // 总结图开关（默认关——云端费用+隐私，显式开启）
     bool TtsEnabled,            // 语音朗读开关（默认关；仅对话模式朗读，弹幕不朗读）
     bool AllReply,              // 多宠物全员回应（默认关；开 = 同一事件每只宠物都生成）
+    int ScreenAnalysisIntervalSeconds = 5, // 截屏分析间隔 3-30s（隐私/云端费用敏感，默认 5）
     bool Onboarded = false)     // 初始化引导已完成（称呼+人格首次设置；开启 AI 后弹引导窗）
 {
     public const string FrequencyLow = "low";
@@ -86,6 +87,7 @@ public sealed record AiSettings(
             raw.SummaryImage,
             raw.TtsEnabled,
             raw.AllReply,
+            Math.Clamp(raw.ScreenAnalysisIntervalSeconds, 3, 30),
             raw.Onboarded);
     }
 }
@@ -117,6 +119,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         var ttsEnabled = defaults.TtsEnabled;
         var allReply = defaults.AllReply;
         var onboarded = defaults.Onboarded;
+        var screenAnalysisIntervalSeconds = defaults.ScreenAnalysisIntervalSeconds;
 
         var camel = options.PropertyNamingPolicy ?? JsonNamingPolicy.CamelCase;
         while (reader.Read())
@@ -142,6 +145,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
                 case "summaryImage": summaryImage = ReadBool(ref reader); break;
                 case "ttsEnabled": ttsEnabled = ReadBool(ref reader); break;
                 case "allReply": allReply = ReadBool(ref reader); break;
+                case "screenAnalysisIntervalSeconds": screenAnalysisIntervalSeconds = ReadInt(ref reader) ?? defaults.ScreenAnalysisIntervalSeconds; break;
                 case "onboarded": onboarded = ReadBool(ref reader); break;
                 default: reader.Skip(); break; // 未知字段容忍（前向兼容）
             }
@@ -150,7 +154,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         return new AiSettings(
             enabled, screenAnalysis, outputMode, screenContextEnabled, providerId,
             memoryEnabled, activeInteraction, interactionFrequency, screenAwareness,
-            intimacyEnabled, dailySummary, summaryImage, ttsEnabled, allReply, onboarded);
+            intimacyEnabled, dailySummary, summaryImage, ttsEnabled, allReply, screenAnalysisIntervalSeconds, onboarded);
     }
 
     public override void Write(Utf8JsonWriter writer, AiSettings value, JsonSerializerOptions options)
@@ -185,6 +189,8 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         JsonSerializer.Serialize(writer, value.TtsEnabled, options);
         writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("AllReply") ?? "allReply");
         JsonSerializer.Serialize(writer, value.AllReply, options);
+        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("ScreenAnalysisIntervalSeconds") ?? "screenAnalysisIntervalSeconds");
+        JsonSerializer.Serialize(writer, value.ScreenAnalysisIntervalSeconds, options);
         writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("Onboarded") ?? "onboarded");
         JsonSerializer.Serialize(writer, value.Onboarded, options);
         writer.WriteEndObject();
@@ -200,4 +206,9 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
             ? reader.GetString()
             : reader.TokenType == JsonTokenType.Null ? null
             : throw new JsonException("AiSettings 字符串字段解析失败");
+
+    private static int? ReadInt(ref Utf8JsonReader reader)
+        => reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var value)
+            ? value
+            : throw new JsonException("AiSettings 整数字段解析失败");
 }

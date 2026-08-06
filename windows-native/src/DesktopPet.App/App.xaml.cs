@@ -58,22 +58,32 @@ public partial class App : Application
 
         if (!isBench)
         {
-            var i18n = new DesktopPet.Core.I18n.I18nService(DesktopPet.Core.I18n.I18nService.Detect());
+            // 语言优先读已保存设置（设置页语言页）；首次启动才用系统检测
+            var storedSettings = _store.LoadSettings();
+            var i18n = new DesktopPet.Core.I18n.I18nService(
+                storedSettings?.Lang ?? DesktopPet.Core.I18n.I18nService.Detect());
             _manager.SetI18n(i18n);
-            var settings = _store.LoadSettings() ?? AppSettings.Defaults(i18n.Lang);
+            var settings = AppSettings.Normalize(storedSettings ?? AppSettings.Defaults(i18n.Lang));
             _manager.ApplySettings(settings);
             _manager.CreateFloatingBall(dataDir);
             _tray = new TrayController(_manager);
 
             // Phase 5：AI 编排（总开关/Agent 进程/输出模式/对话/记账）
-            _chatWindow = new ChatWindow();
+            var chatWindow = new ChatWindow();
+            _chatWindow = chatWindow;
+            chatWindow.IsVisibleChanged += (_, _) =>
+                _manager?.SetChatVisible(chatWindow.IsVisible && chatWindow.WindowState != WindowState.Minimized);
+            chatWindow.StateChanged += (_, _) =>
+                _manager?.SetChatVisible(chatWindow.IsVisible && chatWindow.WindowState != WindowState.Minimized);
+            _manager.SettingsForegroundChanged += settingsForeground =>
+                chatWindow.Topmost = !settingsForeground;
             _modeService = new ModeService(
                 danmakuFactory: () => new DanmakuWindow(
                     SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight),
                 routeToChat: output =>
                 {
-                    if (!_chatWindow.IsVisible) _chatWindow.Show();
-                    _chatWindow.AppendAssistantAsync(output.Text);
+                    ShowChatWindow();
+                    _chatWindow?.AppendAssistantAsync(output.Text);
                 },
                 routeToBubble: text => _manager.BroadcastQuickBubble(text)); // 宠物头上气泡（全员）
             _ai = new AiCoordinator(_store, _modeService, _chatWindow, RecordTokens, ResolveAgentHostPath());
@@ -90,11 +100,7 @@ public partial class App : Application
             _chatWindow.RestartRequested += () => _ai?.ClearChatHistory(); // 重开 = 清 L1 会话窗口
             _manager.SetAiCoordinator(_ai);
             _manager.SetOutputModeHandler(ApplyOutputModeFromBall);
-            _manager.SetOpenChatHandler(() =>
-            {
-                if (!_chatWindow.IsVisible) _chatWindow.Show();
-                _chatWindow.Activate();
-            });
+            _manager.SetOpenChatHandler(ShowChatWindow);
             _ai.ApplySettings(settings); // 应用已保存 AI 设置（默认关 = 不起 Agent）
             _chatWindow.TtsEnabled = settings.Ai.TtsEnabled; // 朗读按钮初始状态（AI 助手页开关）
             RegisterGlobalHotkeys(); // Phase 6h：Ctrl+Alt+H/M/S/Q
@@ -108,6 +114,11 @@ public partial class App : Application
             if (e.Args.Contains("--settings"))
             {
                 _manager.OpenSettings();
+            }
+
+            if (e.Args.Contains("--chat"))
+            {
+                ShowChatWindow();
             }
         }
 
@@ -204,9 +215,10 @@ public partial class App : Application
     private void ShowWelcomeOnboarding()
     {
         var ai = _ai;
-        if (ai is null) return;
+        var store = _store;
+        if (ai is null || store is null) return;
         var personas = ai.Personas;
-        var profile = _store.LoadMemoryProfile()
+        var profile = store.LoadMemoryProfile()
             ?? new DesktopPet.Core.Memory.UserProfile("", [], "", "");
         Dispatcher.BeginInvoke(() =>
         {
@@ -234,6 +246,23 @@ public partial class App : Application
             ?? AppSettings.Defaults(DesktopPet.Core.I18n.I18nService.Detect()));
         _ai.ApplySettings(settings with { Ai = settings.Ai with { OutputMode = mode } });
         _store.SaveSettings(settings with { Ai = settings.Ai with { OutputMode = mode } });
+    }
+
+    private void ShowChatWindow()
+    {
+        var chatWindow = _chatWindow;
+        if (chatWindow is null) return;
+
+        _manager?.SetChatVisible(true);
+        var settingsForeground = _manager?.IsSettingsForeground == true;
+        if (!chatWindow.IsVisible) chatWindow.Show();
+        chatWindow.Topmost = !settingsForeground;
+        if (settingsForeground)
+        {
+            _manager?.OpenSettings();
+            return;
+        }
+        chatWindow.Activate();
     }
 
     /// <summary>token 记账 → CareEngine（Phase 3 token 经济学：5000 token = 1 XP）。

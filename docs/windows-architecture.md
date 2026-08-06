@@ -184,8 +184,9 @@ public interface IImageProvider {
 
 | 方面 | 方法 | 依据/继承 |
 |---|---|---|
-| **精灵渲染** | `WriteableBitmap` 直写 + 每帧 `BitmapSource` 缓存（切片时预裁好）+ alpha 掩码缓存（O(1) hitTest） | 优于 TS 版每帧裁剪 |
-| **帧率自适应** | 无交互时按动画行 fps（现状 TS 版 idle = 3fps）；有动画/拖拽/弹幕时 60fps；完全静止时**停掉渲染循环**（`CompositionTarget.Rendering` 取消订阅，CPU 归零） | 继承 `pet.ts` fps=3 |
+| **精灵渲染** | 普通精灵帧使用冻结 `BitmapSource` LRU 缓存；alpha 掩码缓存（O(1) hitTest）；仅动态成长叠加使用 `WriteableBitmap` | 避免每帧 CPU 放大和 RGBA/BGRA 整表面复制，同时保留动态效果 |
+| **透明 presenter** | WPF layered presenter 用于兼容；高频透明桌宠演进至 `WS_EX_NOREDIRECTIONBITMAP` + `Windows.UI.Composition.DesktopWindowTarget` | WDDM 下 WPF layered window 可硬件加速，但 WPF 与 Visual Layer 不能跨 airspace 共享内容 |
+| **帧率语义** | 按动画状态机定义的 fps 播放；完全静止时停掉渲染循环；性能验收记录 p95 间隔和拖拽延迟 | 不降低既有动画或漫游频率换取 CPU 数字 |
 | **弹幕层** | Win2D GPU 合成；文本对象池（滚动条目不反复创建）；DWrite 布局缓存（同文案不重排） | §6.5 |
 | **内存** | 位图缓存 LRU 上限（如 32MB）；宠物实例卸载时释放帧缓存；设置页缩略图按需加载 | — |
 | **截屏** | 缩略图 320×180 灰度哈希变化检测（1fps 成本极低）；云端调用限频（≥5s/次） | §6.4 |

@@ -77,6 +77,69 @@ public class RoamModesTests
     }
 
     [Fact]
+    public void Climb_EdgePause_UsesInstancePauseRange()
+    {
+        // 停顿时长必须跟随漫游页「移动停顿」滑块（WanderPause*），而不是硬编码常量。
+        var clock = new FakeRoamClock();
+        var modes = Modes(clock, new SequenceRandom().Steady(0.5),
+            () => RoamTestData.Config(RoamMode.Climb, pauseMin: 9000, pauseMax: 9000));
+        var pet = new FakeRoamPet();
+        var pos = new RoamPoint(700, 400 - RoamConstants.WinH); // 站在窗口顶中部
+        var restStart = 0L;
+
+        // 向右踱步到窗口边缘（support right = min(1400-260, 1000-130) = 870）
+        for (var tick = 0; tick < 120; tick++)
+        {
+            clock.Now += RoamConstants.TickMs;
+            var next = modes.RunMode(RoamMode.Climb, RoamTestData.Environment, pos, pet);
+            if (next == pos) { restStart = clock.Now; break; } // 到达边缘，开始按实例 pauseRange 休息
+            pos = next;
+        }
+        Assert.InRange(pos.X, 860, 870); // 到达 support 右缘附近（onEdge 只翻转方向+休息，不拉位置）
+        Assert.True(restStart > 0, "must reach the edge and start pausing");
+
+        // 休息中：位置不变（restUntil = restStart + 9000）
+        clock.Now = restStart + 8999;
+        Assert.Equal(pos, modes.RunMode(RoamMode.Climb, RoamTestData.Environment, pos, pet));
+
+        // 休息结束：恢复踱步（方向翻转向左）
+        clock.Now = restStart + 9001;
+        var resumed = modes.RunMode(RoamMode.Climb, RoamTestData.Environment, pos, pet);
+        Assert.True(resumed.X < pos.X, "must resume pacing after the instance pause range");
+    }
+
+    [Fact]
+    public void Climb_FallbackWander_RestsWithInstancePauseRange()
+    {
+        // 无窗口可爬 → 回退自由漫步，停顿同样必须跟随实例 pauseRange（上游缺陷：
+        // fallback 每次调用重置 restUntil，导致回退模式永不休息）。
+        var clock = new FakeRoamClock();
+        var random = new SequenceRandom().Once(0.5, 0.5).Steady(0.3); // 首次 target (570, 340)，休息后新 target (358, 220)
+        var modes = Modes(clock, random,
+            () => RoamTestData.Config(RoamMode.Climb, pauseMin: 9000, pauseMax: 9000));
+        var env = RoamTestData.Environment with { Windows = [] };
+        var pos = new RoamPoint(40, 40);
+        var pet = new FakeRoamPet();
+
+        modes.RunMode(RoamMode.Stay, env, pos, pet); // 重置模块状态
+        var restStart = 0L;
+        for (var tick = 0; tick < 300; tick++)
+        {
+            clock.Now += RoamConstants.TickMs;
+            var next = modes.RunMode(RoamMode.Climb, env, pos, pet);
+            if (next == pos) { restStart = clock.Now; break; } // 到达目标开始休息
+            pos = next;
+        }
+        Assert.True(restStart > 0, "must reach a target and start resting");
+
+        clock.Now = restStart + 8999;
+        Assert.Equal(pos, modes.RunMode(RoamMode.Climb, env, pos, pet));
+
+        clock.Now = restStart + 9001;
+        Assert.NotEqual(pos, modes.RunMode(RoamMode.Climb, env, pos, pet));
+    }
+
+    [Fact]
     public void Wander_UsesInstancePauseRange_AfterReachingTarget()
     {
         var clock = new FakeRoamClock();
@@ -119,7 +182,7 @@ public class RoamModesTests
         // 走到窗口边缘：y 到达屏顶（climbTopY = 0）
         for (var i = 0; i < 300; i++)
         {
-            clock.Now = t0 + i * 30;
+            clock.Now = t0 + i * RoamConstants.TickMs;
             pos = modes.RunMode(RoamMode.Climb, desktop, pos, pet);
             if (pos.Y < 10) break;
         }
@@ -129,7 +192,7 @@ public class RoamModesTests
         var xs = new HashSet<double>();
         for (var i = 0; i < 600; i++)
         {
-            clock.Now = t0 + (300 + i) * 30;
+            clock.Now = t0 + (300 + i) * RoamConstants.TickMs;
             pos = modes.RunMode(RoamMode.Climb, desktop, pos, pet);
             if (pos.Y > 10) break;
             xs.Add(Math.Round(pos.X));

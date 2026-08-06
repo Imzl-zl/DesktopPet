@@ -24,7 +24,7 @@ public static class AgentConfigBuilder
             ProviderModel: provider?.ModelName,
             ProviderApiKeyRef: string.IsNullOrEmpty(provider?.ApiKeyRef) ? null : provider.ApiKeyRef,
             ProviderReasoningEffort: provider?.ReasoningEffort,
-            MinAnalysisIntervalSeconds: 5);
+            MinAnalysisIntervalSeconds: Math.Clamp(settings.Ai.ScreenAnalysisIntervalSeconds, 3, 30));
     }
 
     /// <summary>选中 id 匹配优先，否则取第一个；无配置 → null（Agent 只做变化检测）。</summary>

@@ -20,7 +20,7 @@ public class RoamFuzzTests
         return new SystemWindowInfo($"W{i}", new RoamRect(left, top, left + w, top + h));
     }
 
-    /// <summary>mode 级 fuzz（fuzz.test.ts）：900 ticks @30ms，静止 >280 ticks 判定卡死。</summary>
+    /// <summary>mode 级 fuzz：900 ticks @RoamConstants.TickMs，静止 >280 ticks 判定卡死。</summary>
     private static bool SimulateModes(RoamEnvironment env, RoamPoint start, FakeRoamClock clock, Func<double> random)
     {
         var pet = new FakeRoamPet();
@@ -32,7 +32,7 @@ public class RoamFuzzTests
         var t0 = clock.Now;
         for (var i = 0; i < 900; i++)
         {
-            clock.Now = t0 + i * 30;
+            clock.Now = t0 + i * RoamConstants.TickMs;
             var next = modes.RunMode(RoamMode.Climb, env, pos, pet);
             var moved = next.X != pos.X || next.Y != pos.Y;
             stallRun = moved ? 0 : stallRun + 1;
@@ -54,7 +54,7 @@ public class RoamFuzzTests
         var t0 = clock.Now;
         for (var i = 0; i < 900; i++)
         {
-            clock.Now = t0 + i * (stallRun > 0 ? 200 : 30);
+            clock.Now = t0 + i * (stallRun > 0 ? RoamEngine.IdleTickMs : RoamConstants.TickMs);
             var next = modes.RunMode(RoamMode.Climb, env, pos, pet);
             var clamped = RoamConfigOps.ClampToBounds(next, env.WorkArea);
             var moved = Math.Abs(clamped.X - pos.X) >= 0.5 || Math.Abs(clamped.Y - pos.Y) >= 0.5;

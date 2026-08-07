@@ -13,16 +13,15 @@ public sealed record StageAppearance(
 
 public static class StageAppearances
 {
-    public static readonly string[] Colors = [null!, "mint", "sky", "gold", "gold"];
-
-    /// <summary>阶段视觉表现（对齐 §3.7 表格：Hatchling 朴素 → Legend 皇冠金辉光）。</summary>
+    /// <summary>阶段视觉表现（对齐 §3.7 表格：Hatchling 朴素 → Legend 皇冠金辉光）。
+    /// 阶段名单一真值在 CareEngine.StageNames，此处只负责视觉映射。</summary>
     public static StageAppearance For(int stageIndex) => stageIndex switch
     {
-        0 => new(0, "Hatchling", GlowUnder: false, GlowOutline: false, Crown: false, StarParticles: false, null, 0),
-        1 => new(1, "Companion", GlowUnder: true, GlowOutline: false, Crown: false, StarParticles: false, "mint", 0),
-        2 => new(2, "Scout", GlowUnder: true, GlowOutline: true, Crown: false, StarParticles: false, "sky", 1),
-        3 => new(3, "Hero", GlowUnder: true, GlowOutline: true, Crown: false, StarParticles: true, "gold", 1),
-        _ => new(4, "Legend", GlowUnder: true, GlowOutline: true, Crown: true, StarParticles: true, "gold", 2),
+        0 => new(0, CareEngine.StageNames[0], GlowUnder: false, GlowOutline: false, Crown: false, StarParticles: false, null, 0),
+        1 => new(1, CareEngine.StageNames[1], GlowUnder: true, GlowOutline: false, Crown: false, StarParticles: false, "mint", 0),
+        2 => new(2, CareEngine.StageNames[2], GlowUnder: true, GlowOutline: true, Crown: false, StarParticles: false, "sky", 1),
+        3 => new(3, CareEngine.StageNames[3], GlowUnder: true, GlowOutline: true, Crown: false, StarParticles: true, "gold", 1),
+        _ => new(4, CareEngine.StageNames[4], GlowUnder: true, GlowOutline: true, Crown: true, StarParticles: true, "gold", 2),
     };
 }
 

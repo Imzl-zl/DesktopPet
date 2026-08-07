@@ -2,6 +2,7 @@ using DesktopPet.Core.Ai;
 using DesktopPet.Core.I18n;
 using DesktopPet.Core.Personas;
 using DesktopPet.Core.Storage;
+using DesktopPet.Infra.Storage;
 using DesktopPet.Core.Scheduling;
 
 namespace DesktopPet.Core.Tests;
@@ -95,6 +96,9 @@ public class AgentConfigBuilderTests
     [Fact]
     public void Build_ProjectsDistinctCaptureAndAnalysisCadence()
     {
+        // 采集节奏固定 1s（变化检测粒度，成本极低，架构 §5/§6.4），
+        // 与模型限频（分析间隔）独立——原实现把 CaptureIntervalSeconds 绑成
+        // 分析间隔，字段文档“与模型限频独立”永远无法达成。
         var settings = SettingsWith(true, true) with
         {
             Ai = SettingsWith(true, true).Ai with { ScreenAnalysisIntervalSeconds = 17 },
@@ -105,7 +109,7 @@ public class AgentConfigBuilderTests
             new PersonasFileModel(),
             ProvidersWith(Ollama));
 
-        Assert.Equal(17, cfg.CaptureIntervalSeconds);
+        Assert.Equal(1, cfg.CaptureIntervalSeconds);
         Assert.Equal(17, cfg.MinAnalysisIntervalSeconds);
     }
 

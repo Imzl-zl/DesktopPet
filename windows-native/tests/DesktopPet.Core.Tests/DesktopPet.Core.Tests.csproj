@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DesktopPet.Core\DesktopPet.Core.csproj" />
+    <ProjectReference Include="..\..\src\DesktopPet.Infra\DesktopPet.Infra.csproj" />
   </ItemGroup>
 
   <ItemGroup>

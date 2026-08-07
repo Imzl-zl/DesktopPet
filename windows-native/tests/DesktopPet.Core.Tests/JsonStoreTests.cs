@@ -3,6 +3,7 @@ using DesktopPet.Core.Memory;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
+using DesktopPet.Infra.Storage;
 using Xunit;
 
 namespace DesktopPet.Core.Tests;
@@ -127,35 +128,29 @@ public class JsonStoreTests : IDisposable
     {
         var store = new FileJsonStore(_dir);
         store.SaveGlobalVisibility(true);
-        string? temporaryPath = null;
-        var failingStore = new FileJsonStore(
-            _dir,
-            new AtomicFilePublisher((temporary, _) =>
-            {
-                temporaryPath = temporary;
-                throw new IOException("injected publish failure");
-            }));
+        // 目标文件被独占打开（无 DELETE 共享）→ Move 失败（真实文件系统场景，
+        // 替代原注入 AtomicFilePublisher 的测试）
+        using (File.Open(Path.Combine(_dir, "pets-visible"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            var ex = Assert.Throws<JsonStoreException>(
+                () => store.SaveGlobalVisibility(false));
 
-        var ex = Assert.Throws<JsonStoreException>(
-            () => failingStore.SaveGlobalVisibility(false));
-
-        Assert.Equal("写入", ex.Operation);
-        Assert.Equal(Path.Combine(_dir, "pets-visible"), ex.FilePath);
-        Assert.Equal("1", File.ReadAllText(ex.FilePath));
-        Assert.NotNull(temporaryPath);
-        Assert.False(File.Exists(temporaryPath));
+            Assert.Equal("写入", ex.Operation);
+            Assert.Equal(Path.Combine(_dir, "pets-visible"), ex.FilePath);
+        }
+        Assert.Equal("1", File.ReadAllText(Path.Combine(_dir, "pets-visible")));
         Assert.Empty(Directory.EnumerateFiles(_dir, "*.tmp"));
     }
 
     [Fact]
     public void FirstSaveFailure_DoesNotPublishPartialFile()
     {
-        var failingStore = new FileJsonStore(
-            _dir,
-            new AtomicFilePublisher((_, _) => throw new IOException("injected first publish failure")));
+        // 目标位置是目录 → Move 失败（替代原注入 AtomicFilePublisher 的测试）
+        Directory.CreateDirectory(Path.Combine(_dir, "diary-meta.json"));
+        var store = new FileJsonStore(_dir);
 
         Assert.Throws<JsonStoreException>(() =>
-            failingStore.SaveDiaryLastGenerated(new DateOnly(2026, 8, 6)));
+            store.SaveDiaryLastGenerated(new DateOnly(2026, 8, 6)));
 
         Assert.False(File.Exists(Path.Combine(_dir, "diary-meta.json")));
         Assert.Empty(Directory.EnumerateFiles(_dir, "*.tmp"));

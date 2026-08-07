@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DesktopPet.Core.Care;
+using DesktopPet.Core.Storage;
 using DesktopPet.Core.Pets;
 
 namespace DesktopPet.Core.Storage;
@@ -88,7 +89,7 @@ public static class TauriMigration
             var result = new Dictionary<string, CareState>();
             foreach (var property in doc.RootElement.EnumerateObject())
             {
-                var state = property.Value.Deserialize<CareState>(CareJsonOptions);
+                var state = property.Value.Deserialize<CareState>(JsonOptions.MigrationRead);
                 if (state is not null) result[property.Name] = state;
             }
             return result;
@@ -99,9 +100,4 @@ public static class TauriMigration
         }
     }
 
-    private static readonly JsonSerializerOptions CareJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-    };
 }

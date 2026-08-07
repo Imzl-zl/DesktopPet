@@ -183,17 +183,12 @@ public sealed class ProvidersFileModel
         return new ProvidersFileModel { Models = models, Image = image };
     }
 
-    private static readonly System.Text.Json.JsonSerializerOptions Options = new()
-    {
-        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
-        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase) },
-    };
 
     public static ProvidersFileMigrationSource InspectForMigration(string json)
     {
         try
         {
-            var raw = System.Text.Json.JsonSerializer.Deserialize<ProvidersFileModel>(json, Options);
+            var raw = System.Text.Json.JsonSerializer.Deserialize<ProvidersFileModel>(json, Storage.JsonOptions.CamelCase);
             if (raw is null)
                 return new ProvidersFileMigrationSource(new ProvidersFileModel(), false);
             var rawModelCount = raw.Models?.Count ?? 0;
@@ -209,13 +204,13 @@ public sealed class ProvidersFileModel
     }
 
     public static string Serialize(ProvidersFileModel file)
-        => System.Text.Json.JsonSerializer.Serialize(Normalize(file), Options);
+        => System.Text.Json.JsonSerializer.Serialize(Normalize(file), Storage.JsonOptions.CamelCase);
 
     public static ProvidersFileModel Deserialize(string json)
     {
         try
         {
-            var file = System.Text.Json.JsonSerializer.Deserialize<ProvidersFileModel>(json, Options);
+            var file = System.Text.Json.JsonSerializer.Deserialize<ProvidersFileModel>(json, Storage.JsonOptions.CamelCase);
             return file is null ? new ProvidersFileModel() : Normalize(file);
         }
         catch (System.Text.Json.JsonException)

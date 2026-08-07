@@ -18,10 +18,7 @@ public sealed record InteractionEngineState(DateTime? LastGreetDate, DateTime? L
 /// </summary>
 public sealed class InteractionEngine
 {
-    public const string FrequencyLow = "low";
-    public const string FrequencyMedium = "medium";
-    public const string FrequencyHigh = "high";
-
+    // 频率档名字符串单一真值在 AiSettings（设置层）；此处引用避免双份定义。
     private static readonly TimeSpan SittingThreshold = TimeSpan.FromMinutes(60);
     private static readonly TimeSpan CodingThreshold = TimeSpan.FromHours(2);
     private static readonly TimeSpan AppSwitchWindow = TimeSpan.FromMinutes(10);
@@ -45,17 +42,17 @@ public sealed class InteractionEngine
 
     private static string NormalizeFrequency(string frequency) => frequency switch
     {
-        FrequencyLow => FrequencyLow,
-        FrequencyHigh => FrequencyHigh,
-        _ => FrequencyMedium,
+        Storage.AiSettings.FrequencyLow => Storage.AiSettings.FrequencyLow,
+        Storage.AiSettings.FrequencyHigh => Storage.AiSettings.FrequencyHigh,
+        _ => Storage.AiSettings.FrequencyMedium,
     };
 
     public void SetEnabled(bool enabled) => _enabled = enabled;
 
     private TimeSpan EventCooldown => _frequency switch
     {
-        FrequencyLow => TimeSpan.FromHours(4),
-        FrequencyHigh => TimeSpan.FromMinutes(30),
+        Storage.AiSettings.FrequencyLow => TimeSpan.FromHours(4),
+        Storage.AiSettings.FrequencyHigh => TimeSpan.FromMinutes(30),
         _ => TimeSpan.FromHours(2),
     };
 

@@ -159,41 +159,15 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
 
     public override void Write(Utf8JsonWriter writer, AiSettings value, JsonSerializerOptions options)
     {
-        // 全字段输出（默认 record 序列化行为，但走 camelCase 保持一致性）
-        writer.WriteStartObject();
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("Enabled") ?? "enabled");
-        JsonSerializer.Serialize(writer, value.Enabled, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("ScreenAnalysis") ?? "screenAnalysis");
-        JsonSerializer.Serialize(writer, value.ScreenAnalysis, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("OutputMode") ?? "outputMode");
-        JsonSerializer.Serialize(writer, value.OutputMode, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("ScreenContextEnabled") ?? "screenContextEnabled");
-        JsonSerializer.Serialize(writer, value.ScreenContextEnabled, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("ProviderId") ?? "providerId");
-        JsonSerializer.Serialize(writer, value.ProviderId, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("MemoryEnabled") ?? "memoryEnabled");
-        JsonSerializer.Serialize(writer, value.MemoryEnabled, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("ActiveInteraction") ?? "activeInteraction");
-        JsonSerializer.Serialize(writer, value.ActiveInteraction, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("InteractionFrequency") ?? "interactionFrequency");
-        JsonSerializer.Serialize(writer, value.InteractionFrequency, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("ScreenAwareness") ?? "screenAwareness");
-        JsonSerializer.Serialize(writer, value.ScreenAwareness, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("IntimacyEnabled") ?? "intimacyEnabled");
-        JsonSerializer.Serialize(writer, value.IntimacyEnabled, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("DailySummary") ?? "dailySummary");
-        JsonSerializer.Serialize(writer, value.DailySummary, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("SummaryImage") ?? "summaryImage");
-        JsonSerializer.Serialize(writer, value.SummaryImage, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("TtsEnabled") ?? "ttsEnabled");
-        JsonSerializer.Serialize(writer, value.TtsEnabled, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("AllReply") ?? "allReply");
-        JsonSerializer.Serialize(writer, value.AllReply, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("ScreenAnalysisIntervalSeconds") ?? "screenAnalysisIntervalSeconds");
-        JsonSerializer.Serialize(writer, value.ScreenAnalysisIntervalSeconds, options);
-        writer.WritePropertyName(options.PropertyNamingPolicy?.ConvertName("Onboarded") ?? "onboarded");
-        JsonSerializer.Serialize(writer, value.Onboarded, options);
-        writer.WriteEndObject();
+        // 默认 record 反射序列化即输出全字段（手写逐字段与默认行为重复且易漂移）；
+        // 用移除本 converter 的 options 副本避免递归，保留其余 converter（如枚举字符串）。
+        var plain = new JsonSerializerOptions(options);
+        for (var i = plain.Converters.Count - 1; i >= 0; i--)
+        {
+            if (plain.Converters[i] is AiSettingsJsonConverter)
+                plain.Converters.RemoveAt(i);
+        }
+        JsonSerializer.Serialize(writer, value, plain);
     }
 
     private static bool ReadBool(ref Utf8JsonReader reader)

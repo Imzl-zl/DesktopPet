@@ -28,7 +28,9 @@ public static class AgentConfigBuilder
             ProviderApiKeyRef: string.IsNullOrEmpty(provider?.ApiKeyRef) ? null : provider.ApiKeyRef,
             ProviderReasoningEffort: provider?.ReasoningEffort,
             MinAnalysisIntervalSeconds: Math.Clamp(settings.Ai.ScreenAnalysisIntervalSeconds, 3, 30),
-            CaptureIntervalSeconds: Math.Clamp(settings.Ai.ScreenAnalysisIntervalSeconds, 3, 30),
+            // 采集节奏固定 1s（变化检测粒度）：与模型限频（分析间隔）独立，
+            // 见 AgentConfig.CaptureIntervalSeconds 文档；原实现误绑定分析间隔。
+            CaptureIntervalSeconds: 1,
             Revision: revision);
     }
 

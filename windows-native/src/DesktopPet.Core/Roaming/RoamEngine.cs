@@ -32,7 +32,6 @@ public sealed class RoamEngine
     private readonly RoamPhysics _physics;
     private readonly IRoamHost _host;
     private readonly IRoamEnvironmentSource _environmentSource;
-    private readonly Func<RoamConfig> _configSource;
     private readonly IRoamClock _clock;
     private readonly IRoamPet? _pet;
     private readonly Func<RoamConfig> _config;
@@ -67,7 +66,6 @@ public sealed class RoamEngine
     {
         _host = host;
         _environmentSource = environmentSource;
-        _configSource = configSource;
         _config = () => RoamConfigOps.Normalize(configSource());
         _clock = clock;
         _pet = pet;

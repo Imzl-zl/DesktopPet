@@ -21,7 +21,9 @@ public sealed record UserProfile(
 public static class MemoryProfileExtractor
 {
     private const int MaxTopics = 3;
-    private const int SummaryMaxChars = 200;
+    /// <summary>最近对话摘要长度上限（≤200 字，架构文档 §10 决策点 2；单一真值，
+    /// ConversationMemory 引用此处）。</summary>
+    internal const int SummaryMaxChars = 200;
     private const int SummaryPerMessageChars = 40;
 
     /// <summary>预设话题词库（中文短词匹配；覆盖高频闲聊主题，可后续扩充）。</summary>

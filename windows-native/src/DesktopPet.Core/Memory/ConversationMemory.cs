@@ -23,8 +23,6 @@ public sealed class ConversationMemory
     /// <summary>会话预算占模型上下文的比例（其余留给 system/记忆/当前输入/输出）。</summary>
     public const double BudgetRatio = 0.5;
 
-    private const int SummaryMaxChars = 200;
-
     public string Summary => _summary;
 
     public int Count => _messages.Count;
@@ -71,14 +69,14 @@ public sealed class ConversationMemory
                 .Where(m => m.Role == ChatRole.User)
                 .Select(m => (m, DateTime.Now))
                 .ToList();
-            var compressed = MemoryProfileExtractor.Compress(droppedTurns, SummaryMaxChars);
+            var compressed = MemoryProfileExtractor.Compress(droppedTurns, MemoryProfileExtractor.SummaryMaxChars);
             if (compressed.Length > 0)
             {
                 _summary = _summary.Length > 0
                     ? MemoryProfileExtractor.Compress(
                         [(new ChatMessage(ChatRole.User, _summary), DateTime.Now),
                          (new ChatMessage(ChatRole.User, compressed), DateTime.Now)],
-                        SummaryMaxChars)
+                        MemoryProfileExtractor.SummaryMaxChars)
                     : compressed;
             }
         }

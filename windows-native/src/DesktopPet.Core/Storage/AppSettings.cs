@@ -79,7 +79,7 @@ public sealed record AppSettings(
             // null = 旧数据（无此字段）→ 默认台词；[] = 用户显式清空 → 保留（不显示闲谈）
             raw.IdleChatterLines ?? DefaultIdleChatterLines,
             raw.HungryLines ?? DefaultHungryLines,
-            roam with { Speed = roam.Speed },
+            roam,
             raw.Lang,
             AiSettings.Normalize(raw.Ai),
             raw.Hotkeys ?? HotkeySettings.Defaults);

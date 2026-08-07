@@ -56,8 +56,6 @@ public static class PetStoreModel
     public const int StoreVersion = 1;
     public const string LegacyInstanceId = "legacy-pet";
 
-    private static readonly string[] ValidRoamModes = ["stay", "wander", "cursor", "climb"];
-
     public static PetStore EmptyPetStore() => new() { Version = StoreVersion, SelectedId = null, Instances = [] };
 
     private static double Clamp(double value, double min, double max, double fallback)
@@ -103,7 +101,7 @@ public static class PetStoreModel
         if (value is null) return null;
         if (string.IsNullOrEmpty(value.Id) || string.IsNullOrEmpty(value.SpriteSlug)) return null;
         var roamMode = value.RoamMode is { } mode &&
-                       Array.IndexOf(ValidRoamModes, mode.ToString().ToLowerInvariant()) >= 0
+                       Array.IndexOf(Roaming.RoamConstants.ValidModes, mode) >= 0
             ? mode
             : RoamMode.Wander;
         var wanderPause = Pause.NormalizeWanderPauseRange(value.WanderPauseMinMs, value.WanderPauseMaxMs);
@@ -137,17 +135,9 @@ public static class PetStoreModel
                 : null;
 
         // TS Number(x)：string 可解析 → 数值；null → 0；其他 → NaN。
-        double? ReadNumber(string property)
-        {
-            if (!value.TryGetProperty(property, out var el)) return null;
-            return el.ValueKind switch
-            {
-                JsonValueKind.Number => el.GetDouble(),
-                JsonValueKind.String when double.TryParse(el.GetString(), out var d) => d,
-                JsonValueKind.Null => 0,
-                _ => double.NaN,
-            };
-        }
+        // 局部包装（读字段）；值转换走类级 ReadNumber(JsonElement)（局部遮蔽故改名）
+        double? NumberField(string property)
+            => value.TryGetProperty(property, out var el) ? ReadNumber(el) : null;
 
         bool? ReadBool(string property)
         {
@@ -176,12 +166,12 @@ public static class PetStoreModel
             Name = ReadString("name"),
             SpriteSlug = ReadString("spriteSlug"),
             Visible = ReadBool("visible"),
-            Size = ReadNumber("size"),
+            Size = NumberField("size"),
             RoamEnabled = ReadBool("roamEnabled"),
             RoamMode = mode,
-            RoamSpeed = ReadNumber("roamSpeed"),
-            WanderPauseMinMs = ReadNumber("wanderPauseMinMs"),
-            WanderPauseMaxMs = ReadNumber("wanderPauseMaxMs"),
+            RoamSpeed = NumberField("roamSpeed"),
+            WanderPauseMinMs = NumberField("wanderPauseMinMs"),
+            WanderPauseMaxMs = NumberField("wanderPauseMaxMs"),
             ReactsToActivity = ReadBool("reactsToActivity"),
             PersonaId = ReadString("personaId"),
             Actions = ReadActions(value),

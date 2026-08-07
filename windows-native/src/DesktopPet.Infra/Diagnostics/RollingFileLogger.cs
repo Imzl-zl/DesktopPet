@@ -158,11 +158,16 @@ public sealed class RollingFileLogger : IAppLogger
             try { _stream = OpenCurrent(); }
             catch (Exception reopenError) when (reopenError is IOException or UnauthorizedAccessException)
             {
-                failure = failure is null ? reopenError : new AggregateException(failure, reopenError);
+                failure = failure is null ? reopenError : CombineRotationFailure(failure, reopenError);
             }
         }
         if (failure is not null) throw failure;
     }
+
+    /// <summary>轮转双失败合并：必须产出 IOException 家族，Write 的捕获过滤才能接住
+    /// （AggregateException 会逃逸中断调用方会话）。</summary>
+    internal static Exception CombineRotationFailure(Exception moveFailure, Exception reopenFailure)
+        => new IOException("日志轮转失败（移动与重开均失败）", reopenFailure);
 
     private FileStream OpenCurrent()
         => new(

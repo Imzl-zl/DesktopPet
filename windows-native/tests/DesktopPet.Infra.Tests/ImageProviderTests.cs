@@ -173,4 +173,75 @@ public class ImageProviderTests
         Assert.Equal("hello-png"u8.ToArray(), result.PngBytes);
         Assert.Null(handler.Requests[0].Headers.Authorization); // 无 Authorization 头
     }
+
+    [Fact]
+    public async Task GenerateAsync_TooManyRequests_ThrowsRateLimitError()
+    {
+        // 错误分类与 ModelProvider 对齐（Microsoft 契约 §8）：429 → rate-limit，不是 network
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse("""{"error":{}}""", HttpStatusCode.TooManyRequests)),
+        };
+        var provider = MakeProvider(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() =>
+            provider.GenerateAsync(new ImageGenRequest("x"), CancellationToken.None));
+        Assert.Equal("rate-limit", ex.Code);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ServerError_ThrowsServerError()
+    {
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse("""{"error":{}}""", HttpStatusCode.InternalServerError)),
+        };
+        var provider = MakeProvider(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() =>
+            provider.GenerateAsync(new ImageGenRequest("x"), CancellationToken.None));
+        Assert.Equal("server", ex.Code);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_UrlDownloadFailure_ThrowsNetworkError()
+    {
+        // url 回退下载失败必须包装成 ProviderException（与 ModelProvider 的
+        // ReadResponseTextAsync 一致），不裸抛 HttpRequestException
+        var handler = new MockHandler
+        {
+            Handler = (req, _) =>
+            {
+                if (req.RequestUri!.AbsoluteUri.StartsWith("https://cdn.example.com/"))
+                {
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+                }
+                return Task.FromResult(JsonResponse("""
+                    {"data":[{"b64_json":null,"url":"https://cdn.example.com/out.png"}]}
+                    """));
+            },
+        };
+        var provider = MakeProvider(handler);
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() =>
+            provider.GenerateAsync(new ImageGenRequest("x"), CancellationToken.None));
+        Assert.Equal("network", ex.Code);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_SendsUserAgent()
+    {
+        // 与 ModelProvider 一致：部分网关/CDN 要求 UA
+        var handler = new MockHandler
+        {
+            Handler = (_, _) => Task.FromResult(JsonResponse("""
+                {"data":[{"b64_json":"aGVsbG8tcG5n"}]}
+                """)),
+        };
+        var provider = MakeProvider(handler);
+
+        await provider.GenerateAsync(new ImageGenRequest("x"), CancellationToken.None);
+
+        Assert.Contains(handler.Requests[0].Headers.UserAgent, h => h.Product is not null);
+    }
 }

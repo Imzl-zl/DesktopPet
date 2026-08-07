@@ -96,6 +96,9 @@ internal static class Program
                 catch (Exception ex) { Log($"AgentService failed: {ex.Message}"); }
                 try { await parentExitTask; }
                 catch (OperationCanceledException) { }
+                catch (Exception ex) { Log($"Parent process monitor failed: {ex.Message}"); }
+                // 任何路径都必须关掉消息泵：否则 Dispatcher.Run 永不返回 →
+                // service.DisposeAsync 不执行，Agent 进程静默挂死（看门狗感知不到）
                 dispatcher.InvokeShutdown();
             }
         });

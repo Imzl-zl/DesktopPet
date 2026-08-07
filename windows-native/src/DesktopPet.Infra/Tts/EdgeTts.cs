@@ -12,7 +12,8 @@ public sealed record TtsVoice(string Name, string Language);
 /// </summary>
 public interface ITtsProvider
 {
-    /// <summary>合成语音，返回 MP3 音频流（调用方负责 Dispose）。</summary>
+    /// <summary>合成语音，返回音频流（调用方负责 Dispose；格式因实现而异：
+    /// SAPI=WAV / Edge=MP3）。</summary>
     Task<Stream> SynthesizeAsync(string text, TtsVoice voice, CancellationToken ct);
 }
 
@@ -42,7 +43,10 @@ public sealed class EdgeTtsSocket : IEdgeSocket
     {
         await _tcp.ConnectAsync(uri.Host, uri.Port, ct).ConfigureAwait(false);
         _ssl = new System.Net.Security.SslStream(_tcp.GetStream());
-        await _ssl.AuthenticateAsClientAsync(uri.Host).ConfigureAwait(false);
+        // 带 ct 的重载（.NET 8 支持）：TLS 握手期间取消同样生效
+        await _ssl.AuthenticateAsClientAsync(
+            new System.Net.Security.SslClientAuthenticationOptions { TargetHost = uri.Host },
+            ct).ConfigureAwait(false);
         _stream = _ssl;
 
         var key = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
@@ -350,11 +354,17 @@ public static class EdgeTtsProtocol
 /// </summary>
 public sealed class EdgeTtsProvider : ITtsProvider
 {
-    private readonly Func<IEdgeSocket> _socketFactory;
+    /// <summary>整体合成 deadline：调用方可能传 CancellationToken.None（App 层），
+    /// Provider 必须兜底防止端点挂起时无限等待。</summary>
+    public static readonly TimeSpan DefaultOverallTimeout = TimeSpan.FromSeconds(30);
 
-    public EdgeTtsProvider(Func<IEdgeSocket>? socketFactory = null)
+    private readonly Func<IEdgeSocket> _socketFactory;
+    private readonly TimeSpan _overallTimeout;
+
+    public EdgeTtsProvider(Func<IEdgeSocket>? socketFactory = null, TimeSpan? overallTimeout = null)
     {
         _socketFactory = socketFactory ?? (() => new EdgeTtsSocket());
+        _overallTimeout = overallTimeout ?? DefaultOverallTimeout;
     }
 
     public async Task<Stream> SynthesizeAsync(string text, TtsVoice voice, CancellationToken ct)
@@ -363,16 +373,20 @@ public sealed class EdgeTtsProvider : ITtsProvider
         if (trimmed.Length == 0) throw new ArgumentException("语音文本不能为空", nameof(text));
         if (trimmed.Length > 500) trimmed = trimmed[..500] + "…"; // Edge 单次请求上限防护
 
+        // 整体 deadline：连接/握手/发帧/收帧全程受此约束
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_overallTimeout);
+
         using var socket = _socketFactory();
         var utcNow = DateTime.UtcNow;
-        await socket.ConnectAsync(EdgeTtsProtocol.BuildEndpoint(utcNow), ct);
-        await socket.SendAsync(EdgeTtsProtocol.BuildSpeechConfigMessage(utcNow), ct);
-        await socket.SendAsync(EdgeTtsProtocol.BuildSsmlMessage(trimmed, voice, Guid.NewGuid().ToString("N"), utcNow), ct);
+        await socket.ConnectAsync(EdgeTtsProtocol.BuildEndpoint(utcNow), deadline.Token);
+        await socket.SendAsync(EdgeTtsProtocol.BuildSpeechConfigMessage(utcNow), deadline.Token);
+        await socket.SendAsync(EdgeTtsProtocol.BuildSsmlMessage(trimmed, voice, Guid.NewGuid().ToString("N"), utcNow), deadline.Token);
 
         using var audio = new MemoryStream();
         while (true)
         {
-            var frame = await socket.ReceiveAsync(ct);
+            var frame = await socket.ReceiveAsync(deadline.Token);
             if (!EdgeTtsProtocol.TryParseFrame(frame, out var path, out var payload))
                 throw new EndOfStreamException("TTS 帧解析失败");
             if (path == "audio") audio.Write(payload.Span);

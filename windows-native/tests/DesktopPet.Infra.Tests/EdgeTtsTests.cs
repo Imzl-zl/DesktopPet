@@ -103,6 +103,8 @@ public class EdgeTtsTests
     {
         public Uri? ConnectedUri { get; private set; }
         public List<string> SentMessages { get; } = [];
+        /// <summary>挂起模式：ReceiveAsync 永不返回（模拟对端无响应）。</summary>
+        public bool HangOnReceive { get; set; }
         private readonly Queue<byte[]> _responses = new();
 
         public FakeEdgeSocket(params byte[][] responses) { foreach (var r in responses) _responses.Enqueue(r); }
@@ -119,10 +121,14 @@ public class EdgeTtsTests
             return Task.CompletedTask;
         }
 
-        public Task<byte[]> ReceiveAsync(CancellationToken ct)
+        public async Task<byte[]> ReceiveAsync(CancellationToken ct)
         {
+            if (HangOnReceive)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct); // 挂起直到取消
+            }
             if (_responses.Count == 0) throw new EndOfStreamException("对端关闭");
-            return Task.FromResult(_responses.Dequeue());
+            return _responses.Dequeue();
         }
 
         public void Dispose() { }
@@ -165,6 +171,18 @@ public class EdgeTtsTests
         var provider = new EdgeTtsProvider(() => socket);
         await Assert.ThrowsAsync<EndOfStreamException>(() =>
             provider.SynthesizeAsync("hi", Xiaoxiao, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SynthesizeAsync_HangingSocket_ThrowsWithinOverallTimeout()
+    {
+        // 对端无响应（ReceiveAsync 永不返回）时，Provider 必须在自身 deadline 内退出，
+        // 即使调用方传 CancellationToken.None（AiCoordinator.Speak 实际如此）。
+        var socket = new FakeEdgeSocket { HangOnReceive = true };
+        var provider = new EdgeTtsProvider(() => socket, overallTimeout: TimeSpan.FromMilliseconds(200));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.SynthesizeAsync("测试", Xiaoxiao, CancellationToken.None));
     }
 }
 

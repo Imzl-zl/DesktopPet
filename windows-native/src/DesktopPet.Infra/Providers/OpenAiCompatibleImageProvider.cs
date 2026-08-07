@@ -55,6 +55,8 @@ public sealed class OpenAiCompatibleImageProvider : IImageProvider
                 !string.IsNullOrEmpty(apiKey)));
         if (!string.IsNullOrEmpty(apiKey))
             httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        if (httpRequest.Headers.UserAgent.Count == 0)
+            httpRequest.Headers.UserAgent.ParseAdd("DesktopPet/1.0"); // 与 ModelProvider 一致：部分网关要求 UA
         httpRequest.Content = JsonContent.Create(body);
 
         using var deadline = CreateDeadline(ct);
@@ -82,7 +84,14 @@ public sealed class OpenAiCompatibleImageProvider : IImageProvider
             }
             if (!response.IsSuccessStatusCode)
             {
-                throw new ProviderException("network", $"生图 HTTP {(int)response.StatusCode}");
+                // 错误分类与 ModelProvider.CreateHttpFailure 对齐：429→rate-limit、5xx→server
+                var code = response.StatusCode switch
+                {
+                    System.Net.HttpStatusCode.TooManyRequests => "rate-limit",
+                    >= System.Net.HttpStatusCode.InternalServerError => "server",
+                    _ => "network",
+                };
+                throw new ProviderException(code, $"生图 HTTP {(int)response.StatusCode}");
             }
 
             try
@@ -101,15 +110,40 @@ public sealed class OpenAiCompatibleImageProvider : IImageProvider
                 }
                 if (first.TryGetProperty("url", out var urlEl) && urlEl.ValueKind == JsonValueKind.String)
                 {
-                    using var imageResp = await _http.GetAsync(urlEl.GetString()!, requestCt).ConfigureAwait(false);
-                    imageResp.EnsureSuccessStatusCode();
-                    return new ImageResult(await imageResp.Content.ReadAsByteArrayAsync(requestCt));
+                    HttpResponseMessage imageResp;
+                    try
+                    {
+                        imageResp = await _http.GetAsync(urlEl.GetString()!, requestCt).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested && deadline?.IsCancellationRequested == true)
+                    {
+                        throw new ProviderException("timeout", "生图图片下载超时");
+                    }
+                    catch (HttpRequestException ex)
+                    {
+                        throw new ProviderException("network", $"生图图片下载失败: {ex.Message}", ex);
+                    }
+                    using (imageResp)
+                    {
+                        if (!imageResp.IsSuccessStatusCode)
+                            throw new ProviderException("network", $"生图图片下载 HTTP {(int)imageResp.StatusCode}");
+                        return new ImageResult(await imageResp.Content.ReadAsByteArrayAsync(requestCt));
+                    }
                 }
                 throw new ProviderException("invalid-response", "生图响应缺少 b64_json/url");
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested && deadline?.IsCancellationRequested == true)
+            {
+                // deadline 触发：裸 OCE 必须包装为 timeout（与 ModelProvider.ReadResponseTextAsync 一致）
+                throw new ProviderException("timeout", "生图响应读取超时");
             }
             catch (JsonException ex)
             {
                 throw new ProviderException("invalid-response", $"生图响应解析失败: {ex.Message}", ex);
+            }
+            catch (FormatException ex)
+            {
+                throw new ProviderException("invalid-response", $"生图响应 b64_json 解码失败: {ex.Message}", ex);
             }
         }
     }

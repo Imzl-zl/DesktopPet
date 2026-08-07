@@ -90,6 +90,22 @@ public sealed class DiagnosticsTests : IDisposable
 
 
     [Fact]
+    public void AtomicFileWriter_NonIoFailure_StillCleansTemp()
+    {
+        // write 委托抛非 IO 异常（如编码/业务异常）时：异常原样上抛，
+        // 临时文件也必须清理（原实现清理代码在 try 内，非 IO 异常会跳过 → GUID tmp 累积）
+        Directory.CreateDirectory(_directory);
+        var target = Path.Combine(_directory, "sprite.png");
+
+        var error = Record.Exception(() => AtomicFileWriter.Write(
+            target,
+            _ => throw new FormatException("boom")));
+
+        Assert.IsType<FormatException>(error);
+        Assert.Empty(Directory.GetFiles(_directory, ".sprite.png.*.tmp"));
+    }
+
+    [Fact]
     public void RollingLogger_TruncatesOversizedLineToHardByteLimit()
     {
         const int maxBytes = 180;
@@ -127,6 +143,21 @@ public sealed class DiagnosticsTests : IDisposable
         Assert.Contains(
             "after recovery",
             string.Join("\n", Directory.GetFiles(_directory, "recover.log*").Select(File.ReadAllText)));
+    }
+
+    [Fact]
+    public void RollingLogger_CombineRotationFailure_AlwaysYieldsIOException()
+    {
+        // 轮转移动失败 + 重开失败双故障时：合并异常必须是 IOException 家族，
+        // 因为 Write 的捕获过滤只接 IOException/UnauthorizedAccessException，
+        // AggregateException 会逃逸中断调用方会话。
+        var moveFailure = new IOException("move failed");
+        var reopenFailure = new UnauthorizedAccessException("reopen failed");
+
+        var combined = RollingFileLogger.CombineRotationFailure(moveFailure, reopenFailure);
+
+        Assert.IsAssignableFrom<IOException>(combined);
+        Assert.Same(reopenFailure, combined.InnerException);
     }
 
     public void Dispose()

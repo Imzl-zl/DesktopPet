@@ -23,7 +23,7 @@ public sealed class AgentService : IAsyncDisposable
     private readonly IAppLogger _logger;
     private readonly int _expectedClientProcessId;
     private readonly Func<int, bool> _clientAuthorizer;
-    private readonly HttpClient _providerHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly HttpClient _providerHttp = ProviderHttpClient.Create();
     private readonly TimeSpan? _captureIntervalOverride;
     private readonly TimeSpan _heartbeatTimeout;
     private readonly TimeProvider _timeProvider;

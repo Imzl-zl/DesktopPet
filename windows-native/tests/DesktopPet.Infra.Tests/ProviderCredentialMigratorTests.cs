@@ -1,6 +1,7 @@
 using DesktopPet.Core.Scheduling;
 using DesktopPet.Core.Storage;
 using DesktopPet.Infra.Providers;
+using DesktopPet.Infra.Storage;
 
 namespace DesktopPet.Infra.Tests;
 

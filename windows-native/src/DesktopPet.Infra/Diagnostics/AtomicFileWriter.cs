@@ -18,7 +18,9 @@ public static class AtomicFileWriter
     public static void WriteAllBytes(string destinationPath, byte[] content)
         => Write(destinationPath, stream => stream.Write(content));
 
-    private static void Write(string destinationPath, Action<FileStream> write)
+    /// <summary>原子写核心：临时文件 + WriteThrough + Move（失败清理保证在 finally）。
+    /// internal：测试注入异常委托验证清理路径。</summary>
+    internal static void Write(string destinationPath, Action<FileStream> write)
     {
         var fullPath = Path.GetFullPath(destinationPath);
         var directory = Path.GetDirectoryName(fullPath)
@@ -49,13 +51,17 @@ public static class AtomicFileWriter
         {
             failure = ex;
         }
-
-        if (!published)
+        finally
         {
-            try { File.Delete(temporaryPath); }
-            catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException)
+            // 无论何种失败（含非 IO 异常）都清理临时文件：
+            // 原实现在 try 内清理，非 IO 异常会跳过 → GUID tmp 在配置目录累积。
+            if (!published)
             {
-                failure = failure is null ? cleanupError : new AggregateException(failure, cleanupError);
+                try { File.Delete(temporaryPath); }
+                catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException)
+                {
+                    failure ??= cleanupError; // 保留首个失败；清理失败不覆盖主失败
+                }
             }
         }
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();

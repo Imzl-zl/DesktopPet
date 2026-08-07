@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using DesktopPet.Core.Scheduling;
+using DesktopPet.Infra.Storage;
 using DesktopPet.Core.Storage;
 
 namespace DesktopPet.Infra.Providers;

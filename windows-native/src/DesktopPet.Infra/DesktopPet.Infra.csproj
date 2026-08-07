@@ -14,4 +14,8 @@
     <PackageReference Include="System.Speech" Version="8.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="DesktopPet.Infra.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -128,26 +128,44 @@ public sealed class GraphicsCaptureSource :
                 if (_state != GraphicsCaptureState.Running) return;
             }
 
-            using var frame = sender.TryGetNextFrame();
-            if (frame is null) return;
             if (!_copyCadence.TryAcquire()) return;
+            var frame = sender.TryGetNextFrame();
+            if (frame is null) return;
+            _ = CopyFrameAsync(frame);
+        }
+        catch (Exception ex)
+        {
+            RegisterFailure(ex);
+        }
+    }
 
-            var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface)
-                .AsTask().GetAwaiter().GetResult();
-            SoftwareBitmap? previous;
-            lock (_gate)
+    /// <summary>
+    /// 异步拷贝：CreateCopyFromSurfaceAsync 是异步 API，在消息泵线程上 await 不阻塞；
+    /// 原实现 .GetAwaiter().GetResult() 同步等待会卡住同线程的 capture 生命周期操作
+    /// （创建/销毁 capture 源）。_copyCadence 节流保证同时最多一个拷贝在飞。
+    /// </summary>
+    private async Task CopyFrameAsync(Direct3D11CaptureFrame frame)
+    {
+        try
+        {
+            using (frame)
             {
-                if (_state != GraphicsCaptureState.Running)
+                var bitmap = await SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface);
+                SoftwareBitmap? previous;
+                lock (_gate)
                 {
-                    bitmap.Dispose();
-                    return;
+                    if (_state != GraphicsCaptureState.Running)
+                    {
+                        bitmap.Dispose();
+                        return;
+                    }
+                    previous = _latest;
+                    _latest = bitmap;
+                    _hasFrame = true;
                 }
-                previous = _latest;
-                _latest = bitmap;
-                _hasFrame = true;
+                previous?.Dispose();
+                Interlocked.Exchange(ref _consecutiveFailures, 0);
             }
-            previous?.Dispose();
-            Interlocked.Exchange(ref _consecutiveFailures, 0);
         }
         catch (Exception ex)
         {

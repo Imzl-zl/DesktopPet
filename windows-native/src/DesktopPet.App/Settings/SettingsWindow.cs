@@ -107,7 +107,6 @@ public sealed class SettingsWindow : Window
         root.Children.Add(_contentHost);
 
         Content = root;
-        ShowPage("pets");
         WpfLocalizer.ApplyNew(this, _i18n);
 
         // 共享预览 timer：驱动所有宠物卡片的实时动画（3fps）
@@ -117,6 +116,7 @@ public sealed class SettingsWindow : Window
             foreach (var card in _previewCards) card.Advance();
         };
         _previewTimer.Start();
+        ShowPage("pets");
     }
 
     private readonly ContentControl _contentHost;
@@ -272,6 +272,15 @@ public sealed class SettingsWindow : Window
         UpdateNavSelection(id);
         StopClipHover(); // 离开动作页 → 停止 hover 预览 timer（避免泄漏）
         StopDiagnostics();
+        // 预览 timer 只驱动宠物卡片：离开宠物页即停止，避免对不可见卡片持续整帧绘制
+        if (id == "pets")
+        {
+            if (!_previewTimer.IsEnabled) _previewTimer.Start();
+        }
+        else
+        {
+            _previewTimer.Stop();
+        }
         var content = id switch
         {
             "pets" => BuildPetsPage(),

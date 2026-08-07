@@ -136,7 +136,7 @@ public sealed class DanmakuWindow : Window
                 ds.DrawText(item.Text, (float)item.X, (float)(item.Track * _trackHeight),
                     global::Microsoft.UI.Colors.White, _textFormat);
             }
-            _frameCount++;
+            Interlocked.Increment(ref _frameCount);
         };
         grid.Children.Add(_canvas);
         return grid;
@@ -153,8 +153,9 @@ public sealed class DanmakuWindow : Window
 
     private void OnFpsTimerTick(object? sender, EventArgs e)
     {
-        _fps = _frameCount;
-        _frameCount = 0;
+        // Win2D Draw 回调（渲染线程）与 UI 线程同时访问 _frameCount：
+        // ++ 是非原子 RMW（Microsoft Learn Interlocked Remarks），必须用原子操作
+        _fps = Interlocked.Exchange(ref _frameCount, 0);
     }
 
     protected override void OnClosed(EventArgs e)

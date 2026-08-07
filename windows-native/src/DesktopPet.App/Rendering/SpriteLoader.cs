@@ -4,6 +4,7 @@ using System.Text.Json;
 
 using DesktopPet.Core.Rendering;
 using DesktopPet.Infra.Diagnostics;
+using DesktopPet.Infra.Providers;
 
 namespace DesktopPet.App.Rendering;
 
@@ -34,7 +35,8 @@ public sealed class SpriteLoader : IDisposable
         Directory.CreateDirectory(_spritesDir);
         _sheetCache = new SpriteSheetCache(maxDecodedCacheBytes);
         _logger = logger ?? NullAppLogger.Instance;
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        _http = ProviderHttpClient.Create();
+        _http.Timeout = TimeSpan.FromSeconds(20);
         // CDN 拒绝无 UA 请求（curl/浏览器 UA 可过）
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("DesktopPet/0.1 (Windows; .NET 8)");
     }

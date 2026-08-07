@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using DesktopPet.App.Interop;
 using DesktopPet.App.Localization;
 using DesktopPet.App.Windows;
 using DesktopPet.Core.I18n;
@@ -71,7 +72,10 @@ public sealed class TrayController : IDisposable
         }
         var handle = bitmap.GetHicon();
         using var fromHandle = System.Drawing.Icon.FromHandle(handle);
-        return (System.Drawing.Icon)fromHandle.Clone(); // 独立句柄，可安全 Dispose
+        var icon = (System.Drawing.Icon)fromHandle.Clone(); // 独立句柄，可安全 Dispose
+        // FromHandle 不接管所有权：官方要求用 DestroyIcon 释放原句柄（Icon.FromHandle Remarks）
+        NativeMethods.DestroyIconHandle(handle);
+        return icon;
     }
 
     public void Dispose()

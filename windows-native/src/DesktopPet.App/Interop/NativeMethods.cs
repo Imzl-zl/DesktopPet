@@ -12,6 +12,14 @@ internal static partial class NativeMethods
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool DestroyIcon(nint hIcon);
+
+    /// <summary>释放 GetHicon 产生的 HICON（Microsoft Learn Icon.FromHandle Remarks：
+    /// 调用方必须用 DestroyIcon 释放原句柄）。</summary>
+    public static void DestroyIconHandle(nint hIcon) => DestroyIcon(hIcon);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetWindowPos(
         nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 

@@ -661,9 +661,12 @@ public sealed class PetWindow : Window
         var sw = Stopwatch.StartNew();
         _roamEngine.MoveManualDrag(new RoamPoint(targetX, targetY)); // 移动 + 物理采样
         sw.Stop();
-        _processingLatencyMs.Add(sw.Elapsed.TotalMilliseconds);
-        // 端到端：消息生成 → 窗口位移完成（含系统输入管线/队列等待）
-        _endToEndLatencyMs.Add(Math.Max(0, Environment.TickCount64 - messageTime));
+        if (BenchLogEnabled)
+        {
+            _processingLatencyMs.Add(sw.Elapsed.TotalMilliseconds);
+            // 端到端：消息生成 → 窗口位移完成（含系统输入管线/队列等待）
+            _endToEndLatencyMs.Add(Math.Max(0, Environment.TickCount64 - messageTime));
+        }
     }
 
     private void OnRawLeftUp()
@@ -1083,12 +1086,11 @@ internal sealed class PetWindowRoamHost : IRoamHost
 
     public void SetLogical(RoamPoint pos)
     {
-        var (x, y) = _window.PhysicalPosition();
+        // 与 SetPhysical 等价（MoveWindow 到逻辑坐标换算后的物理位置）；
+        // 移动判定/持久化由 engine StepMode 负责，这里不做额外持久化。
         NativeMethods.MoveWindow(_window.Hwnd,
             (int)Math.Round(pos.X * _window.DpiScale),
             (int)Math.Round(pos.Y * _window.DpiScale));
-        // 仅当确实移动才持久化（对齐 engine 的移动判定在 StepMode）
-        _ = x; _ = y;
     }
 
     public RoamPoint SetPhysical(RoamPoint physicalPos)

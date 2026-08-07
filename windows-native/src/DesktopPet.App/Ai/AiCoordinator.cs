@@ -17,6 +17,7 @@ using DesktopPet.Core.Summary;
 using DesktopPet.Infra.Diagnostics;
 using DesktopPet.Infra.Lifecycle;
 using DesktopPet.Infra.PipeRpc;
+using DesktopPet.Infra.Storage;
 using DesktopPet.Infra.Providers;
 using DesktopPet.Infra.Tts;
 
@@ -53,7 +54,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     private Process? _agent;
     private readonly OwnedResourceSlot<PipeRpcClient> _rpcSlot = new();
     private CancellationTokenSource? _lifeCts;
-    private bool _shuttingDown;
+    private volatile bool _shuttingDown;
     private int _restartFailures;
     private readonly object _disposeSync = new();
     private Task? _disposeTask;
@@ -69,7 +70,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     private long _pendingAgentRevision;
     private readonly SemaphoreSlim _agentConfigSend = new(1, 1);
     private readonly WindowsCredentialStore _credentials = new();
-    private readonly HttpClient _providerHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly HttpClient _providerHttp = ProviderHttpClient.Create();
     private readonly I18nService _i18n;
     private readonly IAppLogger _logger;
     private readonly CancellationTokenSource _coordinatorLifetime = new();
@@ -88,6 +89,8 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     // 语音输出：SAPI 离线合成（默认；Edge TTS 对 SChannel 风控不可用，见 EdgeTtsProvider 注释）
     private readonly ITtsProvider _tts = new SapiTtsProvider();
     private readonly MediaPlayer _ttsPlayer = new();
+    // 待清理的 TTS 临时文件（MediaEnded 只订阅一次，防闭包随朗读次数累积）
+    private string? _pendingTtsTempPath;
     // 朗读生效状态（会话内）：初始 = 持久设置；对话窗按钮切换；设置页保存重置。
     // 修复：原实现 Speak 只看持久设置，对话窗朗读按钮点击无效。
     private bool _ttsSessionEnabled;
@@ -117,6 +120,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         _lastDiaryDate = store.LoadDiaryLastGenerated();
         _ = _runtime.ReplaceAsync(BuildRuntime(_settings, _providers, _personas));
         _ttsSessionEnabled = _settings.Ai.TtsEnabled;
+        _ttsPlayer.MediaEnded += OnTtsMediaEnded; // 单次订阅（官方模式：一次订阅，字段保存当前状态）
         _chatWindow.TtsToggled += value => _ttsSessionEnabled = value;
         _interaction = new InteractionEngine(
             new InteractionEngineState(null, null),
@@ -392,12 +396,15 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
 
     // ---- Agent 生命周期 ----
 
-    /// <summary>UI 线程封送（事件接收循环在线程池，WPF 窗口必须 UI 线程操作）。</summary>
+    /// <summary>UI 线程封送（事件接收循环在线程池，WPF 窗口必须 UI 线程操作）。
+    /// 用 BeginInvoke 异步投递：Dispatcher 关闭后 BeginInvoke 不抛异常，仅返回 Aborted
+    /// （Microsoft Learn Dispatcher.BeginInvoke Remarks），避免退出竞态下同步 Invoke
+    /// 因队列 abort 抛 TaskCanceledException 导致池线程崩溃。</summary>
     private static void OnUiThread(Action action)
     {
         var dispatcher = System.Windows.Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess()) action();
-        else dispatcher.Invoke(action);
+        else dispatcher.BeginInvoke(action);
     }
 
     private void DebugLog(string msg) => _logger.Info("AiCoordinator", msg);
@@ -874,18 +881,23 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         var speakers = _dispatcher.SelectSpeakers(petIds, allReply: _settings.Ai.AllReply);
         _ = Task.Run(async () =>
         {
-            var tasks = speakers.Select(petId => GenerateInteractionLineAsync(petId, trigger));
-            var lines = await Task.WhenAll(tasks); // 并行独立请求：一次等待而非 N 倍延迟
-            foreach (var line in lines)
+            try
             {
-                if (_shuttingDown || _coordinatorLifetime.IsCancellationRequested) return;
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                DebugLog($"[p6] route output length={line.Length}");
-                OnUiThread(() =>
+                var tasks = speakers.Select(petId => GenerateInteractionLineAsync(petId, trigger));
+                var lines = await Task.WhenAll(tasks); // 并行独立请求：一次等待而非 N 倍延迟
+                foreach (var line in lines)
                 {
-                    if (!_shuttingDown) _modeService.RouteOutput(new AiOutput(line, FromAnalysis: true));
-                });
+                    if (_shuttingDown || _coordinatorLifetime.IsCancellationRequested) return;
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    DebugLog($"[p6] route output length={line.Length}");
+                    OnUiThread(() =>
+                    {
+                        if (!_shuttingDown) _modeService.RouteOutput(new AiOutput(line, FromAnalysis: true));
+                    });
+                }
             }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { DebugLog($"[p6] interaction failed: {ex.Message}"); }
         });
     }
 
@@ -1054,14 +1066,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
                 File.WriteAllBytes(tmp, bytes);
                 OnUiThread(() =>
                 {
-                    _ttsPlayer.MediaEnded += (_, _) =>
-                    {
-                        try { File.Delete(tmp); }
-                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                        {
-                            _logger.Error("AiCoordinator", $"TTS temp cleanup failed: {ex.Message}");
-                        }
-                    };
+                    _pendingTtsTempPath = tmp;
                     _ttsPlayer.Open(new Uri(tmp));
                     _ttsPlayer.Play();
                 });
@@ -1071,6 +1076,19 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
                 DebugLog("tts failed: " + ex.Message); // 朗读失败不影响对话
             }
         });
+    }
+
+    /// <summary>播放结束后清理当前临时文件（单次订阅，防闭包累积）。</summary>
+    private void OnTtsMediaEnded(object? sender, EventArgs e)
+    {
+        var path = _pendingTtsTempPath;
+        _pendingTtsTempPath = null;
+        if (path is null) return;
+        try { File.Delete(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.Error("AiCoordinator", $"TTS temp cleanup failed: {ex.Message}");
+        }
     }
 
     /// <summary>总结图心情推断：从 CareState 饥饿度推导（简单规则，不引入新状态）。</summary>

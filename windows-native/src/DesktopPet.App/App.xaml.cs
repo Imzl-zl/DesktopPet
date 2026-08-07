@@ -13,6 +13,7 @@ using DesktopPet.App.Localization;
 using DesktopPet.App.Rendering;
 using DesktopPet.App.Tray;
 using DesktopPet.App.Windows;
+using DesktopPet.Infra.Storage;
 using DesktopPet.Core.Care;
 using DesktopPet.Core.Hotkeys;
 using DesktopPet.Core.Pets;

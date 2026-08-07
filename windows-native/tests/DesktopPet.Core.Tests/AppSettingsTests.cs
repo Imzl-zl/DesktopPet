@@ -150,6 +150,62 @@ public class AppSettingsTests
     }
 
     [Fact]
+    public void Normalize_ClampsDanmakuSettings()
+    {
+        var raw = AppSettings.Defaults(AppLang.En) with
+        {
+            DanmakuFontSize = 100,
+            DanmakuSpeedPercent = 0,
+            DanmakuTrackCount = 99,
+        };
+        var n = AppSettings.Normalize(raw);
+
+        Assert.Equal(48, n.DanmakuFontSize);   // 上限
+        Assert.Equal(50, n.DanmakuSpeedPercent); // 下限
+        Assert.Equal(20, n.DanmakuTrackCount);   // 上限
+    }
+
+    [Fact]
+    public void Deserialize_MissingDanmakuFields_FillDocumentDefaults()
+    {
+        // 旧 JSON 无弹幕字段 → converter 填默认值（而非 0 → clamp 到下限）
+        var json = """
+        {
+          "theme": "dark",
+          "bubbleOpacity": 80,
+          "fontSize": 14
+        }
+        """;
+
+        var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions.CamelCase)!;
+
+        Assert.Equal("dark", settings.Theme);
+        Assert.Equal(80, settings.BubbleOpacity);
+        Assert.Equal(30, settings.DanmakuFontSize);
+        Assert.Equal(100, settings.DanmakuSpeedPercent);
+        Assert.Equal(10, settings.DanmakuTrackCount);
+    }
+
+    [Fact]
+    public void Deserialize_MissingBubbleOpacity_FillsDefaultNotFloor()
+    {
+        // 回归：旧 JSON 缺数值字段曾被钳到下限（BubbleOpacity 92 → 0），升级后外观悄悄变化
+        var json = """
+        {
+          "theme": "light"
+        }
+        """;
+
+        var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions.CamelCase)!;
+
+        Assert.Equal(92, settings.BubbleOpacity);
+        Assert.Equal(12, settings.FontSize);
+        Assert.Equal(100, settings.PetSizePercent);
+        Assert.Equal(15, settings.IdleChatterIntervalSeconds);
+        Assert.Equal(4, settings.QuickBubbleDurationSeconds);
+    }
+
+    [Fact]
     public void FullSettings_SerializeRoundtrip_DoesNotStackOverflow()
     {
         // 回归：设置页保存路径（JsonOptions.CamelCase 序列化完整 AppSettings，内含 AiSettings 字段）。

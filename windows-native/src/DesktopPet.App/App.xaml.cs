@@ -123,10 +123,19 @@ public partial class App : Application
                 chatWindow.Topmost = !settingsForeground;
             var fullscreenDetector = new FullscreenWindowDetector();
             _modeService = new ModeService(
-                danmakuFactory: () => new DanmakuWindow(
-                    SystemParameters.VirtualScreenWidth,
-                    SystemParameters.VirtualScreenHeight,
-                    i18n: i18n),
+                danmakuFactory: () =>
+                {
+                    // 弹幕参数每次创建窗口时从最新设置读取（设置页气泡页可调）
+                    var danmakuSettings = AppSettings.Normalize(
+                        _store.LoadSettings() ?? AppSettings.Defaults(i18n.Lang));
+                    return new DanmakuWindow(
+                        SystemParameters.VirtualScreenWidth,
+                        SystemParameters.VirtualScreenHeight,
+                        trackCount: danmakuSettings.DanmakuTrackCount,
+                        i18n: i18n,
+                        fontSize: danmakuSettings.DanmakuFontSize,
+                        speedPercent: danmakuSettings.DanmakuSpeedPercent);
+                },
                 routeToChat: output =>
                 {
                     ShowChatWindow();

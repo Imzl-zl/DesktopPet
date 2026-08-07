@@ -1005,6 +1005,19 @@ public sealed class SettingsWindow : Window
         visibleToggle.Unchecked += (_, _) => UpdateInstance(instance.Id, new PetInstancePatch { Visible = false });
         controls.Children.Add(visibleToggle);
 
+        // 屏幕事件评论：AI 主动互动的事件驱动评论（切窗口/久坐/摸鱼）是否分派给这只宠物；定时问候不受影响
+        var reactsToggle = new CheckBox
+        {
+            Content = "屏幕事件评论",
+            Style = AppStyle("ToggleSwitchStyle"),
+            IsChecked = instance.ReactsToActivity,
+            Margin = new Thickness(0, 0, 16, 6),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        reactsToggle.Checked += (_, _) => UpdateInstance(instance.Id, new PetInstancePatch { ReactsToActivity = true });
+        reactsToggle.Unchecked += (_, _) => UpdateInstance(instance.Id, new PetInstancePatch { ReactsToActivity = false });
+        controls.Children.Add(reactsToggle);
+
         var persona = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -1373,7 +1386,7 @@ public sealed class SettingsWindow : Window
         fontCard.Children.Add(font);
         fontCard.Children.Add(new TextBlock
         {
-            Text = "气泡文字字体：系统默认（随系统）/ 圆体（Segoe UI Variable）/ 等宽（Consolas）",
+            Text = "气泡文字字体：系统默认（Segoe UI Variable）/ 圆体（微软正黑）/ 等宽（Cascadia Mono）",
             FontSize = 11,
             Foreground = Brush("TextTertiaryBrush"),
             Margin = new Thickness(0, 6, 0, 0),
@@ -1388,7 +1401,60 @@ public sealed class SettingsWindow : Window
             radio.Checked += (_, _) => Save(s => s with { LeftClickAction = value });
             click.Children.Add(radio);
         }
-        stack.Children.Add(SectionCard("点击宠物", click, margin: 0));
+        stack.Children.Add(SectionCard("点击宠物", click, margin: 12));
+
+        // ---- 弹幕参数（仅「弹幕」输出模式生效；模式在 AI 助手页选择）----
+        var danmakuCard = new StackPanel();
+        var danmakuFontSize = new Slider { Minimum = 16, Maximum = 48, Value = _settings.DanmakuFontSize, Width = 220, VerticalAlignment = VerticalAlignment.Center };
+        var danmakuFontSizeValue = new TextBlock
+        {
+            Text = $"{_settings.DanmakuFontSize}px",
+            Margin = new Thickness(12, 0, 0, 0),
+            FontSize = 12,
+            Foreground = Brush("TextSecondaryBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 40,
+        };
+        danmakuFontSize.ValueChanged += (_, e) => danmakuFontSizeValue.Text = $"{e.NewValue:0}px";
+        CommitSliderOnRelease(danmakuFontSize, () => Save(s => s with { DanmakuFontSize = (int)danmakuFontSize.Value }));
+        danmakuCard.Children.Add(Stacked("弹幕字号", Row(danmakuFontSize, danmakuFontSizeValue)));
+
+        var danmakuSpeed = new Slider { Minimum = 50, Maximum = 200, Value = _settings.DanmakuSpeedPercent, Width = 220, VerticalAlignment = VerticalAlignment.Center };
+        var danmakuSpeedValue = new TextBlock
+        {
+            Text = $"{_settings.DanmakuSpeedPercent}%",
+            Margin = new Thickness(12, 0, 0, 0),
+            FontSize = 12,
+            Foreground = Brush("TextSecondaryBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 40,
+        };
+        danmakuSpeed.ValueChanged += (_, e) => danmakuSpeedValue.Text = $"{e.NewValue:0}%";
+        CommitSliderOnRelease(danmakuSpeed, () => Save(s => s with { DanmakuSpeedPercent = (int)danmakuSpeed.Value }));
+        danmakuCard.Children.Add(Stacked("弹幕速度", Row(danmakuSpeed, danmakuSpeedValue)));
+
+        var danmakuTracks = new Slider { Minimum = 4, Maximum = 20, Value = _settings.DanmakuTrackCount, Width = 220, VerticalAlignment = VerticalAlignment.Center };
+        var danmakuTracksValue = new TextBlock
+        {
+            Text = _settings.DanmakuTrackCount.ToString(),
+            Margin = new Thickness(12, 0, 0, 0),
+            FontSize = 12,
+            Foreground = Brush("TextSecondaryBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 40,
+        };
+        danmakuTracks.ValueChanged += (_, e) => danmakuTracksValue.Text = $"{e.NewValue:0}";
+        CommitSliderOnRelease(danmakuTracks, () => Save(s => s with { DanmakuTrackCount = (int)danmakuTracks.Value }));
+        danmakuCard.Children.Add(Stacked("弹幕密度", Row(danmakuTracks, danmakuTracksValue)));
+        danmakuCard.Children.Add(new TextBlock
+        {
+            Text = "仅「弹幕」输出模式生效（AI 助手页选择）；轨道越多弹幕越密",
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 0),
+        });
+        stack.Children.Add(SectionCard("弹幕样式", danmakuCard, margin: 0));
 
         return PageScroller(stack, PageHeader("气泡", "预设气泡与点击行为"));
     }
@@ -1458,37 +1524,49 @@ public sealed class SettingsWindow : Window
         });
         stack.Children.Add(SectionCard("漫游速度", speedCard));
 
-        // 移动停顿：1-30s（引擎下限 1s，对齐 pause.ts）。爱动/不爱动用户都能调；"待着不动"模式下无意义但保留可调
+        // 移动停顿：1-30s（引擎下限 1s，对齐 pause.ts）。滑块语义 = 区间起点；
+        // 保存时保留原有随机跨度（max-min），只平移区间——避免单滑块把随机范围压扁。
         var pauseSeconds = Math.Max(1, (int)Math.Round(roam.WanderPauseMinMs / 1000.0));
+        var pauseSpanMs = Math.Max(500, roam.WanderPauseMaxMs - roam.WanderPauseMinMs);
         var pause = new Slider { Minimum = 1, Maximum = 30, Value = pauseSeconds, Width = 220, VerticalAlignment = VerticalAlignment.Center };
         var pauseValue = new TextBlock
         {
-            Text = $"{pauseSeconds}s",
+            Text = FormatPauseRange(roam.WanderPauseMinMs, roam.WanderPauseMaxMs),
             Margin = new Thickness(12, 0, 0, 0),
             FontSize = 12,
             Foreground = Brush("TextSecondaryBrush"),
             VerticalAlignment = VerticalAlignment.Center,
-            MinWidth = 40,
+            MinWidth = 80,
         };
-        pause.ValueChanged += (_, e) => pauseValue.Text = $"{(int)e.NewValue}s";
+        pause.ValueChanged += (_, e) => pauseValue.Text = FormatPauseRange(
+            e.NewValue * 1000, e.NewValue * 1000 + pauseSpanMs);
         CommitSliderOnRelease(pause, () =>
         {
             var v = (int)pause.Value;
-            var (min, max) = Pause.NormalizeWanderPauseRange(v * 1000.0, v * 1000.0 + 500);
+            var (min, max) = Pause.NormalizeWanderPauseRange(v * 1000.0, v * 1000.0 + pauseSpanMs);
             SaveRoam(_settings.Roam with { WanderPauseMinMs = min, WanderPauseMaxMs = max });
         });
         var pauseCard = new StackPanel();
         pauseCard.Children.Add(Row(pause, pauseValue));
         pauseCard.Children.Add(new TextBlock
         {
-            Text = "走一段后休息多久（1-30 秒）；调高让宠物更安静、调低更活跃；「待着不动」模式不生效",
+            Text = "走一段后休息多久（1-30 秒，区间内随机）；调高让宠物更安静、调低更活跃；「待着不动」模式不生效",
             FontSize = 11,
             Foreground = Brush("TextTertiaryBrush"),
             Margin = new Thickness(0, 6, 0, 0),
         });
         stack.Children.Add(SectionCard("移动停顿", pauseCard, margin: 0));
 
-        return PageScroller(stack, PageHeader("漫游", "宠物在桌面上的活动方式"));
+        stack.Children.Add(new TextBlock
+        {
+            Text = "此页为全局漫游设置，应用于所有宠物（导入宠物自带的独立漫游配置以全局为准）。",
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+        });
+
+        return PageScroller(stack, PageHeader("漫游", "宠物在桌面上的活动方式（应用于所有宠物）"));
     }
 
     // ---- 快捷键页 ----
@@ -1793,6 +1871,37 @@ public sealed class SettingsWindow : Window
             typeof(SettingsWindow).Assembly.GetName().Version);
         aboutStack.Children.Add(versionText);
         stack.Children.Add(Card(aboutStack));
+
+        // 开机自启（HKCU Run 键；对齐 macOS LoginItem）
+        var autoStart = new CheckBox
+        {
+            Content = "开机自启",
+            Style = AppStyle("ToggleSwitchStyle"),
+            IsChecked = Infra.Startup.AutoStart.IsEnabled(),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        autoStart.Click += (_, _) =>
+        {
+            try
+            {
+                Infra.Startup.AutoStart.SetEnabled(autoStart.IsChecked == true);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                autoStart.IsChecked = !(autoStart.IsChecked == true); // 回滚开关
+                MessageBox.Show(this, _i18n.Format("开机自启设置失败：{0}", ex.Message), "DesktopPet");
+            }
+        };
+        var autoStartCard = new StackPanel();
+        autoStartCard.Children.Add(autoStart);
+        autoStartCard.Children.Add(new TextBlock
+        {
+            Text = "登录 Windows 后自动启动桌面宠物（当前用户）",
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            Margin = new Thickness(0, 4, 0, 0),
+        });
+        stack.Children.Add(Card(autoStartCard));
 
         var statsStack = new StackPanel();
         statsStack.Children.Add(new TextBlock
@@ -2271,6 +2380,111 @@ public sealed class SettingsWindow : Window
             v => Save(s => s with { Ai = s.Ai with { SummaryImage = v } }), margin: 8));
         companionPanel.Children.Add(ToggleRow("语音朗读", "对话模式朗读回复，Edge TTS；弹幕模式不朗读", ai.TtsEnabled,
             v => Save(s => s with { Ai = s.Ai with { TtsEnabled = v } }), margin: 0));
+
+        // 免打扰时段：时段内不产生任何主动互动（定时问候 + 事件评论）；默认关 = 保持现有行为
+        var quietPanel = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+        quietPanel.Children.Add(ToggleRow("免打扰时段", "开启后在设定时段内不主动打扰（定时问候和事件评论都暂停）", ai.QuietHoursEnabled,
+            v => Save(s => s with { Ai = s.Ai with { QuietHoursEnabled = v } }), margin: 8));
+        var hourOptions = Enumerable.Range(0, 24).Select(h => $"{h:00}:00").ToArray();
+        var quietRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 4) };
+        quietRow.Children.Add(new TextBlock
+        {
+            Text = "从",
+            FontSize = 12,
+            Foreground = Brush("TextSecondaryBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+        });
+        var quietStart = new ComboBox
+        {
+            Width = 88,
+            Height = 28,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 12, 0),
+        };
+        foreach (var h in hourOptions) quietStart.Items.Add(h);
+        quietStart.SelectedIndex = Math.Clamp(ai.QuietHoursStart, 0, 23);
+        quietStart.SelectionChanged += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { QuietHoursStart = Math.Max(0, quietStart.SelectedIndex) } });
+        quietRow.Children.Add(quietStart);
+        quietRow.Children.Add(new TextBlock
+        {
+            Text = "到",
+            FontSize = 12,
+            Foreground = Brush("TextSecondaryBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+        });
+        var quietEnd = new ComboBox
+        {
+            Width = 88,
+            Height = 28,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        foreach (var h in hourOptions) quietEnd.Items.Add(h);
+        quietEnd.SelectedIndex = Math.Clamp(ai.QuietHoursEnd, 0, 23);
+        quietEnd.SelectionChanged += (_, _) =>
+            Save(s => s with { Ai = s.Ai with { QuietHoursEnd = Math.Max(0, quietEnd.SelectedIndex) } });
+        quietRow.Children.Add(quietEnd);
+        quietPanel.Children.Add(quietRow);
+        quietPanel.Children.Add(new TextBlock
+        {
+            Text = "默认 23:00-05:00（睡眠时段）；结束小时早于开始小时 = 跨午夜",
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        companionPanel.Children.Add(quietPanel);
+
+        // 朗读声音：空 = 按界面语言自动选择（Edge TTS 声音，仅「语音朗读」开启时生效）
+        var voiceRow = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+        voiceRow.Children.Add(new TextBlock
+        {
+            Text = "朗读声音",
+            FontSize = 12,
+            Foreground = Brush("TextPrimaryBrush"),
+        });
+        var voiceCombo = new ComboBox
+        {
+            Width = 280,
+            Height = 30,
+            FontSize = 12,
+            Margin = new Thickness(0, 4, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        var voices = new (string Name, string Label)[]
+        {
+            ("", "自动（跟随界面语言）"),
+            ("zh-CN-XiaoxiaoNeural", "中文 · 晓晓（女）"),
+            ("zh-CN-XiaoyiNeural", "中文 · 晓伊（女）"),
+            ("zh-CN-YunxiNeural", "中文 · 云希（男）"),
+            ("zh-CN-YunjianNeural", "中文 · 云健（男）"),
+            ("zh-TW-HsiaoChenNeural", "繁體中文 · 曉臻（女）"),
+            ("en-US-JennyNeural", "English · Jenny (female)"),
+            ("en-US-GuyNeural", "English · Guy (male)"),
+            ("ja-JP-NanamiNeural", "日本語 · Nanami (female)"),
+            ("ko-KR-SunHiNeural", "한국어 · SunHi (female)"),
+            ("vi-VN-HoaiMyNeural", "Tiếng Việt · HoaiMy (female)"),
+        };
+        voiceCombo.SelectedIndex = Math.Max(0,
+            Array.FindIndex(voices, v => v.Name == ai.TtsVoiceName));
+        voiceCombo.SelectionChanged += (_, _) =>
+        {
+            var picked = voices[Math.Max(0, voiceCombo.SelectedIndex)].Name;
+            Save(s => s with { Ai = s.Ai with { TtsVoiceName = picked } });
+        };
+        voiceRow.Children.Add(voiceCombo);
+        voiceRow.Children.Add(new TextBlock
+        {
+            Text = "Edge TTS 在线声音；自动模式按界面语言选择默认声音",
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        });
+        companionPanel.Children.Add(voiceRow);
         stack.Children.Add(SectionCard("陪伴功能（记忆 / 主动互动 / 亲密度 / 每日总结 / 语音）", companionPanel));
 
         // 人格卡片网格
@@ -3171,6 +3385,14 @@ public sealed class SettingsWindow : Window
 
     private void SaveRoam(Core.Roaming.RoamConfig roam)
         => Save(s => s with { Roam = roam });
+
+    /// <summary>停顿范围显示：如 "1.2–3.5s"（保留区间信息，避免单值误导）。</summary>
+    private static string FormatPauseRange(double minMs, double maxMs)
+    {
+        var min = (minMs / 1000.0).ToString("0.#", System.Globalization.CultureInfo.CurrentCulture);
+        var max = (maxMs / 1000.0).ToString("0.#", System.Globalization.CultureInfo.CurrentCulture);
+        return $"{min}–{max}s";
+    }
 
     protected override void OnClosed(EventArgs e)
     {

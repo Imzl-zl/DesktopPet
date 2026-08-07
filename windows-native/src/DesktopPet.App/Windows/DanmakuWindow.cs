@@ -26,12 +26,7 @@ public sealed class DanmakuWindow : Window
 {
     private readonly DanmakuEngine _engine;
     private readonly double _trackHeight;
-    private readonly CanvasTextFormat _textFormat = new()
-    {
-        FontSize = 30,
-        FontFamily = "Microsoft YaHei UI",
-        WordWrapping = CanvasWordWrapping.NoWrap,
-    };
+    private readonly CanvasTextFormat _textFormat;
     private XamlIslandHost? _island;
     private CanvasAnimatedControl? _canvas;
     private long _frameCount;
@@ -46,7 +41,9 @@ public sealed class DanmakuWindow : Window
         double width,
         double height,
         int trackCount = 10,
-        I18nService? i18n = null)
+        I18nService? i18n = null,
+        int fontSize = 30,
+        int speedPercent = 100)
     {
         _i18n = i18n ?? new I18nService();
         Title = _i18n.T("DesktopPet Danmaku");
@@ -59,8 +56,22 @@ public sealed class DanmakuWindow : Window
         Top = 0;
         Width = width;
         Height = height;
-        _engine = new DanmakuEngine(width, trackCount, minSpeed: 220, maxSpeed: 420, minGap: 220);
-        _trackHeight = height / Math.Max(1, trackCount);
+        // 设置页气泡页弹幕参数：字号 16-48、速度 50-200%（乘到引擎速度区间）、轨道数 4-20
+        var speedScale = Math.Clamp(speedPercent, 50, 200) / 100.0;
+        _textFormat = new CanvasTextFormat
+        {
+            FontSize = Math.Clamp(fontSize, 16, 48),
+            FontFamily = "Microsoft YaHei UI",
+            WordWrapping = CanvasWordWrapping.NoWrap,
+        };
+        var clampedTracks = Math.Clamp(trackCount, 4, 20);
+        _engine = new DanmakuEngine(
+            width,
+            clampedTracks,
+            minSpeed: 220 * speedScale,
+            maxSpeed: 420 * speedScale,
+            minGap: 220);
+        _trackHeight = height / Math.Max(1, clampedTracks);
 
         _island = new XamlIslandHost(BuildCanvas);
         Content = _island;

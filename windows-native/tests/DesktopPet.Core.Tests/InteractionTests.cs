@@ -213,4 +213,47 @@ public class InteractionTests
         var events = new[] { Ev(ScreenEventKind.AppSwitch, Morning.AddMinutes(-1)) };
         Assert.False(e.TryNextTrigger(Morning, events, out _));
     }
+
+    // ---- 免打扰时段 ----
+
+    [Fact]
+    public void QuietHours_BlocksAllTriggers_WhenEnabled()
+    {
+        var e = New();
+        e.UpdateQuietHours(enabled: true, start: 23, end: 5);
+        var lateNight = new DateTime(2026, 8, 5, 23, 30, 0);
+        var earlyMorning = new DateTime(2026, 8, 6, 2, 0, 0);
+        Assert.False(e.TryNextTrigger(lateNight, [], out _));      // 定时问候被拦
+        Assert.False(e.TryNextTrigger(earlyMorning, [], out _));
+        var events = new[] { Ev(ScreenEventKind.AppSwitch, earlyMorning.AddMinutes(-1)) };
+        Assert.False(e.TryNextTrigger(earlyMorning, events, out _)); // 事件评论被拦
+    }
+
+    [Fact]
+    public void QuietHours_Disabled_KeepsExistingBehavior()
+    {
+        var e = New();
+        e.UpdateQuietHours(enabled: false, start: 23, end: 5); // 默认关
+        Assert.True(e.TryNextTrigger(new DateTime(2026, 8, 5, 23, 30, 0), [], out var t));
+        Assert.Equal("late-night", t!.Reason); // 深夜关心问候保持
+    }
+
+    [Fact]
+    public void QuietHours_OutsideWindow_NormalTriggers()
+    {
+        var e = New();
+        e.UpdateQuietHours(enabled: true, start: 23, end: 5);
+        Assert.True(e.TryNextTrigger(Morning, [], out _)); // 9 点不在免打扰内
+    }
+
+    [Fact]
+    public void QuietHours_IsInQuietHours_SameStartEnd_MeansAllDay()
+    {
+        Assert.True(Storage.AiSettings.IsInQuietHours(12, 0, 0));
+        Assert.True(Storage.AiSettings.IsInQuietHours(0, 23, 5));   // 跨午夜：0 点在内
+        Assert.True(Storage.AiSettings.IsInQuietHours(23, 23, 5));  // 跨午夜：23 点在内
+        Assert.False(Storage.AiSettings.IsInQuietHours(12, 23, 5)); // 中午不在内
+        Assert.True(Storage.AiSettings.IsInQuietHours(9, 8, 18));   // 同日段：在内
+        Assert.False(Storage.AiSettings.IsInQuietHours(20, 8, 18)); // 同日段：在外
+    }
 }

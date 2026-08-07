@@ -127,6 +127,10 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             _settings.Ai.InteractionFrequency,
             _settings.Ai.ScreenAwareness);
         _interaction.SetEnabled(_settings.Ai.ActiveInteraction);
+        _interaction.UpdateQuietHours(
+            _settings.Ai.QuietHoursEnabled,
+            _settings.Ai.QuietHoursStart,
+            _settings.Ai.QuietHoursEnd);
         _tickTimer = new System.Threading.Timer(Tick, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 
@@ -175,6 +179,10 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         _interaction.SetEnabled(settings.Ai.ActiveInteraction);
         _interaction.UpdateFrequency(settings.Ai.InteractionFrequency);
         _interaction.UpdateScreenAwareness(settings.Ai.ScreenAwareness);
+        _interaction.UpdateQuietHours(
+            settings.Ai.QuietHoursEnabled,
+            settings.Ai.QuietHoursStart,
+            settings.Ai.QuietHoursEnd);
         _chatWindow.TtsEnabled = settings.Ai.TtsEnabled;
         _ttsSessionEnabled = settings.Ai.TtsEnabled;
         _chatWindow.ScreenContextEnabled = settings.Ai.ScreenContextEnabled;
@@ -873,6 +881,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
 
         var petIds = (_store.LoadPetStore()?.Instances ?? [])
             .Where(i => i.Visible)
+            .Where(i => !IsEventDriven(trigger.Reason) || i.ReactsToActivity)
             .Select(i => i.Id)
             .ToArray();
         if (petIds.Length == 0) return;
@@ -900,6 +909,10 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             catch (Exception ex) { DebugLog($"[p6] interaction failed: {ex.Message}"); }
         });
     }
+
+    /// <summary>事件驱动评论（屏幕事件触发）只分派给「对活动做出反应」的宠物；定时问候全部分派。</summary>
+    private static bool IsEventDriven(string reason)
+        => reason is not ("morning" or "evening" or "late-night");
 
     /// <summary>单只宠物的主动互动台词（P1 优先级，8s 超时；失败跳过本轮）。
     /// 记忆注入（"隔天主动提起"）+ 亲密度指令 + 每宠物独立人格（PersonaId 覆盖全局）。</summary>
@@ -1059,8 +1072,12 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         {
             try
             {
+                // 朗读声音：设置页可选；空 = 按界面语言自动选择默认声音
+                var voiceName = _settings.Ai.TtsVoiceName;
+                if (string.IsNullOrEmpty(voiceName))
+                    voiceName = Core.Storage.AiSettings.DefaultVoiceFor(_settings.Lang);
                 using var stream = await _tts.SynthesizeAsync(
-                    text, new TtsVoice("zh-CN-XiaoxiaoNeural", "zh-CN"), CancellationToken.None);
+                    text, TtsVoice.FromName(voiceName), CancellationToken.None);
                 var bytes = ((MemoryStream)stream).ToArray();
                 var tmp = Path.Combine(Path.GetTempPath(), $"desktoppet-tts-{Guid.NewGuid():N}.wav");
                 File.WriteAllBytes(tmp, bytes);

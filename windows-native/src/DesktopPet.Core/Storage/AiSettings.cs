@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DesktopPet.Core.I18n;
 
 namespace DesktopPet.Core.Storage;
 
@@ -32,7 +33,11 @@ public sealed record AiSettings(
     bool TtsEnabled,            // 语音朗读开关（默认关；仅对话模式朗读，弹幕不朗读）
     bool AllReply,              // 多宠物全员回应（默认关；开 = 同一事件每只宠物都生成）
     int ScreenAnalysisIntervalSeconds = 5, // 截屏分析间隔 3-30s（隐私/云端费用敏感，默认 5）
-    bool Onboarded = false)     // 初始化引导已完成（称呼+人格首次设置；开启 AI 后弹引导窗）
+    bool Onboarded = false,     // 初始化引导已完成（称呼+人格首次设置；开启 AI 后弹引导窗）
+    string TtsVoiceName = "",  // 朗读声音（Edge TTS 声音名；空 = 按界面语言自动选择）
+    bool QuietHoursEnabled = false, // 免打扰时段开关（默认关 = 保持现有问候行为）
+    int QuietHoursStart = 23,   // 免打扰开始小时（0-23，默认 23）
+    int QuietHoursEnd = 5)      // 免打扰结束小时（0-23，默认 5；跨午夜：23→5）
 {
     public const string FrequencyLow = "low";
     public const string FrequencyMedium = "medium";
@@ -54,6 +59,27 @@ public sealed record AiSettings(
         SummaryImage: false,
         TtsEnabled: false,
         AllReply: false);
+
+    /// <summary>是否处于免打扰时段（跨午夜：start > end 时按环形判断；start == end = 全天）。</summary>
+    public static bool IsInQuietHours(int hour, int start, int end)
+    {
+        start = Math.Clamp(start, 0, 23);
+        end = Math.Clamp(end, 0, 23);
+        return start == end
+            ? true
+            : start < end
+                ? hour >= start && hour < end
+                : hour >= start || hour < end;
+    }
+
+    /// <summary>朗读声音：空 = 按界面语言自动选择。</summary>
+    public static string DefaultVoiceFor(AppLang lang) => lang switch
+    {
+        AppLang.En => "en-US-JennyNeural",
+        AppLang.ZhHant => "zh-TW-HsiaoChenNeural",
+        AppLang.Vi => "vi-VN-HoaiMyNeural",
+        _ => "zh-CN-XiaoxiaoNeural",
+    };
 
     public static AiSettings Normalize(AiSettings? raw)
     {
@@ -88,7 +114,11 @@ public sealed record AiSettings(
             raw.TtsEnabled,
             raw.AllReply,
             Math.Clamp(raw.ScreenAnalysisIntervalSeconds, 3, 30),
-            raw.Onboarded);
+            raw.Onboarded,
+            raw.TtsVoiceName ?? "",
+            raw.QuietHoursEnabled,
+            Math.Clamp(raw.QuietHoursStart, 0, 23),
+            Math.Clamp(raw.QuietHoursEnd, 0, 23));
     }
 }
 
@@ -120,6 +150,10 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         var allReply = defaults.AllReply;
         var onboarded = defaults.Onboarded;
         var screenAnalysisIntervalSeconds = defaults.ScreenAnalysisIntervalSeconds;
+        var ttsVoiceName = defaults.TtsVoiceName;
+        var quietHoursEnabled = defaults.QuietHoursEnabled;
+        var quietHoursStart = defaults.QuietHoursStart;
+        var quietHoursEnd = defaults.QuietHoursEnd;
 
         var camel = options.PropertyNamingPolicy ?? JsonNamingPolicy.CamelCase;
         while (reader.Read())
@@ -147,6 +181,10 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
                 case "allReply": allReply = ReadBool(ref reader); break;
                 case "screenAnalysisIntervalSeconds": screenAnalysisIntervalSeconds = ReadInt(ref reader) ?? defaults.ScreenAnalysisIntervalSeconds; break;
                 case "onboarded": onboarded = ReadBool(ref reader); break;
+                case "ttsVoiceName": ttsVoiceName = ReadString(ref reader) ?? ""; break;
+                case "quietHoursEnabled": quietHoursEnabled = ReadBool(ref reader); break;
+                case "quietHoursStart": quietHoursStart = ReadInt(ref reader) ?? defaults.QuietHoursStart; break;
+                case "quietHoursEnd": quietHoursEnd = ReadInt(ref reader) ?? defaults.QuietHoursEnd; break;
                 default: reader.Skip(); break; // 未知字段容忍（前向兼容）
             }
         }
@@ -154,7 +192,8 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         return new AiSettings(
             enabled, screenAnalysis, outputMode, screenContextEnabled, providerId,
             memoryEnabled, activeInteraction, interactionFrequency, screenAwareness,
-            intimacyEnabled, dailySummary, summaryImage, ttsEnabled, allReply, screenAnalysisIntervalSeconds, onboarded);
+            intimacyEnabled, dailySummary, summaryImage, ttsEnabled, allReply, screenAnalysisIntervalSeconds, onboarded, ttsVoiceName,
+            quietHoursEnabled, quietHoursStart, quietHoursEnd);
     }
 
     public override void Write(Utf8JsonWriter writer, AiSettings value, JsonSerializerOptions options)
@@ -183,6 +222,10 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         v.AllReply,
         v.ScreenAnalysisIntervalSeconds,
         v.Onboarded,
+        v.TtsVoiceName,
+        v.QuietHoursEnabled,
+        v.QuietHoursStart,
+        v.QuietHoursEnd,
     };
 
     private static bool ReadBool(ref Utf8JsonReader reader)

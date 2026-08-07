@@ -27,6 +27,9 @@ public sealed class InteractionEngine
     private bool _screenAwareness;
     private InteractionEngineState _state;
     private bool _enabled = true;
+    private bool _quietHoursEnabled;
+    private int _quietHoursStart;
+    private int _quietHoursEnd;
 
     public InteractionEngine(InteractionEngineState state, string frequency, bool screenAwareness)
     {
@@ -39,6 +42,14 @@ public sealed class InteractionEngine
     public void UpdateFrequency(string frequency) => _frequency = NormalizeFrequency(frequency);
 
     public void UpdateScreenAwareness(bool enabled) => _screenAwareness = enabled;
+
+    /// <summary>免打扰时段（默认关：保持现有问候行为；开启后在时段内不产生任何主动互动）。</summary>
+    public void UpdateQuietHours(bool enabled, int start, int end)
+    {
+        _quietHoursEnabled = enabled;
+        _quietHoursStart = Math.Clamp(start, 0, 23);
+        _quietHoursEnd = Math.Clamp(end, 0, 23);
+    }
 
     private static string NormalizeFrequency(string frequency) => frequency switch
     {
@@ -61,6 +72,9 @@ public sealed class InteractionEngine
     {
         trigger = null;
         if (!_enabled) return false;
+        // 免打扰时段：不产生任何主动互动（定时问候 + 事件评论）
+        if (_quietHoursEnabled && Storage.AiSettings.IsInQuietHours(now.Hour, _quietHoursStart, _quietHoursEnd))
+            return false;
 
         // 1) 事件驱动（需屏幕感知）
         if (_screenAwareness && recentEvents.Count > 0)

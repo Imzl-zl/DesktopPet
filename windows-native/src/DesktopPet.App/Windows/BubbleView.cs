@@ -8,7 +8,8 @@ namespace DesktopPet.App.Windows;
 
 /// <summary>
 /// 宠物气泡（对齐 bubble.ts 的 BubbleRenderer）：多行自适应胶囊、文本变化交叉淡入
-/// （150ms ease，Lumen 动效规范）、重复文本 no-op、headroom 定位在宠物头顶。
+/// （150ms ease，Lumen 动效规范）、重复文本 no-op、底部锚定在宠物实际可见头顶上方
+/// （SnugToHeadTop，修正帧内透明边，任意宠物不压头）。
 /// 长文本换行显示，最大宽度 240px，避免常驻桌面气泡遮挡工作内容。
 /// 外观（主题/不透明度/字号/字体）由设置页驱动：ApplyAppearance 全量刷新。
 /// </summary>
@@ -77,7 +78,8 @@ public sealed class BubbleView : Border
         _text.FontSize = _fontSize;
         _text.FontFamily = _fontFamily switch
         {
-            "rounded" => new FontFamily("Segoe UI Variable, Microsoft YaHei UI"),
+            // 圆体 = 微软正黑/游黑（字形圆润，与系统默认 Segoe UI Variable 拉开视觉差异）
+            "rounded" => new FontFamily("Microsoft JhengHei UI, Yu Gothic UI, Microsoft YaHei UI"),
             "mono" => new FontFamily("Cascadia Mono, Consolas"),
             _ => new FontFamily("Segoe UI Variable, Microsoft YaHei UI, Segoe UI"),
         };
@@ -121,14 +123,19 @@ public sealed class BubbleView : Border
         Visibility = Visibility.Collapsed;
     }
 
-    /// <summary>气泡紧贴宠物头顶（headroom 间隙，对齐 snugBubble：整数 px 防抖动）。</summary>
-    public void SnugToHeadroom(double headroomGapPx)
+    /// <summary>
+    /// 气泡底锚定在宠物实际可见头顶上方（gapAboveHeadPx 间隙，整数 px 防抖动）。
+    /// 气泡本身底部对齐窗口（VerticalAlignment.Bottom），向上平移 = 头顶间隙 + 头到窗口底距离，
+    /// 高度随文本自适应，任何宠物都坐稳头顶，不会压头。
+    /// </summary>
+    public void SnugToHeadTop(double gapAboveHeadPx)
     {
-        var gap = Math.Floor(Math.Max(0, headroomGapPx));
+        var up = Math.Floor(Math.Max(0, gapAboveHeadPx));
         var transform = (TranslateTransform)RenderTransform;
-        if (Math.Abs(transform.Y - gap) > 0.01)
+        var target = -up;
+        if (Math.Abs(transform.Y - target) > 0.01)
         {
-            transform.Y = gap;
+            transform.Y = target;
         }
     }
 

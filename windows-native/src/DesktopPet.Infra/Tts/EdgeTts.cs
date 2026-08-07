@@ -4,7 +4,12 @@ using System.Text;
 namespace DesktopPet.Infra.Tts;
 
 /// <summary>TTS 音色（Edge TTS 名称，如 zh-CN-XiaoxiaoNeural）。</summary>
-public sealed record TtsVoice(string Name, string Language);
+public sealed record TtsVoice(string Name, string Language)
+{
+    /// <summary>由完整声音名（如 "zh-CN-XiaoxiaoNeural"）推导语言标签（"zh-CN"）。</summary>
+    public static TtsVoice FromName(string name)
+        => new(name, name.Length >= 5 ? name[..5] : "zh-CN");
+}
 
 /// <summary>
 /// TTS Provider 契约（架构文档 §3.2）。实现：EdgeTtsProvider（默认，免费）。

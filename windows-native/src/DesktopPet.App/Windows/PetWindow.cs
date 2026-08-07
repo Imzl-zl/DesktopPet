@@ -177,13 +177,12 @@ public sealed class PetWindow : Window
         _image.SnapsToDevicePixels = true;
         RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.NearestNeighbor);
 
-        // 气泡层叠在精灵上方，顶部对齐（headroom 由 SnugToHeadroom 控制）
+        // 气泡层叠在精灵上方，底部锚定窗口底（SnugToHeadTop 向上平移至头顶上方，高度自适应）
         var root = new Grid();
         root.Children.Add(_image);
         root.Children.Add(_bubble);
         _bubble.HorizontalAlignment = HorizontalAlignment.Center;
-        _bubble.VerticalAlignment = VerticalAlignment.Top;
-        _bubble.Margin = new Thickness(0, 8, 0, 0);
+        _bubble.VerticalAlignment = VerticalAlignment.Bottom;
         Content = root;
 
         _animationTimer = new DispatcherTimer(DispatcherPriority.Render)
@@ -222,17 +221,24 @@ public sealed class PetWindow : Window
             environmentSource,
             () =>
             {
-                // 全局漫游设置优先（设置页漫游页）；未下发时回退实例字段（导入默认）
-                if (_roamConfig is not null) return _roamConfig;
-                var instance = _instance;
+                // 成长阶段能力限制对所有路径一致生效：Cursor（Companion+）/ Climb（Scout+）
                 var stage = CareEngine.StageIndex(CareEngine.LevelForXp(_careState.Xp));
                 var caps = StageCapabilitiesFor.For(stage);
-                var mode = instance.RoamMode;
-                if (mode == RoamMode.Cursor && !caps.CursorMode) mode = RoamMode.Wander;
-                if (mode == RoamMode.Climb && !caps.ClimbMode) mode = RoamMode.Wander;
+                // 全局漫游设置优先（设置页漫游页，唯一 UI 真值）；实例字段为 Tauri 迁移兼容兜底
+                if (_roamConfig is not null)
+                {
+                    var mode = _roamConfig.Mode;
+                    if (mode == RoamMode.Cursor && !caps.CursorMode) mode = RoamMode.Wander;
+                    if (mode == RoamMode.Climb && !caps.ClimbMode) mode = RoamMode.Wander;
+                    return mode == _roamConfig.Mode ? _roamConfig : _roamConfig with { Mode = mode };
+                }
+                var instance = _instance;
+                var instanceMode = instance.RoamMode;
+                if (instanceMode == RoamMode.Cursor && !caps.CursorMode) instanceMode = RoamMode.Wander;
+                if (instanceMode == RoamMode.Climb && !caps.ClimbMode) instanceMode = RoamMode.Wander;
                 return new RoamConfig(
                     instance.RoamEnabled,
-                    mode,
+                    instanceMode,
                     (int)Math.Max(1, instance.RoamSpeed * caps.SpeedFactor),
                     instance.WanderPauseMinMs,
                     instance.WanderPauseMaxMs);
@@ -347,6 +353,8 @@ public sealed class PetWindow : Window
         // 动画总开关即时生效（关 = 静态显示当前帧）
         if (_userAnimationEnabled) UpdateTimerState();
         else _animationTimer.Stop();
+        // 动画关闭时无帧循环：强制重绘一次，保证尺寸/外观等设置即时生效
+        DrawFrame(0);
 
         // 闲谈开关变化 → 强制重选台词（ShowIdleChatter 关时 PickMoodLine 返回空）
         _moodLine = null;
@@ -494,12 +502,21 @@ public sealed class PetWindow : Window
             : null;
     }
 
+    /// <summary>气泡底与宠物实际可见头顶的间隙（DIP；此前 margin 8 语义的延续）。</summary>
+    private const double BubbleHeadGapPx = 6;
+
+    /// <summary>
+    /// 气泡底锚定在实际可见头顶上方：SpriteRect.Y（帧顶，含 bob）+ ContentTopInset
+    /// （帧内透明边修正）= 实际头顶；从窗口底上移「头到窗口底距离 + 间隙」。
+    /// 旧实现按帧矩形顶定位，帧内透明边大的宠物气泡悬空、小的直接压头。
+    /// </summary>
     private void SnugBubble()
     {
         if (_renderer is not null)
         {
-            // 气泡坐在精灵头顶：headroom 占 buffer 比例 × 窗口高度
-            _bubble.SnugToHeadroom(_renderer.Headroom * Height);
+            var (_, y, _, _) = _renderer.SpriteRect;
+            var up = (_bufferHeight - (y + _renderer.ContentTopInset)) / _dpiScale + BubbleHeadGapPx;
+            _bubble.SnugToHeadTop(up);
         }
     }
 
@@ -834,10 +851,11 @@ public sealed class PetWindow : Window
 
     private (int Scale, int Dx, int Dy) SpritePlacement()
     {
-        var scale = Math.Max(1, Math.Min(
+        var fit = Math.Max(1, Math.Min(
             _bufferWidth / PlaceholderPet.FrameWidth,
-            _bufferHeight / PlaceholderPet.FrameHeight));
-        return (scale, (_bufferWidth - PlaceholderPet.FrameWidth * scale) / 2, _bufferHeight - PlaceholderPet.FrameHeight * scale);
+            _bufferHeight / PlaceholderPet.FrameHeight)) * (_settings?.PetSizePercent ?? 100) / 100.0;
+        var scale = Math.Max(1, (int)Math.Floor(fit)); // 占位精灵保持整数块缩放
+        return (scale, (int)((_bufferWidth - PlaceholderPet.FrameWidth * scale) / 2), (int)(_bufferHeight - PlaceholderPet.FrameHeight * scale));
     }
 
     /// <summary>Displays cached retained frames when no dynamic stage overlay is active.</summary>

@@ -159,16 +159,31 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
 
     public override void Write(Utf8JsonWriter writer, AiSettings value, JsonSerializerOptions options)
     {
-        // 默认 record 反射序列化即输出全字段（手写逐字段与默认行为重复且易漂移）；
-        // 用移除本 converter 的 options 副本避免递归，保留其余 converter（如枚举字符串）。
-        var plain = new JsonSerializerOptions(options);
-        for (var i = plain.Converters.Count - 1; i >= 0; i--)
-        {
-            if (plain.Converters[i] is AiSettingsJsonConverter)
-                plain.Converters.RemoveAt(i);
-        }
-        JsonSerializer.Serialize(writer, value, plain);
+        // 类型级 [JsonConverter] 特性优先于 options 集合：Write 内再次 Serialize 同一类型
+        // 必然解析回本 converter → 无限递归（StackOverflow）。官方推荐 = 序列化 DTO 投影：
+        // 匿名类型无特性 converter，反射输出与默认行为一致（命名策略照常应用）。
+        JsonSerializer.Serialize(writer, ToDto(value), options);
     }
+
+    private static object ToDto(AiSettings v) => new
+    {
+        v.Enabled,
+        v.ScreenAnalysis,
+        v.OutputMode,
+        v.ScreenContextEnabled,
+        v.ProviderId,
+        v.MemoryEnabled,
+        v.ActiveInteraction,
+        v.InteractionFrequency,
+        v.ScreenAwareness,
+        v.IntimacyEnabled,
+        v.DailySummary,
+        v.SummaryImage,
+        v.TtsEnabled,
+        v.AllReply,
+        v.ScreenAnalysisIntervalSeconds,
+        v.Onboarded,
+    };
 
     private static bool ReadBool(ref Utf8JsonReader reader)
         => reader.TokenType == JsonTokenType.True || reader.TokenType == JsonTokenType.False

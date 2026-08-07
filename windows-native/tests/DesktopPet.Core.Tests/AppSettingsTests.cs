@@ -2,6 +2,7 @@ using DesktopPet.Core.Hotkeys;
 using DesktopPet.Core.I18n;
 using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
+using System.Text.Json;
 using Xunit;
 
 namespace DesktopPet.Core.Tests;
@@ -146,5 +147,28 @@ public class AppSettingsTests
     {
         var raw = AppSettings.Defaults(AppLang.En) with { IdleChatterIntervalSeconds = 1 };
         Assert.Equal(5, AppSettings.Normalize(raw).IdleChatterIntervalSeconds);
+    }
+
+    [Fact]
+    public void FullSettings_SerializeRoundtrip_DoesNotStackOverflow()
+    {
+        // 回归：设置页保存路径（JsonOptions.CamelCase 序列化完整 AppSettings，内含 AiSettings 字段）。
+        // 类型级 [JsonConverter] 使 converter 内再 Serialize 同类型必然递归——
+        // 曾因 Write 委托默认序列化导致 StackOverflowException（App 点击设置开关即崩）。
+        // 注意：AppSettings 含数组属性（QuickBubblePresets 等），record 相等按引用比较，
+        // 故只对无数组的 AiSettings 做整体相等断言，其余核对关键标量。
+        var settings = AppSettings.Normalize(AppSettings.Defaults(AppLang.ZhHans)) with
+        {
+            Ai = AppSettings.Defaults(AppLang.ZhHans).Ai with { TtsEnabled = true, AllReply = true, Onboarded = true },
+        };
+
+        var json = JsonSerializer.Serialize(settings, JsonOptions.CamelCase);
+        var back = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions.CamelCase)!;
+
+        Assert.Equal(settings.Ai, back.Ai);
+        Assert.Equal(settings.Roam, back.Roam);
+        Assert.Equal(settings.Lang, back.Lang);
+        Assert.Equal(settings.AnimationEnabled, back.AnimationEnabled);
+        Assert.Equal(settings.PetSizePercent, back.PetSizePercent);
     }
 }

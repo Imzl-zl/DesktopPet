@@ -7,6 +7,12 @@
 
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <ApplicationIcon>..\DesktopPet.App\Assets\app.ico</ApplicationIcon>
+    <Version>1.14.0</Version>
+    <Product>DesktopPet</Product>
+    <Company>DesktopPet</Company>
+    <Copyright>Copyright © 2026 DesktopPet</Copyright>
   </PropertyGroup>
 
   <ItemGroup>

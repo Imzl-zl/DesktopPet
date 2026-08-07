@@ -80,6 +80,7 @@ public sealed class SettingsWindow : Window
         _manager = manager;
         _spriteLoader = spriteLoader;
         _i18n = i18n;
+        Icon = AppIcons.WindowIcon();
         _ai = ai;
         _applyHotkeys = applyHotkeys;
         _changeLanguage = changeLanguage;

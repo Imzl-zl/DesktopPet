@@ -146,6 +146,7 @@ public sealed class ChatWindow : Window
     {
         _i18n = i18n ?? new I18nService();
         Title = "DesktopPet 对话";
+        Icon = AppIcons.WindowIcon();
         Width = 400;
         Height = 540;
         MinWidth = 320;

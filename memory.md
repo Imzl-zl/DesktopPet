@@ -7,15 +7,16 @@
 - macOS 主版（SwiftPM）：`swift build` / `swift test` 通过；打包 `./scripts/build-app.sh release`。
 - Windows 版（.NET 8 + WPF）：Core 370 / Infra 96 / Agent 33 / App 38 顺序测试通过（537 total）；`dotnet build windows-native/DesktopPet.sln --no-restore -p:Platform=x64` 为 0 warning / 0 error。
 - Windows 上 Swift core 验证：`./scripts/verify-core-windows.sh`（54 个 core 测试）。
-- 最后更新：2026-08-06
+- 最后更新：2026-08-07
 
 ## 已完成能力
 - macOS 桌宠完整功能：养成（XP/五阶段/成就）、精灵导入切片、气泡、休息提醒、4 语言本地化、菜单栏应用 + Sparkle 更新。
 - Windows .NET 8 + WPF 迁移全部完工，Tauri 旧版（`windows/`）已删除。
-- Windows 版：宠物/漫游、气泡、引导、分层会话记忆、可插拔模型/TTS/生图、四优先级 AI 运行时、捕获/渲染/拖拽/弹幕资源生命周期、可配置事务型全局快捷键与连接级凭据迁移。
-- Windows 重要项 I1-I17 的实现子任务 1-4 已完成：730-key 英/简中/繁中/越南语同集 catalog 与持久化后发布的实时刷新；`%APPDATA%/DesktopPet/logs` 滚动脱敏/ZIP 导出；CPU/WorkingSet 诊断；Credential Manager 前缀恢复出厂；多屏/DPI 全屏主动输出抑制；I15 原子文件/调用方补偿闭环。
+- Windows 版：宠物/漫游、气泡、引导、分层会话记忆、可插拔模型/TTS/生图、三优先级（P0/P1/P2）AI 运行时、捕获/渲染/拖拽/弹幕资源生命周期、可配置事务型全局快捷键与连接级凭据迁移。
+- Windows 重要项 I1-I17 的实现子任务 1-4 已完成：726-key 英/简中/繁中/越南语同集 catalog 与持久化后发布的实时刷新；`%APPDATA%/DesktopPet/logs` 滚动脱敏/ZIP 导出；CPU/WorkingSet 诊断；Credential Manager 前缀恢复出厂；多屏/DPI 全屏主动输出抑制；I15 原子文件/调用方补偿闭环。
 
 ## 进行中 / 未完成
+- `.tasks/windows-review-fix`（2026-08-07 启动）：Windows 版设计健康度审查已落盘（4 份报告 + 整合结论，无 Critical；Important 18 项 / 文档漂移 25 项）；修复原则 = 方法用法以官方文档为准。批次 A（App 行为风险）→ B（Infra/Agent）→ C（Core 结构）→ D（文档漂移）→ 集成验证。
 - `.tasks/windows-important-hardening` child 5 待执行：全量独立 review、正式报告更新、真实 Windows GPU/Win32/WPF/Credential Manager/日志导出/恢复出厂重启/多屏 mixed-DPI 验收。
 - Roadmap 后续项：v0.2 桌面感知深化；Provider 默认范围、自动更新方案等产品决策见 `docs/windows-architecture.md` §10。
 

@@ -15,24 +15,28 @@
 │  · 宠物窗口 = 自绘渲染器（不走 MVVM，性能敏感）                    │
 │  · 设置/对话 = MVVM（View + ViewModel + Service）              │
 ├─────────────────────────────────────────────────────────────┤
-│ 应用层（用例编排，无 UI 依赖）                                    │
-│  QuickBubbleService / ModeService / CareService /            │
-│  ChatSessionService / DanmakuService / HotkeyService /       │
-│  DailySummaryService / IntimacyService /                     │
-│  PetDispatcherService（多宠物主动互动分派：事件→谁来说→各自人格生成）│
+│ 应用层/协调（DesktopPet.App，无 UI 依赖的用例编排）               │
+│  AiCoordinator（AI 运行时/Agent 生命周期/主动互动/每日总结）       │
+│  ModeService（输出模式 danmaku/chat/bubble/silent）            │
+│  PetWindowManager（多实例窗口/广播/设置下发）                   │
+│  HotkeySettingsCoordinator / LanguageCoordinator             │
 ├─────────────────────────────────────────────────────────────┤
 │ 领域层 DesktopPet.Core（纯逻辑，可单测，不依赖 WPF/IO）           │
-│  SpriteSlicer / PetStateMachine / MovementPhysics /          │
-│  CareEngine / PersonaEngine / MemoryEngine / IntimacyEngine  │
+│  SpriteSlicer / RoamEngine+RoamPhysics / CareEngine /         │
+│  PersonaEngine / ConversationMemory+MemoryProfileExtractor /  │
+│  IntimacyEngine / InteractionEngine / DanmakuEngine /         │
+│  ModelRequestScheduler（P0/P1/P2 并发调度）                   │
 ├─────────────────────────────────────────────────────────────┤
-│ 基础设施层                                                    │
-│  JsonStore（仓储）· PipeRpc（IPC）· GraphicsCaptureService     │
-│  ModelProvider 抽象 + 实现 · TtsProvider 抽象 + 实现           │
-│  InputHook（全局键鼠钩子）· RegistryHotkey · Logger            │
+│ 基础设施层 DesktopPet.Infra / DesktopPet.Agent                │
+│  FileJsonStore（仓储，Infra.Storage）· PipeRpc（IPC）           │
+│  ModelProvider 抽象（Core 定义）+ OpenAI 兼容实现（Infra）       │
+│  TtsProvider 抽象 + 实现（Infra：SAPI 默认 / Edge 备选）         │
+│  HotkeyManager（RegisterHotKey）· RollingFileLogger           │
+│  Agent：GraphicsCaptureSource / AnalysisEngine                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**依赖方向**：表现层 → 应用层 → 领域层 ← 基础设施层（依赖倒置：领域层定义接口，基础设施实现）。`DesktopPet.Core` 零 UI 零 IO 依赖，全部核心逻辑可单测。
+**依赖方向**：表现层 → 应用层/协调 → 领域层 ← 基础设施层（依赖倒置：领域层定义接口，基础设施实现）。`DesktopPet.Core` 零 UI 零 IO 依赖，全部核心逻辑可单测。
 
 **进程**：`PetApp.exe`（上面全部）+ `PetAgent.exe`（截屏/分析/总结，Phase 5 拆，见迁移计划 §4.1）。
 
@@ -44,18 +48,18 @@
 |---|---|---|
 | **MVVM** | 设置页、对话窗口、托盘菜单 | WPF 标准；数据绑定 + `INotifyPropertyChanged`；View 无逻辑 |
 | **Renderer 自绘**（非 MVVM） | 宠物窗口、弹幕层 | 16ms 帧预算内直写像素，绑定/模板开销不可接受；刻意豁免 |
-| **事件总线（Mediator）** | `quick-bubble` 广播（浮球→全部宠物）、`pets-changed`、`bubble-changed` | 现状 TS 版就是事件广播模型，1:1 移植；窗口间解耦 |
+| **直接扇出 + C# event** | 浮球广播（`PetWindowManager.BroadcastQuickBubble` foreach 窗口）、设置变更 `ApplySettings` 循环下发 | 窗口数少（≤5），无需 Mediator 框架；C# `event` 用于跨层通知（如 `AnalysisEngine.EventRaised`） |
 | **状态机** | 宠物行为（idle/wander/sleep/drag/roam 模式）；对话会话（idle/thinking/replying/error） | 行为转换有明确边界；迁移 TS 版 roam 引擎的 mode 系统 |
-| **策略模式** | 漫游模式 stay/wander/cursor/climb（各一个策略类）；输出模式弹幕/对话/静默 | 行为可插拔；新增模式不改核心循环 |
-| **Provider 抽象** | 模型（OpenAI 兼容/本地 Ollama）、TTS（Edge/OpenAI/SAPI）、图像生成 | 用户要求可自定义连接；见 §4 |
-| **仓储（Repository）** | PetStore / CareState / MemoryStore / Personas / 设置，统一 `IJsonStore<T>` | 持久化细节隔离；测试用内存实现 |
+| **策略分派** | 漫游模式 stay/wander/cursor/climb（`RoamModes` 单类 switch 分派）；输出模式弹幕/对话/气泡/静默 | 行为可插拔；新增模式不改核心循环 |
+| **Provider 抽象** | 模型（OpenAI 兼容/本地 Ollama）、TTS（SAPI 默认/Edge 备选）、图像生成 | 用户要求可自定义连接；见 §3 |
+| **仓储（Repository）** | PetStore / CareState / MemoryStore / Personas / 设置，统一 `IJsonStore` | 持久化细节隔离；测试用内存实现 |
 | **请求管道（Pipeline）** | 对话请求：校验→人格拼接→记忆注入→亲密度修饰→模型调用→token 记账→XP/亲密度结算 | 横切关注点（记账/注入/日志）不污染会话逻辑；可单测每步 |
-| **工厂** | `PetWindowFactory`（多实例窗口创建/销毁） | 多宠物实例生命周期统一管理 |
-| **依赖注入** | `Microsoft.Extensions.DependencyInjection`，全程序 | 显式依赖、可替换实现、单测友好 |
-| **观察者** | 设置变更 → 各窗口订阅刷新（替代现状 Tauri 的 listen/emit） | 事件总线复用即可，不引入额外框架 |
+| **工厂** | `PetWindowManager`（多实例窗口创建/销毁） | 多宠物实例生命周期统一管理 |
+| **手工构造器注入** | App.xaml.cs 组合根：手工 `new` + 构造器注入 + `Func` 工厂（无 DI 容器） | 单进程窗口应用，显式依赖链清晰；不引入容器依赖 |
+| **观察者** | 设置变更 → 各窗口刷新（`PetWindowManager.ApplySettings` 直接下发） | 窗口数少，直接循环即可 |
 | **适配器** | Tauri 版 localStorage 数据 → 新版 JSON 迁移 | 一次性迁移工具，隔离旧格式 |
 
-**明确不用的**：领域事件（过度设计）、CQRS/EventSourcing（数据量小，JSON 仓储足够）、单例（DI 容器管理生命周期）。
+**明确不用的**：领域事件（过度设计）、CQRS/EventSourcing（数据量小，JSON 仓储足够）、事件总线框架、DI 容器（手工组合根 + 构造器注入已覆盖，见上）。
 
 ---
 
@@ -86,20 +90,21 @@
       "isDefault": false
     }
   ],
-  "tts": {
-    "provider": "edge",   // edge | openai | sapi | custom
-    "voice": "zh-CN-XiaoxiaoNeural",
-    "customUrl": ""       // 仅 custom 时使用
+  "image": {   // 生图连接（可选，总结图用）
+    "baseUrl": "...",
+    "apiKeyRef": "...",
+    "modelName": "...",
+    "size": "1024x1024"
   }
 }
+// 注意：TTS 不在此文件配置——语音输出由 App 硬编码 SapiTtsProvider（离线默认），
+// EdgeTtsProvider 保留为备选实现（对 SChannel 风控不可用，见代码注释）。
 ```
 
 - **协议**：全部走 OpenAI 兼容 REST（`/chat/completions`，图片用 content 数组）——云端（OpenAI/DeepSeek/Qwen/GLM…）和本地（Ollama/vLLM/LM Studio）天然统一，一个 `HttpClient` 实现通吃
-- **能力发现**：设置页「测试连接」按钮 → 调 `/models` 列出可用模型（现有 Rust 版 `list_image_models` 已验证此路径）；失败给出明确错误（超时/401/URL 错误分类提示）
+- **能力发现**：设置页「测试连接」按钮 → 调 `/models` 列出可用模型；失败给出明确错误（超时/401/URL 错误分类提示）
 - **API Key 安全**：`Windows Credential Manager` 存储，JSON 只存引用 ID，不落盘明文
-- **多模型分工**（默认策略，可手动覆盖）：
-  - 本地小模型（可选）：截屏变化过滤、事件分类（便宜快）
-  - 主模型：对话/弹幕/总结（用户选择）
+- **多模型分工**：未实现（可选保留项）。变化检测用本地灰度哈希（FrameHasher），事件分类是模型输出后的关键词粗分类（AnalysisEngine.Classify），无独立本地小模型链路
 - 界面：设置页 AI 助手 → 「模型连接」卡片：连接列表 + 测试按钮 + 能力徽章 + 默认标记
 
 ### 3.2 接口定义
@@ -111,13 +116,14 @@ public interface IModelProvider {
     Task<ChatResult> CompleteAsync(ChatRequest req, CancellationToken ct);
     Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken ct); // 测试连接
 }
-// 实现：OpenAiCompatibleProvider（一个类通吃所有 OpenAI 兼容端点）
+// 实现：OpenAiCompatibleModelProvider（Core/Scheduling/ModelContracts.cs 定义接口）
 
 public interface ITtsProvider {
-    Task<Stream> SynthesizeAsync(string text, TtsVoice voice, CancellationToken ct);
-    bool SupportsStreaming { get; }
+    Task<Stream> SynthesizeAsync(string text, TtsVoice voice, CancellationToken ct); // 音频流：SAPI=WAV / Edge=MP3
 }
-// 实现：EdgeTtsProvider（默认，免费）/ OpenAiTtsProvider / SapiTtsProvider（离线）
+// 实现：SapiTtsProvider（默认，离线）/ EdgeTtsProvider（免费协议，备选）
+// 注意：默认实现是 SAPI 而非 Edge——Edge 端点对 Windows SChannel 风控不可用；
+// 无 OpenAiTtsProvider；接口无 SupportsStreaming。
 ```
 
 ### 3.3 模型请求调度器（ModelRequestScheduler）
@@ -168,9 +174,9 @@ public interface IImageProvider {
 用户输入
   → ① 校验（长度/频率限制）
   → ② 人格拼接：Base Prompt + 人格 Prompt（按亲密度档位选称呼/语气版本）
-  → ③ 记忆注入：用户画像摘要 + 最近对话摘要（8 轮压缩）
+  → ③ 记忆注入：用户画像摘要 + 最近对话摘要（按 token 预算裁剪，超限轮次压缩进 ≤200 字滚动摘要）
   → ④ 屏幕上下文（对话模式：最近 N 条屏幕事件，可选携带当前截图）
-  → ⑤ ModelProvider.CompleteAsync（temperature 0.7, max_tokens 120）
+  → ⑤ ModelProvider.CompleteAsync（temperature 0.7；max_tokens 120 为桌宠短句路径上限，对话路径按模型连接配置，每日总结 0.8/300）
   → ⑥ 输出 → 打字机气泡 / 弹幕（按当前输出模式）
   → ⑦ token 记账：→ CareEngine（XP）+ IntimacyEngine（亲密度）
   → ⑧ 异步：画像更新（新话题标签、作息推断）
@@ -189,7 +195,7 @@ public interface IImageProvider {
 | **帧率语义** | 按动画状态机定义的 fps 播放；完全静止时停掉渲染循环；性能验收记录 p95 间隔和拖拽延迟 | 不降低既有动画或漫游频率换取 CPU 数字 |
 | **弹幕层** | Win2D GPU 合成；文本对象池（滚动条目不反复创建）；DWrite 布局缓存（同文案不重排） | §6.5 |
 | **内存** | 位图缓存 LRU 上限（如 32MB）；宠物实例卸载时释放帧缓存；设置页缩略图按需加载 | — |
-| **截屏** | 缩略图 320×180 灰度哈希变化检测（1fps 成本极低）；云端调用限频（≥5s/次） | §6.4 |
+| **截屏** | 缩略图 320×180 灰度哈希变化检测（采集 1fps 成本极低，与分析间隔独立）；云端调用限频（分析间隔 3-30s，默认 5s） | §6.4 |
 | **拖拽** | 直接 `MoveWindow`，无 IPC 无补丁层；`GetMessageTime` 采样验证 <16ms | 迁移计划 §7 |
 | **启动** | 宠物窗口先行（<2s 可见），设置/目录/弹幕按需懒加载；`app.manifest` PerMonitorV2 | 对标 bongo-cat-next <2s |
 | **网络** | `HttpClient` 单例 + 连接复用；超时 30s；指数退避重试 | — |
@@ -225,7 +231,7 @@ public interface IImageProvider {
 | **崩溃恢复** | 位置/状态每次变更即持久化（防丢失）；宠物窗口异常自动重建（工厂 + 看门狗） |
 | **所有操作可逆** | 删除宠物 → 内联确认；清空对话 → 确认；恢复出厂设置（设置页底部） |
 | **键盘可达** | 设置/对话窗口全键盘可操作；全局快捷键常显在设置页（可自定义） |
-| **忙碌不打扰** | 弹幕/主动互动在用户全屏（游戏/放映）时暂停（截屏分析自然感知） |
+| **忙碌不打扰** | 弹幕/主动互动在用户全屏（游戏/放映）时暂停（Win32 前台窗口几何检测 + 输出交付边界抑制；截屏与分析不停止） |
 | **性能可见** | 设置页「关于」显示当前 CPU/内存占用（自采样），用户可自查"卡不卡" |
 
 ---
@@ -239,27 +245,31 @@ public interface IImageProvider {
 
 ---
 
-## 9. 代码组织（命名空间）
+## 9. 代码组织（命名空间，以实际目录为准）
 
 ```
-DesktopPet.App/        Windows, ViewModels, Renderers, Services(应用层), Resources(样式/图标/i18n)
-DesktopPet.Core/       Slicing, Physics, Care, Personas, Memory, Intimacy, Pipeline, Contracts(接口)
-DesktopPet.Agent/      Capture, ChangeDetection, Analysis, DailySummary
-DesktopPet.Infra/      JsonStore, PipeRpc, Providers(Model/Tts/Image), InputHook, Hotkey, Logger
-DesktopPet.Core.Tests/ 切片对照/物理/养成/人格拼接/亲密度/管道
+DesktopPet.App/        Windows, Settings, Rendering, Ai, Tray, Hotkeys, Fullscreen, Localization, Interop, Storage, Bench
+DesktopPet.Core/       Ai, Care, Danmaku, Hotkeys, I18n, Input, Interaction, Memory, Personas, Pets, Rendering, Roaming, Scheduling, Slicing, Storage, Summary
+DesktopPet.Agent/      Capture, Analysis（变化检测在 AnalysisEngine 内；每日总结在 Core/Summary）
+DesktopPet.Infra/      Providers(Model/Tts/Image), Tts, PipeRpc, Diagnostics(Logger/原子写/脱敏), Hotkey, Lifecycle, Storage(FileJsonStore)
+DesktopPet.Core.Tests/ 切片对照/漫游/养成/人格拼接/亲密度/管道/存储
 DesktopPet.Agent.Tests/ 截屏离线测试（录制帧序列）
+DesktopPet.Infra.Tests/ Provider/PipeRpc/日志/原子写/凭据/生命周期
+DesktopPet.App.Tests/   本地化/全屏抑制/热键/渲染缓存/进程指标
 ```
 
 **测试策略**：核心管道（人格拼接 → 记忆注入 → 记账）用 mock `IModelProvider` 全链路单测；切片用与 TS 版同批测试图做对照断言；UI 走手工验收清单（见 UI 文档 §6）。
+
+**组件名对齐**（代码真名）：`QuickBubbleController`（Core/Interaction）、`RoamEngine`+`RoamPhysics`（Core/Roaming）、`ConversationMemory`+`MemoryProfileExtractor`（Core/Memory）、`InteractionEngine`（Core/Interaction）、`HotkeyManager`（Infra/Hotkey）、`PetWindowManager`（App/Windows）、`FileJsonStore`（Infra/Storage）、`RollingFileLogger`（Infra/Diagnostics）、`GraphicsCaptureSource`（Agent/Capture）。
 
 ---
 
 ## 10. 待定决策（进入对应 Phase 前敲定）
 
-| # | 决策 | 截止 | 默认倾向 |
+| # | 决策 | 状态 | 默认倾向 |
 |---|---|---|---|
-| 1 | Provider 默认实现范围（仅 OpenAI 兼容？+ SAPI？） | Phase 5 | OpenAI 兼容 + Edge TTS（零成本起步） |
-| 2 | 记忆画像字段清单（称呼/作息/话题/摘要长度） | Phase 6 | 4 字段起步，摘要 ≤200 字 |
-| 3 | 亲密度与 XP 联动曲线（token 换算比例） | Phase 6 | 亲密度 = 对话轮次加权 + token 少量加成 |
-| 4 | 主动互动触发阈值（久坐/深夜/持续编码定义） | Phase 6 | 久坐 60min / 深夜 23 点后 / 编码连续 2h |
-| 5 | 自动更新方案（Velopack vs 自建） | Phase 4 | Velopack（活跃、NSIS 兼容） |
+| 1 | Provider 默认实现范围（仅 OpenAI 兼容？+ SAPI？） | 已定 | OpenAI 兼容（模型/生图）+ SAPI 默认 TTS；Edge TTS 备选（SChannel 风控不可用） |
+| 2 | 记忆画像字段清单（称呼/作息/话题/摘要长度） | 已定 | 4 字段起步，摘要 ≤200 字（代码常量 200） |
+| 3 | 亲密度与 XP 联动曲线（token 换算比例） | 已定 | 亲密度 = 对话轮次加权 + token 少量加成 |
+| 4 | 主动互动触发阈值（久坐/深夜/持续编码定义） | 已定 | 久坐 60min / 深夜 23 点后 / 编码连续 2h |
+| 5 | 自动更新方案（Velopack vs 自建） | 待定 | Velopack（活跃、NSIS 兼容） |

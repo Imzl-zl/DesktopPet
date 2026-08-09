@@ -164,7 +164,10 @@ internal static class CredNative
     public const int CredPersistLocalMachine = 2;
     public const int ErrorNotFound = 1168;
 
-    [StructLayout(LayoutKind.Sequential)]
+    // 注意：必须 CharSet.Unicode——CREDENTIALW 的字符串字段是 LPWSTR，
+    // 缺省 CharSet 会按 ANSI 编组，CredWrite 写出的 target 名会被系统按
+    // UTF-16 误解成乱码（曾导致迁移器每次启动误报 target-conflict 并累积垃圾凭据）。
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     internal struct Credential
     {
         public int Flags;

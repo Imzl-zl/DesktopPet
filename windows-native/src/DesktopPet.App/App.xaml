@@ -273,10 +273,11 @@
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
                                 CornerRadius="{StaticResource RadiusControl}">
+                            <!-- 注意：Padding 由 TextBoxView（PART_ContentHost 内容宿主）内部处理，
+                                 官方模板不把 Padding 绑到 ScrollViewer.Margin。否则 Padding 双重应用，
+                                 固定 Height 的输入框文字可视区会被压缩成几像素高的细带（字看起来很小）。 -->
                             <ScrollViewer x:Name="PART_ContentHost"
-                                          Margin="{TemplateBinding Padding}"
-                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                          HorizontalAlignment="Stretch" />
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsKeyboardFocused" Value="True">
@@ -354,7 +355,9 @@
                     <ControlTemplate TargetType="RadioButton">
                         <StackPanel Orientation="Horizontal" Background="Transparent">
                             <Grid Width="18" Height="18" VerticalAlignment="Center">
-                                <Ellipse x:Name="Ring" Stroke="{StaticResource StrokeBrush}" StrokeThickness="1.5" Fill="{StaticResource CardBgBrush}" />
+                                <!-- 未选中圆环用中灰 #C9CDD4：原 StrokeBrush #E5E7EB 在白色卡片上几乎不可见，
+                                     单选框看起来只剩文字贴在左边（无圆圈标记）。 -->
+                                <Ellipse x:Name="Ring" Stroke="#C9CDD4" StrokeThickness="1.5" Fill="{StaticResource CardBgBrush}" />
                                 <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{StaticResource AccentBrush}" Visibility="Collapsed" />
                             </Grid>
                             <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" />

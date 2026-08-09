@@ -14,6 +14,7 @@ using DesktopPet.Core.Pets;
 using DesktopPet.Core.Scheduling;
 using DesktopPet.Core.Storage;
 using DesktopPet.Core.Summary;
+using DesktopPet.Core.Tts;
 using DesktopPet.Infra.Diagnostics;
 using DesktopPet.Infra.Lifecycle;
 using DesktopPet.Infra.PipeRpc;
@@ -32,7 +33,7 @@ namespace DesktopPet.App.Ai;
 /// · 屏幕事件日志（App 侧维护，对话屏幕上下文 + 主动互动事件驱动用）
 /// · Phase 6：记忆画像注入/更新（记忆开关）、亲密度记账与语气指令（亲密度开关）、
 ///   主动互动（定时 + 事件驱动，多宠物并行分派）、每日总结 + 总结图（开关组）、
-///   对话朗读（Edge TTS，语音开关 + 仅对话模式）
+///   对话朗读（语音开关 + 仅对话模式）
 /// </summary>
 public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnectionTester
 {
@@ -86,8 +87,12 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     // 256k 配置下几百轮不触发）；L2 真超预算时最早轮次压缩进滚动摘要注入，不静默丢弃；
     // 摘要可合并进 L3 画像（RecordChatSuccess）。
     private readonly ConversationMemory _conversation = new();
-    // 语音输出：SAPI 离线合成（默认；Edge TTS 对 SChannel 风控不可用，见 EdgeTtsProvider 注释）
-    private readonly ITtsProvider _tts = new SapiTtsProvider();
+    // 语音输出：三级 Provider 栈（windows-tts-design.md §3）——默认 SAPI 离线兜底；
+    // 引擎选择/降级由 TtsProviderRegistry 处理；Speak 按设置选引擎，失败降级 sapi
+    private readonly ITtsProvider _sapiTts = new SapiTtsProvider();
+    private readonly IReadOnlyList<ITtsProvider> _baseTtsProviders;
+    private IReadOnlyList<ITtsProvider> _ttsProviders;
+    private ITtsProvider _tts;
     private readonly MediaPlayer _ttsPlayer = new();
     // 待清理的 TTS 临时文件（MediaEnded 只订阅一次，防闭包随朗读次数累积）
     private string? _pendingTtsTempPath;
@@ -103,7 +108,8 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         Action<string, CareState, int> recordTokens,
         string agentHostPath,
         I18nService? i18n = null,
-        IAppLogger? logger = null)
+        IAppLogger? logger = null,
+        IReadOnlyList<ITtsProvider>? ttsProviders = null)
     {
         _store = store;
         _modeService = modeService;
@@ -112,9 +118,13 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         _agentHostPath = agentHostPath;
         _i18n = i18n ?? new I18nService();
         _logger = logger ?? NullAppLogger.Instance;
+        _baseTtsProviders = ttsProviders is { Count: > 0 }
+            ? ttsProviders
+            : new List<ITtsProvider> { _sapiTts };
         _settings = AppSettings.Normalize(store.LoadSettings() ?? AppSettings.Defaults(Core.I18n.I18nService.Detect()));
         _personas = PersonasFileModel.Normalize(store.LoadPersonasFile() ?? new PersonasFileModel());
         _providers = store.LoadProvidersFile() ?? new ProvidersFileModel();
+        RebuildTtsProviders();
         _profile = MemoryProfileExtractor.Normalize(store.LoadMemoryProfile());
         _intimacy = new IntimacyEngine(store.LoadIntimacy() ?? IntimacyState.Defaults);
         _lastDiaryDate = store.LoadDiaryLastGenerated();
@@ -136,6 +146,22 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
 
     public PersonasFileModel Personas => _personas;
     public ProvidersFileModel Providers => _providers;
+
+    /// <summary>可用的 TTS 引擎列表（设置页枚举/试听用；windows-tts-design.md §3）。</summary>
+    public IReadOnlyList<ITtsProvider> TtsProviders => _ttsProviders;
+
+    /// <summary>按 providers.json 重建 TTS 引擎列表：基础引擎（sapi/onecore）+
+    /// 已配置的在线端点（openai）；随后按设置重选当前引擎。</summary>
+    private void RebuildTtsProviders()
+    {
+        var list = new List<ITtsProvider>(_baseTtsProviders);
+        if (_providers.Tts is not null)
+        {
+            list.Add(new OpenAiCompatibleTtsProvider(_providers.Tts, _credentials, _providerHttp));
+        }
+        _ttsProviders = list;
+        _tts = TtsProviderRegistry.ResolveProvider(_ttsProviders, _settings.Ai.TtsProviderId);
+    }
 
     public Task<ModelConnectionTestResult> TestAsync(ModelConnectionDraft draft, CancellationToken ct)
         => new ModelConnectionTester(_credentials, _providerHttp).TestAsync(draft, ct);
@@ -185,6 +211,8 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             settings.Ai.QuietHoursEnd);
         _chatWindow.TtsEnabled = settings.Ai.TtsEnabled;
         _ttsSessionEnabled = settings.Ai.TtsEnabled;
+        // 引擎切换即时生效（设置页保存 → ApplySettings → 重建选择）
+        _tts = TtsProviderRegistry.ResolveProvider(_ttsProviders, settings.Ai.TtsProviderId);
         _chatWindow.ScreenContextEnabled = settings.Ai.ScreenContextEnabled;
         _modeService.SetMode(settings.Ai.OutputMode switch
         {
@@ -262,6 +290,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             revision = ++_runtimeRevision;
         }
         QueueRuntimeReconcile(revision);
+        RebuildTtsProviders(); // TTS 在线端点配置变更 → 引擎列表重建（openai 出现/消失）
     }
 
     /// <summary>用户主动对话（任何模式下可用）：管道 → 输出到对话窗 + token 记账。</summary>
@@ -1048,7 +1077,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         }
     }
 
-    /// <summary>朗读（语音开关 + 仅对话模式；Edge TTS MP3 → 临时文件 → MediaPlayer）。</summary>
+    /// <summary>朗读（语音开关 + 仅对话模式；合成流 → 临时文件 → MediaPlayer）。</summary>
     /// <summary>当前选中模型连接的最大输出配置（空 = 不发送 max_tokens，上游默认）。
     /// 对话路径与互动/评论路径分离：互动/评论固定内置短句 120，不受此配置影响。</summary>
     private int? CurrentMaxOutputTokens()
@@ -1070,28 +1099,50 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         if (string.IsNullOrWhiteSpace(text)) return;
         _ = Task.Run(async () =>
         {
+            // 捕获当前引擎快照：设置变更可能在后台朗读期间切换 _tts
+            var active = _tts;
             try
             {
-                // 朗读声音：设置页可选；空 = 按界面语言自动选择默认声音
-                var voiceName = _settings.Ai.TtsVoiceName;
-                if (string.IsNullOrEmpty(voiceName))
-                    voiceName = Core.Storage.AiSettings.DefaultVoiceFor(_settings.Lang);
-                using var stream = await _tts.SynthesizeAsync(
-                    text, TtsVoice.FromName(voiceName), CancellationToken.None);
-                var bytes = ((MemoryStream)stream).ToArray();
-                var tmp = Path.Combine(Path.GetTempPath(), $"desktoppet-tts-{Guid.NewGuid():N}.wav");
-                File.WriteAllBytes(tmp, bytes);
-                OnUiThread(() =>
-                {
-                    _pendingTtsTempPath = tmp;
-                    _ttsPlayer.Open(new Uri(tmp));
-                    _ttsPlayer.Play();
-                });
+                await SpeakCoreAsync(text, active);
             }
             catch (Exception ex)
             {
-                DebugLog("tts failed: " + ex.Message); // 朗读失败不影响对话
+                // 非默认引擎失败（端点不可用/网络/认证）→ 降级 SAPI 兜底一次，不打断对话
+                if (!ReferenceEquals(active, _sapiTts))
+                {
+                    DebugLog($"tts {_tts.Id} failed ({ex.GetType().Name}: {ex.Message}), fallback to sapi");
+                    try
+                    {
+                        await SpeakCoreAsync(text, force: _sapiTts);
+                    }
+                    catch (Exception fallbackEx)
+                    {
+                        DebugLog("tts fallback failed: " + fallbackEx.Message);
+                    }
+                }
+                else
+                {
+                    DebugLog("tts failed: " + ex.Message); // 朗读失败不影响对话
+                }
             }
+        });
+    }
+
+    private async Task SpeakCoreAsync(string text, ITtsProvider? force = null)
+    {
+        var provider = force ?? _tts;
+        // 朗读声音：设置页可选；空 = 自动（各引擎内部解析：SAPI 语言回退 / OneCore 默认语音 /
+        // 在线端点配置默认音色）。不在运行时额外调 ListVoicesAsync（在线引擎会多一次网络调用）。
+        using var stream = await provider.SynthesizeAsync(
+            new TtsSynthesisRequest(text, _settings.Ai.TtsVoiceName, _settings.Ai.TtsSpeedPercent), CancellationToken.None);
+        var bytes = ((MemoryStream)stream).ToArray();
+        var tmp = Path.Combine(Path.GetTempPath(), $"desktoppet-tts-{Guid.NewGuid():N}.wav");
+        File.WriteAllBytes(tmp, bytes);
+        OnUiThread(() =>
+        {
+            _pendingTtsTempPath = tmp;
+            _ttsPlayer.Open(new Uri(tmp));
+            _ttsPlayer.Play();
         });
     }
 

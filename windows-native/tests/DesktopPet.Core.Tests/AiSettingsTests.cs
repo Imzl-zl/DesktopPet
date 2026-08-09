@@ -132,3 +132,38 @@ public class AiSettingsTests
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 }
+
+public class TtsEngineSettingsTests
+{
+    [Fact]
+    public void Defaults_TtsEngine_IsSapiWithNormalSpeed()
+    {
+        var d = AiSettings.Defaults;
+        Assert.Equal("sapi", d.TtsProviderId);   // 默认引擎 = SAPI 兜底
+        Assert.Equal(100, d.TtsSpeedPercent);    // 语速默认 100%
+        Assert.Equal("", d.TtsVoiceName);        // 音色空 = 自动
+    }
+
+    [Theory]
+    [InlineData("onecore")]
+    [InlineData("openai")]
+    public void Normalize_KeepsValidProviderIds(string id)
+    {
+        var raw = AiSettings.Defaults with { TtsProviderId = id };
+        Assert.Equal(id, AiSettings.Normalize(raw).TtsProviderId);
+    }
+
+    [Fact]
+    public void Normalize_InvalidProviderId_FallsBackToSapi()
+    {
+        var raw = AiSettings.Defaults with { TtsProviderId = "edge" };
+        Assert.Equal("sapi", AiSettings.Normalize(raw).TtsProviderId);
+    }
+
+    [Fact]
+    public void Normalize_ClampsSpeedPercent()
+    {
+        Assert.Equal(50, AiSettings.Normalize(AiSettings.Defaults with { TtsSpeedPercent = 10 }).TtsSpeedPercent);
+        Assert.Equal(200, AiSettings.Normalize(AiSettings.Defaults with { TtsSpeedPercent = 999 }).TtsSpeedPercent);
+    }
+}

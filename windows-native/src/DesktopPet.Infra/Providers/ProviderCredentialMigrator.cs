@@ -11,6 +11,7 @@ public static class ProviderCredentialRefs
     public const string LegacyModel = "model-key";
     public const string LegacyImage = "image-key";
     public const string Image = "provider/image/default/api-key";
+    public const string Tts = "provider/tts/default/api-key";
 
     public static string NewConnectionId() => Guid.NewGuid().ToString("N");
 

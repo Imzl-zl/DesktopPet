@@ -12,8 +12,11 @@ using DesktopPet.App.Fullscreen;
 using DesktopPet.App.Localization;
 using DesktopPet.App.Rendering;
 using DesktopPet.App.Tray;
+using DesktopPet.App.Tts;
 using DesktopPet.App.Windows;
+using DesktopPet.Core.Tts;
 using DesktopPet.Infra.Storage;
+using DesktopPet.Infra.Tts;
 using DesktopPet.Core.Care;
 using DesktopPet.Core.Hotkeys;
 using DesktopPet.Core.Pets;
@@ -156,7 +159,12 @@ public partial class App : Application
                 RecordTokens,
                 ResolveAgentHostPath(),
                 i18n,
-                _logger);
+                _logger,
+                ttsProviders: new List<ITtsProvider>
+                {
+                    new SapiTtsProvider(),
+                    new OneCoreTtsProvider(),
+                });
             _chatWindow.SendRequested += async (text, ctx) =>
             {
                 if (_ai is not null) await _ai.SendChatAsync(text, ctx);

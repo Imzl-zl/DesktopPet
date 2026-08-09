@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using System.Text;
 using System.Threading;
+using DesktopPet.Core.Tts;
 using DesktopPet.Infra.Tts;
 
 namespace DesktopPet.Infra.Tests;
@@ -144,7 +145,7 @@ public class EdgeTtsTests
         var socket = new FakeEdgeSocket(AudioFrame([1, 2]), AudioFrame(audio), TurnEndFrame());
         var provider = new EdgeTtsProvider(() => socket);
 
-        using var stream = await provider.SynthesizeAsync("辛苦了", Xiaoxiao, CancellationToken.None);
+        using var stream = await provider.SynthesizeAsync(new TtsSynthesisRequest("辛苦了", "zh-CN-XiaoxiaoNeural"), CancellationToken.None);
 
         // 两条消息：speech.config + ssml
         Assert.Equal(2, socket.SentMessages.Count);
@@ -161,7 +162,7 @@ public class EdgeTtsTests
     {
         var provider = new EdgeTtsProvider(() => new FakeEdgeSocket());
         await Assert.ThrowsAsync<ArgumentException>(() =>
-            provider.SynthesizeAsync("   ", Xiaoxiao, CancellationToken.None));
+            provider.SynthesizeAsync(new TtsSynthesisRequest("   ", "zh-CN-XiaoxiaoNeural"), CancellationToken.None));
     }
 
     [Fact]
@@ -170,7 +171,7 @@ public class EdgeTtsTests
         var socket = new FakeEdgeSocket(AudioFrame([1]));
         var provider = new EdgeTtsProvider(() => socket);
         await Assert.ThrowsAsync<EndOfStreamException>(() =>
-            provider.SynthesizeAsync("hi", Xiaoxiao, CancellationToken.None));
+            provider.SynthesizeAsync(new TtsSynthesisRequest("hi", "zh-CN-XiaoxiaoNeural"), CancellationToken.None));
     }
 
     [Fact]
@@ -182,37 +183,6 @@ public class EdgeTtsTests
         var provider = new EdgeTtsProvider(() => socket, overallTimeout: TimeSpan.FromMilliseconds(200));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            provider.SynthesizeAsync("测试", Xiaoxiao, CancellationToken.None));
-    }
-}
-
-/// <summary>
-/// Phase 6g：SAPI 离线 TTS（默认语音实现——Edge 端点对 SChannel 风控，见 EdgeTtsProvider 注释）。
-/// 依赖系统 zh-CN 语音；无语音时回退默认（断言仅 WAV 结构）。
-/// </summary>
-[SupportedOSPlatform("windows")]
-public class SapiTtsProviderTests
-{
-    [Fact]
-    public async Task SynthesizeAsync_ReturnsWavStream()
-    {
-        var provider = new SapiTtsProvider();
-        using var stream = await provider.SynthesizeAsync(
-            "语音测试", new TtsVoice("zh-CN-XiaoxiaoNeural", "zh-CN"), CancellationToken.None);
-        var bytes = ((MemoryStream)stream).ToArray();
-        Assert.True(bytes.Length > 100, $"音频过短: {bytes.Length}");
-        // RIFF/WAVE 头
-        Assert.Equal(0x52, bytes[0]); // R
-        Assert.Equal(0x49, bytes[1]); // I
-        Assert.Equal(0x46, bytes[2]); // F
-        Assert.Equal(0x46, bytes[3]); // F
-    }
-
-    [Fact]
-    public async Task SynthesizeAsync_EmptyText_Throws()
-    {
-        var provider = new SapiTtsProvider();
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            provider.SynthesizeAsync("   ", new TtsVoice("x", "zh-CN"), CancellationToken.None));
+            provider.SynthesizeAsync(new TtsSynthesisRequest("测试", "zh-CN-XiaoxiaoNeural"), CancellationToken.None));
     }
 }

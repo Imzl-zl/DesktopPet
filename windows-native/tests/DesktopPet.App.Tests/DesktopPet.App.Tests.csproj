@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -35,6 +35,8 @@
              Link="Ai\AgentLaunchContract.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Ai\ModelConnectionTestController.cs"
              Link="Ai\ModelConnectionTestController.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Tts\OneCoreTtsProvider.cs"
+             Link="Tts\OneCoreTtsProvider.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Rendering\SpriteLoader.cs"
              Link="Rendering\SpriteLoader.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Rendering\SpriteSheetCache.cs"

@@ -30,7 +30,7 @@
 │ 基础设施层 DesktopPet.Infra / DesktopPet.Agent                │
 │  FileJsonStore（仓储，Infra.Storage）· PipeRpc（IPC）           │
 │  ModelProvider 抽象（Core 定义）+ OpenAI 兼容实现（Infra）       │
-│  TtsProvider 抽象 + 实现（Infra：SAPI 默认 / Edge 备选）         │
+│  TtsProvider 抽象（Core 定义）+ 三级实现（SAPI/OneCore/端点）    │
 │  HotkeyManager（RegisterHotKey）· RollingFileLogger           │
 │  Agent：GraphicsCaptureSource / AnalysisEngine                │
 └─────────────────────────────────────────────────────────────┘
@@ -51,7 +51,7 @@
 | **直接扇出 + C# event** | 浮球广播（`PetWindowManager.BroadcastQuickBubble` foreach 窗口）、设置变更 `ApplySettings` 循环下发 | 窗口数少（≤5），无需 Mediator 框架；C# `event` 用于跨层通知（如 `AnalysisEngine.EventRaised`） |
 | **状态机** | 宠物行为（idle/wander/sleep/drag/roam 模式）；对话会话（idle/thinking/replying/error） | 行为转换有明确边界；迁移 TS 版 roam 引擎的 mode 系统 |
 | **策略分派** | 漫游模式 stay/wander/cursor/climb（`RoamModes` 单类 switch 分派）；输出模式弹幕/对话/气泡/静默 | 行为可插拔；新增模式不改核心循环 |
-| **Provider 抽象** | 模型（OpenAI 兼容/本地 Ollama）、TTS（SAPI 默认/Edge 备选）、图像生成 | 用户要求可自定义连接；见 §3 |
+| **Provider 抽象** | 模型（OpenAI 兼容/本地 Ollama）、TTS（SAPI 默认/OneCore 自然语音/OpenAI 兼容端点，见 `windows-tts-design.md`）、图像生成 | 用户要求可自定义连接；见 §3 |
 | **仓储（Repository）** | PetStore / CareState / MemoryStore / Personas / 设置，统一 `IJsonStore` | 持久化细节隔离；测试用内存实现 |
 | **请求管道（Pipeline）** | 对话请求：校验→人格拼接→记忆注入→亲密度修饰→模型调用→token 记账→XP/亲密度结算 | 横切关注点（记账/注入/日志）不污染会话逻辑；可单测每步 |
 | **工厂** | `PetWindowManager`（多实例窗口创建/销毁） | 多宠物实例生命周期统一管理 |
@@ -97,8 +97,8 @@
     "size": "1024x1024"
   }
 }
-// 注意：TTS 不在此文件配置——语音输出由 App 硬编码 SapiTtsProvider（离线默认），
-// EdgeTtsProvider 保留为备选实现（对 SChannel 风控不可用，见代码注释）。
+// TTS 在线端点配置见 `windows-tts-design.md` §5.2：providers.json 新增 tts 段
+// （baseUrl/apiKeyRef/modelName/voice，对齐 image 段）；离线引擎（SAPI/OneCore）零配置。
 ```
 
 - **协议**：全部走 OpenAI 兼容 REST（`/chat/completions`，图片用 content 数组）——云端（OpenAI/DeepSeek/Qwen/GLM…）和本地（Ollama/vLLM/LM Studio）天然统一，一个 `HttpClient` 实现通吃
@@ -118,12 +118,10 @@ public interface IModelProvider {
 }
 // 实现：OpenAiCompatibleModelProvider（Core/Scheduling/ModelContracts.cs 定义接口）
 
-public interface ITtsProvider {
-    Task<Stream> SynthesizeAsync(string text, TtsVoice voice, CancellationToken ct); // 音频流：SAPI=WAV / Edge=MP3
-}
-// 实现：SapiTtsProvider（默认，离线）/ EdgeTtsProvider（免费协议，备选）
-// 注意：默认实现是 SAPI 而非 Edge——Edge 端点对 Windows SChannel 风控不可用；
-// 无 OpenAiTtsProvider；接口无 SupportsStreaming。
+// TTS 契约（Core/Tts/TtsContracts.cs）：ListVoicesAsync + SynthesizeAsync(TtsSynthesisRequest)
+// 实现：SapiTtsProvider（默认，离线）/ OneCoreTtsProvider（App，系统自然语音）/
+//      OpenAiCompatibleTtsProvider（在线端点，用户自配）
+// 完整设计见 windows-tts-design.md（三级 Provider 栈 / 配置 / UX / 验收）。
 ```
 
 ### 3.3 模型请求调度器（ModelRequestScheduler）
@@ -268,7 +266,7 @@ DesktopPet.App.Tests/   本地化/全屏抑制/热键/渲染缓存/进程指标
 
 | # | 决策 | 状态 | 默认倾向 |
 |---|---|---|---|
-| 1 | Provider 默认实现范围（仅 OpenAI 兼容？+ SAPI？） | 已定 | OpenAI 兼容（模型/生图）+ SAPI 默认 TTS；Edge TTS 备选（SChannel 风控不可用） |
+| 1 | Provider 默认实现范围（仅 OpenAI 兼容？+ SAPI？） | 已定 | OpenAI 兼容（模型/生图）+ SAPI 默认 TTS；OneCore 自然语音 / OpenAI 兼容端点（见 `windows-tts-design.md`）；Edge TTS 直连不做（TLS 指纹 + 地域风控实证） |
 | 2 | 记忆画像字段清单（称呼/作息/话题/摘要长度） | 已定 | 4 字段起步，摘要 ≤200 字（代码常量 200） |
 | 3 | 亲密度与 XP 联动曲线（token 换算比例） | 已定 | 亲密度 = 对话轮次加权 + token 少量加成 |
 | 4 | 主动互动触发阈值（久坐/深夜/持续编码定义） | 已定 | 久坐 60min / 深夜 23 点后 / 编码连续 2h |

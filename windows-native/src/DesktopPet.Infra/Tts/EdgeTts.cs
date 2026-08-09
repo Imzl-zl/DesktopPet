@@ -1,25 +1,15 @@
 using System.Net.WebSockets;
 using System.Text;
+using DesktopPet.Core.Tts;
 
 namespace DesktopPet.Infra.Tts;
 
-/// <summary>TTS 音色（Edge TTS 名称，如 zh-CN-XiaoxiaoNeural）。</summary>
+/// <summary>TTS 音色（Edge TTS 名称，如 zh-CN-XiaoxiaoNeural；Edge 协议内部辅助类型）。</summary>
 public sealed record TtsVoice(string Name, string Language)
 {
     /// <summary>由完整声音名（如 "zh-CN-XiaoxiaoNeural"）推导语言标签（"zh-CN"）。</summary>
     public static TtsVoice FromName(string name)
         => new(name, name.Length >= 5 ? name[..5] : "zh-CN");
-}
-
-/// <summary>
-/// TTS Provider 契约（架构文档 §3.2）。实现：EdgeTtsProvider（默认，免费）。
-/// 语音开关默认关（AI 助手页）；弹幕模式不朗读（App 层控制）。
-/// </summary>
-public interface ITtsProvider
-{
-    /// <summary>合成语音，返回音频流（调用方负责 Dispose；格式因实现而异：
-    /// SAPI=WAV / Edge=MP3）。</summary>
-    Task<Stream> SynthesizeAsync(string text, TtsVoice voice, CancellationToken ct);
 }
 
 /// <summary>Edge TTS 底层 socket 抽象（测试注入内存实现）。</summary>
@@ -33,7 +23,9 @@ public interface IEdgeSocket : IDisposable
 /// <summary>
 /// 真实 WebSocket 实现（Edge TTS 端点）。
 /// 自研最小 RFC 6455 客户端：WinHTTP 的 ClientWebSocket 对微软端点握手失败
-/// （HTTP/2 ALPN / 扩展协商差异 → 400），裸 TCP + TLS + 手工帧已验证可用。
+/// （HTTP/2 ALPN / 扩展协商差异 → 400），改用裸 TCP + TLS + 手工帧。
+/// 注意：TLS 走 SslStream（SChannel）——2026-08 实测该指纹被端点拒绝（Bad request），
+/// 生产不可用（见 EdgeTtsProvider 头注释）；本实现仅作协议保留与测试。
 /// 不协商 permessage-deflate（服务端允许，帧即明文）。
 /// </summary>
 public sealed class EdgeTtsSocket : IEdgeSocket
@@ -354,8 +346,11 @@ public static class EdgeTtsProtocol
 }
 
 /// <summary>
-/// Edge TTS Provider（免费协议）：连接 → speech.config → SSML → 收集 audio 帧直到 turn.end。
-/// 输出 MP3 字节流；弹幕模式不调用（App 层）。
+/// Edge TTS Provider（免费协议，保留代码与测试但**不接生产**——2026-08 实测
+/// 端点返回 Bad request：Windows SChannel TLS ClientHello 指纹 + 大陆 IP 地域风控
+/// 双重拦截，且微软随时改协议（见 docs/windows-tts-design.md §1.2）。
+/// 未来若启用需 OpenSSL 路径 + 跟随 edge-tts 社区协议演进。
+/// 连接 → speech.config → SSML → 收集 audio 帧直到 turn.end，输出 MP3 字节流。
 /// </summary>
 public sealed class EdgeTtsProvider : ITtsProvider
 {
@@ -366,16 +361,24 @@ public sealed class EdgeTtsProvider : ITtsProvider
     private readonly Func<IEdgeSocket> _socketFactory;
     private readonly TimeSpan _overallTimeout;
 
+    public string Id => "edge";
+    public bool RequiresNetwork => true;
+
+    /// <summary>端点不可用（风控）：直接抛 provider 错误，由上层降级到默认引擎；不枚举。</summary>
+    public Task<IReadOnlyList<TtsVoiceInfo>> ListVoicesAsync(CancellationToken ct)
+        => throw new ProviderUnavailableException("Edge TTS 端点不可用（TLS 指纹 + 地域风控）");
+
     public EdgeTtsProvider(Func<IEdgeSocket>? socketFactory = null, TimeSpan? overallTimeout = null)
     {
         _socketFactory = socketFactory ?? (() => new EdgeTtsSocket());
         _overallTimeout = overallTimeout ?? DefaultOverallTimeout;
     }
 
-    public async Task<Stream> SynthesizeAsync(string text, TtsVoice voice, CancellationToken ct)
+    public async Task<Stream> SynthesizeAsync(TtsSynthesisRequest request, CancellationToken ct)
     {
+        var text = request.Text;
         var trimmed = text?.Trim() ?? "";
-        if (trimmed.Length == 0) throw new ArgumentException("语音文本不能为空", nameof(text));
+        if (trimmed.Length == 0) throw new ArgumentException("语音文本不能为空", nameof(request.Text));
         if (trimmed.Length > 500) trimmed = trimmed[..500] + "…"; // Edge 单次请求上限防护
 
         // 整体 deadline：连接/握手/发帧/收帧全程受此约束
@@ -386,7 +389,7 @@ public sealed class EdgeTtsProvider : ITtsProvider
         var utcNow = DateTime.UtcNow;
         await socket.ConnectAsync(EdgeTtsProtocol.BuildEndpoint(utcNow), deadline.Token);
         await socket.SendAsync(EdgeTtsProtocol.BuildSpeechConfigMessage(utcNow), deadline.Token);
-        await socket.SendAsync(EdgeTtsProtocol.BuildSsmlMessage(trimmed, voice, Guid.NewGuid().ToString("N"), utcNow), deadline.Token);
+        await socket.SendAsync(EdgeTtsProtocol.BuildSsmlMessage(trimmed, TtsVoice.FromName(request.VoiceId), Guid.NewGuid().ToString("N"), utcNow), deadline.Token);
 
         using var audio = new MemoryStream();
         while (true)

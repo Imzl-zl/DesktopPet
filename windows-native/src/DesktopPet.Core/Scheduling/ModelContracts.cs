@@ -133,6 +133,16 @@ public sealed record ProviderConfig(
     int? ContextWindowTokens = null); // 模型上下文长度（空 = L1 会话窗口按最近 5 轮截断）
 
 /// <summary>
+/// TTS 端点连接配置（windows-tts-design.md §5.2：providers.json 的 tts 段，对齐 image 段）。
+/// ApiKeyRef 是 Windows Credential Manager 的引用 id，不落明文 JSON。
+/// </summary>
+public sealed record TtsEndpointConfig(
+    string BaseUrl,      // 如 https://api.siliconflow.cn/v1（/v1/audio/speech）
+    string ApiKeyRef,    // 凭据引用 id（空 = 无鉴权，如本地 GPT-SoVITS）
+    string ModelName,    // 如 FunAudioLLM/CosyVoice2-0.5B / tts-1 / gpt-sovits
+    string Voice = "");  // 默认音色 id；空 = 自动（列表首个/按语言）
+
+/// <summary>
 /// 生图连接配置（架构文档 §3.4：providers.json 的 image 段，复用凭据引用机制）。
 /// </summary>
 public sealed record ImageGenConfig(
@@ -169,6 +179,9 @@ public sealed class ProvidersFileModel
     /// <summary>Phase 6f：生图连接（空 = 未配置，总结图开关关闭时不生成）。</summary>
     public ImageGenConfig? Image { get; set; }
 
+    /// <summary>windows-tts-design.md §5.2：TTS 端点连接（空 = 未配置，用本地引擎）。</summary>
+    public TtsEndpointConfig? Tts { get; set; }
+
     public static ProvidersFileModel Normalize(ProvidersFileModel raw)
     {
         var models = (raw.Models ?? [])
@@ -180,7 +193,11 @@ public sealed class ProvidersFileModel
                     || string.IsNullOrWhiteSpace(raw.Image.ModelName)
             ? null
             : raw.Image with { BaseUrl = raw.Image.BaseUrl.Trim(), ModelName = raw.Image.ModelName.Trim() };
-        return new ProvidersFileModel { Models = models, Image = image };
+        var tts = raw.Tts is null || string.IsNullOrWhiteSpace(raw.Tts.BaseUrl)
+                  || string.IsNullOrWhiteSpace(raw.Tts.ModelName)
+            ? null
+            : raw.Tts with { BaseUrl = raw.Tts.BaseUrl.Trim(), ModelName = raw.Tts.ModelName.Trim() };
+        return new ProvidersFileModel { Models = models, Image = image, Tts = tts };
     }
 
 
@@ -194,7 +211,8 @@ public sealed class ProvidersFileModel
             var rawModelCount = raw.Models?.Count ?? 0;
             var normalized = Normalize(raw);
             var lossless = normalized.Models.Count == rawModelCount
-                           && (raw.Image is null || normalized.Image is not null);
+                           && (raw.Image is null || normalized.Image is not null)
+                           && (raw.Tts is null || normalized.Tts is not null);
             return new ProvidersFileMigrationSource(normalized, lossless);
         }
         catch (System.Text.Json.JsonException)

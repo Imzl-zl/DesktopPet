@@ -29,6 +29,8 @@
 - Tauri → .NET 8 + WPF 整体迁移（透明窗口软渲染是卡顿根因，原生渲染是唯一合理选择）。
 - 双进程架构：PetApp.exe + PetAgent.exe（截屏/分析/总结），Agent 崩溃看门狗自动重启。
 - 模型/TTS/生图统一 OpenAI 兼容协议，Provider 可插拔；API Key 存 Windows Credential Manager，不落明文。
+- TTS 三级 Provider 栈已实施（`docs/windows-tts-design.md`）：SAPI 兜底 + OneCore 系统自然语音（App 层 WinRT）+ OpenAI 兼容端点（Infra，providers.json `tts` 段，Key 存 Credential Manager）；`ITtsProvider` 契约下沉 Core（TtsContracts.cs），设置页引擎单选/音色下拉/试听/语速（50-200%）；Edge TTS 直连不做（TLS 指纹 + 地域风控实证，EdgeTts.cs 保留标记不可用）。
+- 坑点：SAPI `synth.Rate` 合法范围 -10..+10，语速映射必须 clamp（200% 不 clamp 会抛 ArgumentOutOfRangeException）；`OpenAiCompatibleTtsProvider.ListVoicesAsync` 的 401 必须显式抛 auth（吞掉会导致设置页假成功）；OneCore SSML `xml:lang` 必须跟随选中语音语言；设置页异步音色加载需 generation token 防竞态。
 - 领域层（Core）零 UI 零 IO、可单测；宠物窗口自绘渲染器豁免 MVVM，设置/对话走 MVVM。
 - AI 总开关：关闭即纯桌宠模式，无截屏/网络/后台进程。
 - Windows 本地化以 Core embedded JSON 为唯一词典；语言变更必须先保存 settings，再刷新已跟踪静态槽位；用户/模型/日记/自定义人格内容显式排除。
@@ -45,6 +47,7 @@
 - **构建输出目录陷阱**：`dotnet build -p:Platform=x64` 输出 `bin/x64/`，而 `ResolveAgentHostPath` 回退探测 `bin/Debug/`（无 x64）——改 Agent 代码后必须不带 Platform 参数重新构建 AgentHost，否则 App 启动的仍是旧 DLL。
 
 ## 最近活跃窗口
+- 2026-08-09（TTS 实施）：P0-P3 全部完成——契约下沉 Core（TtsContracts/Registry）、SAPI 适配新契约（ListVoices+语速）、OneCoreTtsProvider（App）、OpenAiCompatibleTtsProvider（/v1/audio/speech+voices）、AiSettings 加 TtsProviderId/TtsSpeedPercent、providers.json tts 段、设置页引擎/音色/试听/语速/连接编辑器；603 tests 全绿 + build 0 warn/error + 真机（SAPI/OneCore 全语速合成、App 冒烟）；独立 code review 发现 I-1~I-4（SAPI 200% 越界/ListVoices 吞 401/Speak 每次拉列表/SSML lang 硬编码）+ M-1~M-5 全部修复并补回归测试。
 - 2026-08-09：设置审计修复——① Windows TTS 声音列表从硬编码 Edge 名改为 SAPI 动态枚举（`SapiTtsProvider.GetInstalledVoices`，旧 Edge 名回落"自动"）；`SapiTtsProvider` 语言回退加 `TryParseCulture` 兜底；② macOS 声音设置从"死设置"接入真实事件（Event 重构为 click/breakReminder，默认 Pop/Purr；`PetWindowModel` 点击、`BreakReminderController` 提醒改走 `SoundSettings.play`；SetupView 文案与 4 语言 strings 同步）。验证：Windows 557 tests 全过 + build 0 error + System.Speech 8.0 真机全路径（枚举/精确选中/语言回退/合成 WAV）+ PetApp F5 冒烟零错误日志；macOS 端未编译验证（用户暂缓）。
 - 2026-08-07（晚）：修复截屏分析静默失效——根因 GraphicsCapture FrameArrived 节流拒绝不取帧→帧滞留占满 FramePool→FrameArrived 永不再触发（永久死锁，无异常无日志）；VS MCP 附加调试 + 独立探测程序 + 自包含对照实验三重实证；修复 = 节流拒绝时取帧即弃 + bufferCount 1→2；端到端恢复（push event kind=Coding 连续产出，弹幕路由正常）；Agent.Tests 33 / 全量 550 全过。另发现并移除 PetWindow.cs:406 残留调试断点（VS F5 启动必停导致 App 卡在启动流程、Agent 不启动）。
 - 2026-08-07：修复 Windows 版气泡压头/悬空——根因：气泡按帧矩形顶定位（Headroom 固定偏移），不同宠物帧内透明边不同；改为底部锚定 + 按实际可见头顶（ContentTopInset）向上平移；新增 SpriteSheet/PetRenderer 测试（Core 374）。

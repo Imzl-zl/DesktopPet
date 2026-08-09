@@ -12,6 +12,8 @@ using DesktopPet.App.Diagnostics;
 using DesktopPet.App.Localization;
 using DesktopPet.App.Rendering;
 using DesktopPet.App.Windows;
+using DesktopPet.App.Tts;
+using DesktopPet.Core.Tts;
 using DesktopPet.Core.Care;
 using DesktopPet.Core.Hotkeys;
 using DesktopPet.Core.I18n;
@@ -2380,7 +2382,7 @@ public sealed class SettingsWindow : Window
             v => Save(s => s with { Ai = s.Ai with { DailySummary = v } }), margin: 8));
         companionPanel.Children.Add(ToggleRow("总结图", "默认关：用生图模型给日记配插图，需配置生图连接", ai.SummaryImage,
             v => Save(s => s with { Ai = s.Ai with { SummaryImage = v } }), margin: 8));
-        companionPanel.Children.Add(ToggleRow("语音朗读", "对话模式朗读回复，Edge TTS；弹幕模式不朗读", ai.TtsEnabled,
+        companionPanel.Children.Add(ToggleRow("语音朗读", "对话模式朗读回复；弹幕模式不朗读", ai.TtsEnabled,
             v => Save(s => s with { Ai = s.Ai with { TtsEnabled = v } }), margin: 0));
 
         // 免打扰时段：时段内不产生任何主动互动（定时问候 + 事件评论）；默认关 = 保持现有行为
@@ -2440,9 +2442,55 @@ public sealed class SettingsWindow : Window
         });
         companionPanel.Children.Add(quietPanel);
 
-        // 朗读声音：空 = 按界面语言自动选择。列表 = 系统已安装的 SAPI 离线语音
-        // （离线合成，与 SapiTtsProvider 实现一致；不再硬编码 Edge 声音名——
-        // 那些名字在 SAPI 下 SelectVoice 必然失败，只能退化为语言匹配）。
+        // 朗读引擎 + 音色 + 试听 + 语速（windows-tts-design.md §7）：
+        // 引擎单选（当前可用 provider 列表，在线引擎在 AI 关闭时置灰）；
+        // 音色下拉按引擎异步枚举（ListVoicesAsync）；试听合成固定文案；语速 50-200%。
+        var ttsPanel = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+        ttsPanel.Children.Add(new TextBlock
+        {
+            Text = "朗读引擎",
+            FontSize = 12,
+            Foreground = Brush("TextPrimaryBrush"),
+        });
+        var ttsProviders = _ai?.TtsProviders ?? [];
+        var engineNames = new Dictionary<string, string>
+        {
+            ["sapi"] = "系统语音（离线）",
+            ["onecore"] = "自然语音（离线）",
+            ["openai"] = "自配端点（在线）",
+        };
+        var engineRow = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+        var selectedProviderId = ai.TtsProviderId;
+        // 保存的引擎不在当前 provider 列表（如未配置在线端点）→ 回落默认 sapi
+        if (ttsProviders.All(p => p.Id != selectedProviderId)) selectedProviderId = "sapi";
+        ITtsProvider? activeProvider = null;
+        var engineRadios = new List<(RadioButton Radio, ITtsProvider Provider)>();
+        foreach (var provider in ttsProviders)
+        {
+            var label = engineNames.TryGetValue(provider.Id, out var n) ? n : provider.Id;
+            var radio = new RadioButton
+            {
+                Content = label,
+                IsChecked = provider.Id == selectedProviderId,
+                Margin = new Thickness(0, 0, 20, 0),
+                FontSize = 12,
+                IsEnabled = !provider.RequiresNetwork || ai.Enabled, // 在线引擎需 AI 总开关
+            };
+            engineRadios.Add((radio, provider));
+            engineRow.Children.Add(radio);
+            if (provider.Id == selectedProviderId) activeProvider = provider;
+        }
+        ttsPanel.Children.Add(engineRow);
+        ttsPanel.Children.Add(new TextBlock
+        {
+            Text = "自然语音需在系统设置安装（设置 → 时间和语言 → 语音）；自配端点支持 OpenAI 兼容 TTS",
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 0),
+        });
+
+        // 音色下拉（按当前引擎异步枚举）+ 试听
         var voiceRow = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
         voiceRow.Children.Add(new TextBlock
         {
@@ -2458,41 +2506,175 @@ public sealed class SettingsWindow : Window
             Margin = new Thickness(0, 4, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Left,
         };
-        var voiceItems = new List<(string Name, string Label)> { ("", "自动（跟随界面语言）") };
-        try
+        var previewButton = new Button
         {
-            foreach (var v in SapiTtsProvider.GetInstalledVoices())
+            Content = "试听",
+            Width = 64,
+            Height = 30,
+            FontSize = 12,
+            Margin = new Thickness(8, 4, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            IsEnabled = activeProvider is not null,
+        };
+        var voiceWrap = new WrapPanel();
+        voiceWrap.Children.Add(voiceCombo);
+        voiceWrap.Children.Add(previewButton);
+        voiceRow.Children.Add(voiceWrap);
+
+        // 引擎切换 → 重载音色列表；当前选择失效自动回落「自动」
+        // ComboBoxItem.Tag 存引擎内音色 Id（"" = 自动），Items 显示名
+        var voiceLoadGeneration = 0; // 代际令牌：快速切换引擎时丢弃过期异步结果
+        async Task LoadVoicesAsync(ITtsProvider provider)
+        {
+            var generation = ++voiceLoadGeneration;
+            var items = new List<(string Id, string Label)> { ("", "自动（跟随界面语言）") };
+            try
             {
-                var gender = v.Gender switch { "female" => "女", "male" => "男", _ => "" };
-                var suffix = v.Language.Length > 0 ? $"（{v.Language}{(gender.Length > 0 ? " · " + gender : "")}）" : "";
-                voiceItems.Add((v.Name, v.Name + suffix));
+                var voices = await provider.ListVoicesAsync(CancellationToken.None);
+                foreach (var v in voices)
+                {
+                    var gender = v.Gender switch { "female" => "女", "male" => "男", _ => "" };
+                    var suffix = v.Language.Length > 0 ? $"（{v.Language}{(gender.Length > 0 ? " · " + gender : "")}）" : "";
+                    items.Add((v.Id, v.DisplayName + suffix));
+                }
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or ProviderUnavailableException or InvalidOperationException)
+            {
+                // 引擎不可用/未配置：只保留「自动」项，试听会走运行时降级
+                _logger.Error("Settings", $"voice enumeration failed ({provider.Id}): {ex.GetType().Name}: {ex.Message}");
+            }
+            if (generation != voiceLoadGeneration) return; // 过期结果：已有更新的引擎切换
+            var prev = ai.TtsVoiceName;
+            voiceCombo.SelectionChanged -= OnVoiceComboChanged; // 程序化填充不触发保存
+            voiceCombo.Items.Clear();
+            foreach (var (id, label) in items)
+            {
+                voiceCombo.Items.Add(new ComboBoxItem { Content = label, Tag = id });
+            }
+            // 旧音色不在新引擎列表 → 回落「自动」
+            var savedIndex = items.FindIndex(v => v.Id == prev);
+            voiceCombo.SelectedIndex = Math.Max(0, savedIndex);
+            voiceCombo.SelectionChanged += OnVoiceComboChanged;
+        }
+
+        void OnVoiceComboChanged(object? sender, SelectionChangedEventArgs e)
+        {
+            if (voiceCombo.SelectedItem is ComboBoxItem item && item.Tag is string voiceId)
+            {
+                Save(s => s with { Ai = s.Ai with { TtsVoiceName = voiceId } });
             }
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+
+        foreach (var (radio, provider) in engineRadios)
         {
-            // 系统无可用 SAPI 语音引擎：只保留「自动」项（运行时合成同样会回退默认）。
-            _logger.Error("Settings", $"SAPI voice enumeration failed: {ex.GetType().Name}: {ex.Message}");
+            radio.Checked += async (_, _) =>
+            {
+                activeProvider = provider;
+                previewButton.IsEnabled = true;
+                Save(s => s with { Ai = s.Ai with { TtsProviderId = provider.Id } });
+                await LoadVoicesAsync(provider);
+            };
         }
-        foreach (var (_, label) in voiceItems) voiceCombo.Items.Add(label);
-        // 旧版本保存的 Edge 声音名（zh-CN-XiaoxiaoNeural 等）不在 SAPI 列表 → 回落「自动」，
-        // 用户重新选择后才会覆盖旧值。
-        var savedVoiceIndex = voiceItems.FindIndex(v => v.Name == ai.TtsVoiceName);
-        voiceCombo.SelectedIndex = Math.Max(0, savedVoiceIndex);
-        voiceCombo.SelectionChanged += (_, _) =>
+        voiceCombo.SelectionChanged += OnVoiceComboChanged;
+
+        // 试听：合成固定文案 → 临时文件 → MediaPlayer 播放
+        var previewPlayer = new System.Windows.Media.MediaPlayer();
+        string? pendingPreviewPath = null;
+        previewPlayer.MediaEnded += (_, _) =>
         {
-            var picked = voiceItems[Math.Max(0, voiceCombo.SelectedIndex)].Name;
-            Save(s => s with { Ai = s.Ai with { TtsVoiceName = picked } });
+            if (pendingPreviewPath is not null)
+            {
+                try { File.Delete(pendingPreviewPath); } catch { /* 临时文件清理失败可忽略 */ }
+                pendingPreviewPath = null;
+            }
         };
-        voiceRow.Children.Add(voiceCombo);
-        voiceRow.Children.Add(new TextBlock
+        previewButton.Click += async (_, _) =>
         {
-            Text = "系统已安装的离线语音（Windows SAPI）；自动模式按界面语言匹配",
+            if (activeProvider is null) return;
+            previewButton.IsEnabled = false;
+            try
+            {
+                var voice = TtsProviderRegistry.ResolveVoice(
+                    await activeProvider.ListVoicesAsync(CancellationToken.None),
+                    ai.TtsVoiceName, _i18n.Lang.ToString());
+                using var stream = await activeProvider.SynthesizeAsync(
+                    new TtsSynthesisRequest("嗨，我是你的桌面宠物~", voice?.Id ?? "", ai.TtsSpeedPercent),
+                    CancellationToken.None);
+                var bytes = ((MemoryStream)stream).ToArray();
+                pendingPreviewPath = Path.Combine(Path.GetTempPath(), $"desktoppet-tts-preview-{Guid.NewGuid():N}.wav");
+                File.WriteAllBytes(pendingPreviewPath, bytes);
+                previewPlayer.Open(new Uri(pendingPreviewPath));
+                previewPlayer.Play();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error("Settings", $"TTS preview failed: {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                previewButton.IsEnabled = true;
+            }
+        };
+
+        // 语速滑条 50-200%
+        var speedRow = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+        speedRow.Children.Add(new TextBlock
+        {
+            Text = "语速",
+            FontSize = 12,
+            Foreground = Brush("TextPrimaryBrush"),
+        });
+        var speedSlider = new Slider
+        {
+            Minimum = 50,
+            Maximum = 200,
+            Value = ai.TtsSpeedPercent,
+            Width = 220,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var speedValue = new TextBlock
+        {
+            Text = $"{ai.TtsSpeedPercent}%",
+            FontSize = 12,
+            Foreground = Brush("TextSecondaryBrush"),
+            Width = 48,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        speedSlider.ValueChanged += (_, e) => speedValue.Text = $"{e.NewValue:0}%";
+        var speedWrap = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+        speedWrap.Children.Add(speedSlider);
+        speedWrap.Children.Add(speedValue);
+        speedRow.Children.Add(speedWrap);
+        CommitSliderOnRelease(speedSlider, () =>
+            Save(s => s with { Ai = s.Ai with { TtsSpeedPercent = (int)speedSlider.Value } }));
+
+        ttsPanel.Children.Add(voiceRow);
+        ttsPanel.Children.Add(speedRow);
+
+        // 在线端点连接（providers.json tts 段）：仅 TTS 相关，独立于模型/生图连接
+        var ttsConnButton = new Button
+        {
+            Content = "自配端点连接" + (providers.Tts is not null ? "（已配置）" : "（未配置）"),
+            Style = AppStyle("ButtonDefaultStyle"),
+            Height = 28,
+            FontSize = 12,
+            Margin = new Thickness(0, 10, 0, 0),
+            Padding = new Thickness(12, 3, 12, 3),
+        };
+        ttsConnButton.Click += (_, _) => ShowTtsConnectionEditor();
+        ttsPanel.Children.Add(ttsConnButton);
+        ttsPanel.Children.Add(new TextBlock
+        {
+            Text = "自配端点需 OpenAI 兼容 TTS（如 SiliconFlow / Fish Audio / 本地 GPT-SoVITS）",
             FontSize = 11,
             Foreground = Brush("TextTertiaryBrush"),
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 4, 0, 0),
         });
-        companionPanel.Children.Add(voiceRow);
+        companionPanel.Children.Add(ttsPanel);
+        // 初始加载当前引擎音色列表
+        if (activeProvider is not null) _ = LoadVoicesAsync(activeProvider);
         stack.Children.Add(SectionCard("陪伴功能（记忆 / 主动互动 / 亲密度 / 每日总结 / 语音）", companionPanel));
 
         // 人格卡片网格
@@ -3283,7 +3465,196 @@ public sealed class SettingsWindow : Window
         window.ShowDialog();
     }
 
-    // ---- Phase 6f：日记查看（文本 + 总结图）----
+    // ---- TTS 在线端点连接（providers.json tts 段；windows-tts-design.md §5.2）----
+
+    private void ShowTtsConnectionEditor()
+    {
+        if (_ai is null) return;
+        var providers = _ai.Providers;
+        var cfg = providers.Tts;
+        var creds = new Infra.Providers.WindowsCredentialStore();
+
+        var baseBox = new TextBox { Text = cfg?.BaseUrl ?? "", FontSize = 12, Height = 30 };
+        var modelBox = new TextBox { Text = cfg?.ModelName ?? "", FontSize = 12, Height = 30 };
+        var voiceBox = new TextBox { Text = cfg?.Voice ?? "", FontSize = 12, Height = 30 };
+        var keyBox = new PasswordBox { FontSize = 12, Height = 30 };
+
+        var form = new StackPanel { Margin = new Thickness(20, 16, 20, 0) };
+        form.Children.Add(FormLabel("BaseUrl（OpenAI 兼容 TTS，如 https://api.siliconflow.cn/v1）"));
+        form.Children.Add(baseBox);
+        form.Children.Add(FormLabel("模型（如 FunAudioLLM/CosyVoice2-0.5B / tts-1）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(modelBox);
+        form.Children.Add(FormLabel("默认音色 id（可选；空 = 自动，可在朗读声音下拉中选）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(voiceBox);
+        form.Children.Add(FormLabel("API Key（存 Windows 凭据管理器，不落明文 JSON）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(keyBox);
+        if (!string.IsNullOrEmpty(cfg?.ApiKeyRef))
+        {
+            form.Children.Add(new TextBlock
+            {
+                Text = "已保存凭据；留空保持不变",
+                FontSize = 11,
+                Foreground = Brush("TextTertiaryBrush"),
+                Margin = new Thickness(0, 4, 0, 0),
+            });
+        }
+
+        var window = new Window
+        {
+            Title = "自配 TTS 端点",
+            Width = 460,
+            Height = 420,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            Background = Brush("WindowBgBrush"),
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+        };
+        var saveButton = new Button
+        {
+            Content = "保存并测试连接",
+            Style = AppStyle("ButtonPrimaryStyle"),
+            Width = 150,
+            Height = 32,
+            FontSize = 13,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 16, 0, 0),
+        };
+        saveButton.Click += (_, _) =>
+        {
+            var baseUrl = baseBox.Text.Trim();
+            var model = modelBox.Text.Trim();
+            if (baseUrl.Length == 0 || model.Length == 0)
+            {
+                MessageBox.Show(window, _i18n.T("BaseUrl 和模型名不能为空"), "DesktopPet");
+                return;
+            }
+
+            try
+            {
+                var oldSecret = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? null : creds.Get(cfg.ApiKeyRef);
+                if (!string.IsNullOrEmpty(cfg?.ApiKeyRef)
+                    && oldSecret is null
+                    && string.IsNullOrEmpty(keyBox.Password))
+                {
+                    MessageBox.Show(window, _i18n.T("已保存的凭据不存在，请重新输入 API Key"), "DesktopPet");
+                    return;
+                }
+                var secret = string.IsNullOrEmpty(keyBox.Password) ? oldSecret : keyBox.Password;
+                var keyRef = secret is null ? "" : Infra.Providers.ProviderCredentialRefs.Tts;
+                _ = ProviderEndpointPolicy.BuildRequestUri(baseUrl, "audio/speech", secret is not null);
+                var previousTargetSecret = keyRef.Length == 0 ? null : creds.Get(keyRef);
+                var credentialChanged = keyRef.Length > 0
+                    && !string.Equals(previousTargetSecret, secret, StringComparison.Ordinal);
+                if (credentialChanged) creds.Set(keyRef, secret!);
+
+                var nextProviders = new Core.Scheduling.ProvidersFileModel
+                {
+                    Models = providers.Models.ToList(),
+                    Image = providers.Image,
+                    Tts = new Core.Scheduling.TtsEndpointConfig(baseUrl, keyRef, model, voiceBox.Text.Trim()),
+                };
+                try
+                {
+                    _ai.ApplyProviders(nextProviders);
+                }
+                catch (JsonStoreException ex)
+                {
+                    if (credentialChanged)
+                    {
+                        try
+                        {
+                            if (previousTargetSecret is null) creds.Delete(keyRef);
+                            else creds.Set(keyRef, previousTargetSecret);
+                        }
+                        catch (CredentialStoreException)
+                        {
+                            MessageBox.Show(window, _i18n.T("配置保存失败，凭据未能完整恢复。"), "DesktopPet");
+                        }
+                    }
+                    PersistenceErrorPresenter.Report(ex, window);
+                    return;
+                }
+
+                // 连接测试：拉音色列表（失败按错误分类提示，不阻断保存）
+                _ = TestTtsConnectionAsync(window, saveButton, baseUrl, keyRef, model, secret);
+                ShowPage("ai"); // 刷新页面：连接按钮文案（已配置）与引擎列表即时更新
+            }
+            catch (CredentialStoreException ex)
+            {
+                MessageBox.Show(
+                    window,
+                    _i18n.Format("Windows 凭据操作失败（系统错误 {0}）", ex.NativeError),
+                    "DesktopPet");
+            }
+            catch (Core.Scheduling.ProviderException ex)
+            {
+                MessageBox.Show(
+                    window,
+                    ex.Code == "insecure-transport"
+                        ? _i18n.T("远程 HTTP 连接不能保存 API Key，请使用 HTTPS")
+                        : _i18n.T("TTS 接口地址无效"),
+                    "DesktopPet");
+            }
+        };
+
+        var footer = new Grid { Margin = new Thickness(20, 4, 20, 16) };
+        footer.Children.Add(saveButton);
+        var root = new DockPanel();
+        DockPanel.SetDock(form, Dock.Top);
+        DockPanel.SetDock(footer, Dock.Bottom);
+        root.Children.Add(footer);
+        root.Children.Add(form);
+        window.Content = root;
+        WpfLocalizer.ApplyNew(window, _i18n);
+        window.ShowDialog();
+    }
+
+    /// <summary>保存后异步测试：拉取 /audio/voices 验证连接；失败按 auth/network/invalid 分类提示。</summary>
+    private async Task TestTtsConnectionAsync(
+        Window window,
+        Button saveButton,
+        string baseUrl,
+        string keyRef,
+        string model,
+        string? secret)
+    {
+        saveButton.IsEnabled = false;
+        saveButton.Content = "测试中…";
+        try
+        {
+            var provider = new Infra.Providers.OpenAiCompatibleTtsProvider(
+                new Core.Scheduling.TtsEndpointConfig(baseUrl, keyRef, model),
+                new Infra.Providers.WindowsCredentialStore(),
+                ProviderHttpClient.Create());
+            var voices = await provider.ListVoicesAsync(CancellationToken.None);
+            if (voices.Count > 0)
+            {
+                MessageBox.Show(window, $"连接成功：检测到 {voices.Count} 个音色（如 {voices[0].DisplayName}）", "DesktopPet");
+            }
+            else
+            {
+                MessageBox.Show(window, "连接成功（端点未提供音色列表，可在朗读声音中手动输入）", "DesktopPet");
+            }
+        }
+        catch (Core.Scheduling.ProviderException ex)
+        {
+            var message = ex.Code switch
+            {
+                "auth" => "鉴权失败：请检查 API Key",
+                "timeout" => "连接超时：请检查网络或 BaseUrl",
+                "network" => "网络错误：请检查 BaseUrl 或网络连接",
+                _ => $"连接失败：{ex.Message}",
+            };
+            MessageBox.Show(window, message, "DesktopPet");
+        }
+        finally
+        {
+            saveButton.IsEnabled = true;
+            saveButton.Content = "保存并测试连接";
+            window.Close();
+        }
+    }
 
     private void ShowDiaryViewer()
     {

@@ -34,10 +34,12 @@ public sealed record AiSettings(
     bool AllReply,              // 多宠物全员回应（默认关；开 = 同一事件每只宠物都生成）
     int ScreenAnalysisIntervalSeconds = 5, // 截屏分析间隔 3-30s（隐私/云端费用敏感，默认 5）
     bool Onboarded = false,     // 初始化引导已完成（称呼+人格首次设置；开启 AI 后弹引导窗）
-    string TtsVoiceName = "",  // 朗读声音（Edge TTS 声音名；空 = 按界面语言自动选择）
+    string TtsVoiceName = "",  // 朗读声音（当前引擎下的音色标识；空 = 按界面语言自动选择）
     bool QuietHoursEnabled = false, // 免打扰时段开关（默认关 = 保持现有问候行为）
     int QuietHoursStart = 23,   // 免打扰开始小时（0-23，默认 23）
-    int QuietHoursEnd = 5)      // 免打扰结束小时（0-23，默认 5；跨午夜：23→5）
+    int QuietHoursEnd = 5,      // 免打扰结束小时（0-23，默认 5；跨午夜：23→5）
+    string TtsProviderId = "sapi", // 朗读引擎（windows-tts-design.md §3）：sapi | onecore | openai；未知归一化回 sapi
+    int TtsSpeedPercent = 100)  // 朗读语速 50-200%（默认 100）
 {
     public const string FrequencyLow = "low";
     public const string FrequencyMedium = "medium";
@@ -73,19 +75,10 @@ public sealed record AiSettings(
     }
 
     /// <summary>
-    /// 朗读声音：空 = 按界面语言自动选择。
-    /// 注意：生产实现为 SAPI 离线合成，本方法返回的 Edge 风格名字不会精确命中，
-    /// 而是作为「语言提示」走 SapiTtsProvider 的语言回退（SelectVoice 失败 → SelectVoiceByHints）。
-    /// 设置页已改为枚举系统已安装的 SAPI 语音；此处仅服务于旧的自动模式语义。
+    /// 朗读声音语义：空 = 自动（跟随界面语言，由引擎内解析）。
+    /// 引擎 = sapi（默认，离线兜底）| onecore（系统自然语音）| openai（自配端点）。
+    /// 完整设计见 docs/windows-tts-design.md。
     /// </summary>
-    public static string DefaultVoiceFor(AppLang lang) => lang switch
-    {
-        AppLang.En => "en-US-JennyNeural",
-        AppLang.ZhHant => "zh-TW-HsiaoChenNeural",
-        AppLang.Vi => "vi-VN-HoaiMyNeural",
-        _ => "zh-CN-XiaoxiaoNeural",
-    };
-
     public static AiSettings Normalize(AiSettings? raw)
     {
         if (raw is null) return Defaults;
@@ -102,6 +95,12 @@ public sealed record AiSettings(
             FrequencyLow => FrequencyLow,
             FrequencyHigh => FrequencyHigh,
             _ => FrequencyMedium,
+        };
+        var providerId = raw.TtsProviderId switch
+        {
+            "onecore" => "onecore",
+            "openai" => "openai",
+            _ => "sapi",
         };
         return new AiSettings(
             raw.Enabled,
@@ -123,7 +122,9 @@ public sealed record AiSettings(
             raw.TtsVoiceName ?? "",
             raw.QuietHoursEnabled,
             Math.Clamp(raw.QuietHoursStart, 0, 23),
-            Math.Clamp(raw.QuietHoursEnd, 0, 23));
+            Math.Clamp(raw.QuietHoursEnd, 0, 23),
+            providerId,
+            Math.Clamp(raw.TtsSpeedPercent, 50, 200));
     }
 }
 
@@ -159,6 +160,8 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         var quietHoursEnabled = defaults.QuietHoursEnabled;
         var quietHoursStart = defaults.QuietHoursStart;
         var quietHoursEnd = defaults.QuietHoursEnd;
+        var ttsProviderId = defaults.TtsProviderId;
+        var ttsSpeedPercent = defaults.TtsSpeedPercent;
 
         var camel = options.PropertyNamingPolicy ?? JsonNamingPolicy.CamelCase;
         while (reader.Read())
@@ -190,6 +193,8 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
                 case "quietHoursEnabled": quietHoursEnabled = ReadBool(ref reader); break;
                 case "quietHoursStart": quietHoursStart = ReadInt(ref reader) ?? defaults.QuietHoursStart; break;
                 case "quietHoursEnd": quietHoursEnd = ReadInt(ref reader) ?? defaults.QuietHoursEnd; break;
+                case "ttsProviderId": ttsProviderId = ReadString(ref reader) ?? defaults.TtsProviderId; break;
+                case "ttsSpeedPercent": ttsSpeedPercent = ReadInt(ref reader) ?? defaults.TtsSpeedPercent; break;
                 default: reader.Skip(); break; // 未知字段容忍（前向兼容）
             }
         }
@@ -198,7 +203,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
             enabled, screenAnalysis, outputMode, screenContextEnabled, providerId,
             memoryEnabled, activeInteraction, interactionFrequency, screenAwareness,
             intimacyEnabled, dailySummary, summaryImage, ttsEnabled, allReply, screenAnalysisIntervalSeconds, onboarded, ttsVoiceName,
-            quietHoursEnabled, quietHoursStart, quietHoursEnd);
+            quietHoursEnabled, quietHoursStart, quietHoursEnd, ttsProviderId, ttsSpeedPercent);
     }
 
     public override void Write(Utf8JsonWriter writer, AiSettings value, JsonSerializerOptions options)
@@ -231,6 +236,8 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         v.QuietHoursEnabled,
         v.QuietHoursStart,
         v.QuietHoursEnd,
+        v.TtsProviderId,
+        v.TtsSpeedPercent,
     };
 
     private static bool ReadBool(ref Utf8JsonReader reader)

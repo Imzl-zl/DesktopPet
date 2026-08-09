@@ -64,7 +64,7 @@ public sealed class GraphicsCaptureSource :
             _item = CreateCaptureItemForMonitor(MonitorFromPoint(0, 0, 1 /* MONITOR_DEFAULTTONEAREST */));
             _item.Closed += OnItemClosed;
             _framePool = Direct3D11CaptureFramePool.Create(
-                _device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 1, _item.Size);
+                _device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, _item.Size);
             _framePool.FrameArrived += OnFrameArrived;
             _session = _framePool.CreateCaptureSession(_item);
             _session.StartCapture();
@@ -128,7 +128,14 @@ public sealed class GraphicsCaptureSource :
                 if (_state != GraphicsCaptureState.Running) return;
             }
 
-            if (!_copyCadence.TryAcquire()) return;
+            if (!_copyCadence.TryAcquire())
+            {
+                // 节流窗口内的帧：立即取出并释放，不能滞留池中——
+                // 缓冲=1 时滞留帧会占满 FramePool，后续新帧被丢弃且 FrameArrived 不再触发
+                // （永久死锁：分析引擎永远拿不到新帧）。
+                using var dropped = sender.TryGetNextFrame();
+                return;
+            }
             var frame = sender.TryGetNextFrame();
             if (frame is null) return;
             _ = CopyFrameAsync(frame);

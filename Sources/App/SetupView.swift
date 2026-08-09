@@ -260,18 +260,18 @@ private struct GeneralTab: View {
             }
 
             Section("Sounds") {
-                SoundRow(title: "When a task finishes",
-                         enabled: $sound.doneEnabled,
-                         customPath: sound.doneCustomPath,
-                         onPlay: { sound.play(.done) },
-                         onUpload: { sound.upload(for: .done) },
-                         onReset: { sound.resetToDefault(.done) })
-                SoundRow(title: "When your pet needs you",
-                         enabled: $sound.waitingEnabled,
-                         customPath: sound.waitingCustomPath,
-                         onPlay: { sound.play(.waiting) },
-                         onUpload: { sound.upload(for: .waiting) },
-                         onReset: { sound.resetToDefault(.waiting) })
+                SoundRow(title: "When you click the pet",
+                         enabled: $sound.clickEnabled,
+                         customPath: sound.clickCustomPath,
+                         onPlay: { sound.play(.click) },
+                         onUpload: { sound.upload(for: .click) },
+                         onReset: { sound.resetToDefault(.click) })
+                SoundRow(title: "When the break reminder fires",
+                         enabled: $sound.breakReminderEnabled,
+                         customPath: sound.breakReminderCustomPath,
+                         onPlay: { sound.play(.breakReminder) },
+                         onUpload: { sound.upload(for: .breakReminder) },
+                         onReset: { sound.resetToDefault(.breakReminder) })
             }
 
             Section("About") {

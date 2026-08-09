@@ -138,8 +138,8 @@
 "Turn on in System Settings to get alerts" = "Turn on in System Settings to get alerts";
 "Alerts when something needs your attention." = "Alerts when something needs your attention.";
 "Muted, the toggle turns alerts back on" = "Muted, the toggle turns alerts back on";
-"When a task finishes" = "When a task finishes";
-"When your pet needs you" = "When your pet needs you";
+"When you click the pet" = "When you click the pet";
+"When the break reminder fires" = "When the break reminder fires";
 "Whimsical phrases shown while something is happening, e.g. \"Brewing…\" or \"Compiling…\"." = "Whimsical phrases shown while something is happening, e.g. \"Brewing…\" or \"Compiling…\".";
 
 /* Pet chat & idle messages */

@@ -1,24 +1,25 @@
 import AppKit
 import DesktopPetCore
 
-/// Plays a sound when an agent finishes or needs input. Each event has its own
-/// on/off and sound choice (a built-in macOS system sound, or a custom file the
-/// user uploads). Custom files are copied into `~/.desktoppet/sounds/`.
+/// Plays a sound on the pet's own events: being clicked, and the break
+/// reminder firing. Each event has its own on/off and sound choice (a built-in
+/// macOS system sound, or a custom file the user uploads). Custom files are
+/// copied into `~/.desktoppet/sounds/`.
 @MainActor
 final class SoundSettings: ObservableObject {
     static let shared = SoundSettings()
 
-    enum Event: String { case waiting, done }
+    enum Event: String { case click, breakReminder }
 
-    @Published var waitingEnabled: Bool { didSet { save() } }
-    @Published var doneEnabled: Bool { didSet { save() } }
+    @Published var clickEnabled: Bool { didSet { save() } }
+    @Published var breakReminderEnabled: Bool { didSet { save() } }
     /// "" means use the built-in default; otherwise a custom file path.
-    @Published var waitingCustomPath: String { didSet { save() } }
-    @Published var doneCustomPath: String { didSet { save() } }
+    @Published var clickCustomPath: String { didSet { save() } }
+    @Published var breakReminderCustomPath: String { didSet { save() } }
 
     /// Built-in macOS system sounds used as defaults.
-    static let defaultWaiting = "Submarine"
-    static let defaultDone = "Glass"
+    static let defaultClick = "Pop"
+    static let defaultBreakReminder = "Purr"
 
     private var soundsDir: URL {
         URL(fileURLWithPath: DesktopPetPaths.baseDir).appendingPathComponent("sounds")
@@ -26,18 +27,18 @@ final class SoundSettings: ObservableObject {
 
     init() {
         let d = UserDefaults.standard
-        waitingEnabled = (d.object(forKey: "desktoppet.sound.waiting.on") as? Bool) ?? true
-        doneEnabled = (d.object(forKey: "desktoppet.sound.done.on") as? Bool) ?? true
-        waitingCustomPath = d.string(forKey: "desktoppet.sound.waiting.path") ?? ""
-        doneCustomPath = d.string(forKey: "desktoppet.sound.done.path") ?? ""
+        clickEnabled = (d.object(forKey: "desktoppet.sound.click.on") as? Bool) ?? true
+        breakReminderEnabled = (d.object(forKey: "desktoppet.sound.breakReminder.on") as? Bool) ?? true
+        clickCustomPath = d.string(forKey: "desktoppet.sound.click.path") ?? ""
+        breakReminderCustomPath = d.string(forKey: "desktoppet.sound.breakReminder.path") ?? ""
     }
 
     func isEnabled(_ event: Event) -> Bool {
-        event == .waiting ? waitingEnabled : doneEnabled
+        event == .click ? clickEnabled : breakReminderEnabled
     }
 
     func customPath(_ event: Event) -> String {
-        event == .waiting ? waitingCustomPath : doneCustomPath
+        event == .click ? clickCustomPath : breakReminderCustomPath
     }
 
     /// Plays the configured sound for an event, if enabled.
@@ -48,7 +49,7 @@ final class SoundSettings: ObservableObject {
         if !path.isEmpty, FileManager.default.fileExists(atPath: path) {
             sound = NSSound(contentsOfFile: path, byReference: true)
         } else {
-            sound = NSSound(named: event == .waiting ? Self.defaultWaiting : Self.defaultDone)
+            sound = NSSound(named: event == .click ? Self.defaultClick : Self.defaultBreakReminder)
         }
         sound?.stop()
         sound?.play()
@@ -81,14 +82,14 @@ final class SoundSettings: ObservableObject {
     }
 
     private func setCustomPath(_ path: String, for event: Event) {
-        if event == .waiting { waitingCustomPath = path } else { doneCustomPath = path }
+        if event == .click { clickCustomPath = path } else { breakReminderCustomPath = path }
     }
 
     private func save() {
         let d = UserDefaults.standard
-        d.set(waitingEnabled, forKey: "desktoppet.sound.waiting.on")
-        d.set(doneEnabled, forKey: "desktoppet.sound.done.on")
-        d.set(waitingCustomPath, forKey: "desktoppet.sound.waiting.path")
-        d.set(doneCustomPath, forKey: "desktoppet.sound.done.path")
+        d.set(clickEnabled, forKey: "desktoppet.sound.click.on")
+        d.set(breakReminderEnabled, forKey: "desktoppet.sound.breakReminder.on")
+        d.set(clickCustomPath, forKey: "desktoppet.sound.click.path")
+        d.set(breakReminderCustomPath, forKey: "desktoppet.sound.breakReminder.path")
     }
 }

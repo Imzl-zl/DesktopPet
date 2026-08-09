@@ -83,7 +83,7 @@ final class PetWindowModel: ObservableObject {
             Task { @MainActor [weak self] in self?.petReactionLine = "" }
         }
 
-        NSSound(named: "Pop")?.play()
+        SoundSettings.shared.play(.click)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             self?.petCooldown = false

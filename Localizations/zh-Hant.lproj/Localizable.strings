@@ -139,8 +139,8 @@
 "Turn on in System Settings to get alerts" = "在系統設定中開啟以接收提醒";
 "Alerts when something needs your attention." = "有事情需要關注時提醒。";
 "Muted, the toggle turns alerts back on" = "已靜音，撥動開關重新開啟提醒";
-"When a task finishes" = "當任務完成時";
-"When your pet needs you" = "當寵物需要你時";
+"When you click the pet" = "點擊寵物時";
+"When the break reminder fires" = "休息提醒響起時";
 "Whimsical phrases shown while something is happening, e.g. \"Brewing…\" or \"Compiling…\"." = "有事情發生時顯示的趣味短語，例如 \"Brewing…\" 或 \"Compiling…\"。";
 
 /* Pet chat & idle messages */

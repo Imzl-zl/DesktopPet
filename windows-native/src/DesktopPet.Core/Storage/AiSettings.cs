@@ -72,7 +72,12 @@ public sealed record AiSettings(
                 : hour >= start || hour < end;
     }
 
-    /// <summary>朗读声音：空 = 按界面语言自动选择。</summary>
+    /// <summary>
+    /// 朗读声音：空 = 按界面语言自动选择。
+    /// 注意：生产实现为 SAPI 离线合成，本方法返回的 Edge 风格名字不会精确命中，
+    /// 而是作为「语言提示」走 SapiTtsProvider 的语言回退（SelectVoice 失败 → SelectVoiceByHints）。
+    /// 设置页已改为枚举系统已安装的 SAPI 语音；此处仅服务于旧的自动模式语义。
+    /// </summary>
     public static string DefaultVoiceFor(AppLang lang) => lang switch
     {
         AppLang.En => "en-US-JennyNeural",

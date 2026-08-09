@@ -139,8 +139,8 @@
 "Turn on in System Settings to get alerts" = "Bật trong Cài đặt hệ thống để nhận thông báo";
 "Alerts when something needs your attention." = "Báo khi có việc cần bạn chú ý.";
 "Muted, the toggle turns alerts back on" = "Đang tắt tiếng, gạt công tắc để bật lại";
-"When a task finishes" = "Khi một tác vụ xong";
-"When your pet needs you" = "Khi pet cần bạn";
+"When you click the pet" = "Khi bạn bấm vào thú cưng";
+"When the break reminder fires" = "Khi nhắc nhở nghỉ ngơi";
 "Whimsical phrases shown while something is happening, e.g. \"Brewing…\" or \"Compiling…\"." = "Câu vui hiện khi có việc đang xảy ra, ví dụ \"Brewing…\" hoặc \"Compiling…\".";
 
 /* Pet chat & idle messages */

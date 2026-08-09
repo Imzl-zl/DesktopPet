@@ -21,6 +21,7 @@ using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
 using DesktopPet.Infra.Diagnostics;
 using DesktopPet.Infra.Providers;
+using DesktopPet.Infra.Tts;
 
 namespace DesktopPet.App.Settings;
 
@@ -2439,7 +2440,9 @@ public sealed class SettingsWindow : Window
         });
         companionPanel.Children.Add(quietPanel);
 
-        // 朗读声音：空 = 按界面语言自动选择（Edge TTS 声音，仅「语音朗读」开启时生效）
+        // 朗读声音：空 = 按界面语言自动选择。列表 = 系统已安装的 SAPI 离线语音
+        // （离线合成，与 SapiTtsProvider 实现一致；不再硬编码 Edge 声音名——
+        // 那些名字在 SAPI 下 SelectVoice 必然失败，只能退化为语言匹配）。
         var voiceRow = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
         voiceRow.Children.Add(new TextBlock
         {
@@ -2449,37 +2452,41 @@ public sealed class SettingsWindow : Window
         });
         var voiceCombo = new ComboBox
         {
-            Width = 280,
+            Width = 320,
             Height = 30,
             FontSize = 12,
             Margin = new Thickness(0, 4, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Left,
         };
-        var voices = new (string Name, string Label)[]
+        var voiceItems = new List<(string Name, string Label)> { ("", "自动（跟随界面语言）") };
+        try
         {
-            ("", "自动（跟随界面语言）"),
-            ("zh-CN-XiaoxiaoNeural", "中文 · 晓晓（女）"),
-            ("zh-CN-XiaoyiNeural", "中文 · 晓伊（女）"),
-            ("zh-CN-YunxiNeural", "中文 · 云希（男）"),
-            ("zh-CN-YunjianNeural", "中文 · 云健（男）"),
-            ("zh-TW-HsiaoChenNeural", "繁體中文 · 曉臻（女）"),
-            ("en-US-JennyNeural", "English · Jenny (female)"),
-            ("en-US-GuyNeural", "English · Guy (male)"),
-            ("ja-JP-NanamiNeural", "日本語 · Nanami (female)"),
-            ("ko-KR-SunHiNeural", "한국어 · SunHi (female)"),
-            ("vi-VN-HoaiMyNeural", "Tiếng Việt · HoaiMy (female)"),
-        };
-        voiceCombo.SelectedIndex = Math.Max(0,
-            Array.FindIndex(voices, v => v.Name == ai.TtsVoiceName));
+            foreach (var v in SapiTtsProvider.GetInstalledVoices())
+            {
+                var gender = v.Gender switch { "female" => "女", "male" => "男", _ => "" };
+                var suffix = v.Language.Length > 0 ? $"（{v.Language}{(gender.Length > 0 ? " · " + gender : "")}）" : "";
+                voiceItems.Add((v.Name, v.Name + suffix));
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            // 系统无可用 SAPI 语音引擎：只保留「自动」项（运行时合成同样会回退默认）。
+            _logger.Error("Settings", $"SAPI voice enumeration failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        foreach (var (_, label) in voiceItems) voiceCombo.Items.Add(label);
+        // 旧版本保存的 Edge 声音名（zh-CN-XiaoxiaoNeural 等）不在 SAPI 列表 → 回落「自动」，
+        // 用户重新选择后才会覆盖旧值。
+        var savedVoiceIndex = voiceItems.FindIndex(v => v.Name == ai.TtsVoiceName);
+        voiceCombo.SelectedIndex = Math.Max(0, savedVoiceIndex);
         voiceCombo.SelectionChanged += (_, _) =>
         {
-            var picked = voices[Math.Max(0, voiceCombo.SelectedIndex)].Name;
+            var picked = voiceItems[Math.Max(0, voiceCombo.SelectedIndex)].Name;
             Save(s => s with { Ai = s.Ai with { TtsVoiceName = picked } });
         };
         voiceRow.Children.Add(voiceCombo);
         voiceRow.Children.Add(new TextBlock
         {
-            Text = "Edge TTS 在线声音；自动模式按界面语言选择默认声音",
+            Text = "系统已安装的离线语音（Windows SAPI）；自动模式按界面语言匹配",
             FontSize = 11,
             Foreground = Brush("TextTertiaryBrush"),
             TextWrapping = TextWrapping.Wrap,

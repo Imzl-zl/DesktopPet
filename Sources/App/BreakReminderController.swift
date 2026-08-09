@@ -67,7 +67,7 @@ final class BreakReminderController {
             NotificationManager.shared.notify(
                 title: "Time for a break",
                 body: "You've worked \(mins) min — rest \(brk) min")
-            NSSound(named: "Purr")?.play()
+            SoundSettings.shared.play(.breakReminder)
             PetController.shared.beginBreakRest(
                 line: "Worked \(mins) min — let's rest \(brk) min")
         case .breakOver:

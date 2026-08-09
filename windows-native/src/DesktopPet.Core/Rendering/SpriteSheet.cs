@@ -17,6 +17,9 @@ public sealed class SpriteSheet
     public required IReadOnlyList<IReadOnlyList<SpriteFrame>> Clips { get; init; }
     public required IReadOnlyList<int> ClipMaxWidths { get; init; }
 
+    /// <summary>每行 clip 的内容顶部偏移（px，取行内最小，帧间气泡不跳）；null = 无修正（测试构造）。</summary>
+    public IReadOnlyList<int>? ClipContentTops { get; init; }
+
     /// <summary>解码后的源图 RGBA 像素（导入预览等用途；测试构造可不填）。</summary>
     public byte[]? SourceRgba { get; init; }
 
@@ -43,6 +46,9 @@ public sealed class SpriteSheet
             var maxWidths = frames
                 .Select(row => row.Count > 0 ? row.Max(f => f.Width) : 0)
                 .ToList();
+            var contentTops = frames
+                .Select(row => row.Count > 0 ? row.Min(f => f.ContentTop) : 0)
+                .ToList();
 
             return new SpriteSheet
             {
@@ -52,6 +58,7 @@ public sealed class SpriteSheet
                 SourceRgba = rgba, // 保留解码像素（预览构建位图用；切片只读不修改）
                 Clips = frames,
                 ClipMaxWidths = maxWidths,
+                ClipContentTops = contentTops,
             };
         }
         catch (Exception)
@@ -64,6 +71,7 @@ public sealed class SpriteSheet
     {
         var rgba = new byte[rect.W * rect.H * 4];
         var mask = new byte[rect.W * rect.H];
+        var contentTop = rect.H; // 首个不透明行（无内容兜底 = 帧高）
         for (var y = 0; y < rect.H; y++)
         {
             var srcRow = (rect.Y + y) * sourceWidth + rect.X;
@@ -76,9 +84,13 @@ public sealed class SpriteSheet
                 rgba[dst + 1] = source[src + 1];
                 rgba[dst + 2] = source[src + 2];
                 rgba[dst + 3] = source[src + 3];
-                if (source[src + 3] > SpriteSlicer.AlphaThreshold) mask[dstRow + x] = 1;
+                if (source[src + 3] > SpriteSlicer.AlphaThreshold)
+                {
+                    mask[dstRow + x] = 1;
+                    if (y < contentTop) contentTop = y;
+                }
             }
         }
-        return new SpriteFrame(rgba, mask, rect.W, rect.H, rect.X, rect.Y);
+        return new SpriteFrame(rgba, mask, rect.W, rect.H, rect.X, rect.Y, contentTop);
     }
 }

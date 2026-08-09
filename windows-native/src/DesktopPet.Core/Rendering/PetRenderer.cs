@@ -5,7 +5,8 @@ namespace DesktopPet.Core.Rendering;
 /// <summary>预裁剪帧：RGBA 像素 + alpha 掩码（hitTest O(1)），切片时一次性生成。</summary>
 /// <param name="RectX">帧在源图中的 x（网格线绘制用）。</param>
 /// <param name="RectY">帧在源图中的 y。</param>
-public sealed record SpriteFrame(byte[] Rgba, byte[] Mask, int Width, int Height, int RectX = 0, int RectY = 0);
+/// <param name="ContentTop">帧内第一个不透明像素行（px）；气泡按实际可见头顶定位，修正帧内透明边。</param>
+public sealed record SpriteFrame(byte[] Rgba, byte[] Mask, int Width, int Height, int RectX = 0, int RectY = 0, int ContentTop = 0);
 
 /// <summary>idle 播放列表配置（对齐 pet.ts 的 ap_idle_clips / ap_idle_interval / ap_idle_mode）。</summary>
 public sealed record IdlePlaylistOptions(IReadOnlyList<int> Clips, double IntervalMs, bool Random);
@@ -88,8 +89,15 @@ public sealed class PetRenderer
     public double Fps => _fps;
     public int ActiveRow => _overrideRow ?? _idleRow ?? _row;
 
-    /// <summary>精灵上方留白比例（气泡锚点，对齐 pet.ts headroom）。</summary>
+    /// <summary>
+    /// 精灵上方留白比例（气泡锚点）：窗口顶到实际可见头顶的距离占缓冲比例。
+    /// 按帧内不透明内容顶部（ContentTopInset）计算，不同宠物帧内透明边不同时
+    /// 气泡仍贴实际头顶，不会压头/远离。
+    /// </summary>
     public double Headroom { get; private set; }
+
+    /// <summary>帧内不透明内容顶部偏移（物理像素，已含缩放）；气泡锚点用。</summary>
+    public int ContentTopInset { get; private set; }
 
     /// <summary>最近绘制的精灵矩形（buffer 像素）。</summary>
     public (int X, int Y, int W, int H) SpriteRect { get; private set; }
@@ -206,21 +214,27 @@ public sealed class PetRenderer
 
         var rowIndex = Math.Min(activeRow, _sheet.Clips.Count - 1);
         var scaleWidth = _sheet.ClipMaxWidths[rowIndex] > 0 ? _sheet.ClipMaxWidths[rowIndex] : frame.Width;
-        var fit = Math.Min((double)bufferWidth / scaleWidth, (double)bufferHeight / frame.Height) * _sizePercent;
-        var scale = fit >= 1 ? Math.Floor(fit) : fit;
+        // 浮点最近邻缩放：整数化（floor）会把 1.0~1.99 的放大吞成 1，
+        // 导致尺寸设置 100%→130% 对贴近缓冲的精灵完全无效（260x320 缓冲下的常见场景）。
+        var scale = Math.Min((double)bufferWidth / scaleWidth, (double)bufferHeight / frame.Height) * _sizePercent;
         _lastScale = scale;
         var width = (int)(frame.Width * scale);
         var height = (int)(frame.Height * scale);
         // 待机浮动：以地面为轴向上 0-6px 正弦（不穿底），相位独立于行切换
         var bobY = _bobEnabled ? (int)((Math.Sin(_bobPhase * 0.35) * 0.5 + 0.5) * -6) : 0;
-        Headroom = (bufferHeight - height) / (double)bufferHeight;
+        // 帧内透明边修正：气泡锚定实际可见头顶，而不是帧矩形顶（切片保留帧内透明边）
+        var contentTop = _sheet.ClipContentTops is { Count: > 0 } tops ? tops[rowIndex] : 0;
+        ContentTopInset = (int)(contentTop * scale);
+        Headroom = (bufferHeight - height + ContentTopInset + bobY) / (double)bufferHeight;
         SpriteRect = ((bufferWidth - width) / 2, bufferHeight - height + bobY, width, height);
         return frame;
     }
 
     /// <summary>
-    /// 绘制一帧到帧缓冲：anchored bottom-center + 整数缩放；缩放来自该行最宽帧
+    /// 绘制一帧到帧缓冲：anchored bottom-center + 浮点最近邻缩放；缩放来自该行最宽帧
     /// （per-CLIP，帧间同尺寸，气泡不跳动，对齐 pet.ts draw()）。行切换时帧号归零。
+    /// 每个源像素覆盖目标区间 [floor(p*scale), floor((p+1)*scale))：任意分数缩放
+    /// 无空洞无重叠（原“整数块 + (int) 步进”在非整数 scale 下会漏行漏列）。
     /// </summary>
     public void DrawFrame(byte[] buffer, int bufferWidth, int bufferHeight)
     {
@@ -231,21 +245,21 @@ public sealed class PetRenderer
         var scale = _lastScale;
         for (var fy = 0; fy < frame.Height; fy++)
         {
+            var dstY0 = dy + (int)(fy * scale);
+            var dstY1 = dy + (int)((fy + 1) * scale);
+            if (dstY1 <= 0 || dstY0 >= bufferHeight) continue; // 整行越界（负 Y 溢出/底部外）
             for (var fx = 0; fx < frame.Width; fx++)
             {
                 var src = (fy * frame.Width + fx) * 4;
                 if (frame.Rgba[src + 3] == 0) continue;
-                var dstX = dx + (int)(fx * scale);
-                var dstY = dy + (int)(fy * scale);
-                // 边界裁剪：130% 尺寸等溢出场景（负 Y/右侧越界）不能写穿缓冲
-                if (dstY >= bufferHeight || dstX >= bufferWidth) continue;
-                for (var sy = 0; sy < scale; sy++)
+                var dstX0 = dx + (int)(fx * scale);
+                var dstX1 = dx + (int)((fx + 1) * scale);
+                if (dstX1 <= 0 || dstX0 >= bufferWidth) continue; // 整列越界
+                for (var y = dstY0; y < dstY1; y++)
                 {
-                    var y = dstY + sy;
                     if (y < 0 || y >= bufferHeight) continue;
-                    for (var sx = 0; sx < scale; sx++)
+                    for (var x = dstX0; x < dstX1; x++)
                     {
-                        var x = dstX + sx;
                         if (x < 0 || x >= bufferWidth) continue;
                         var dst = (y * bufferWidth + x) * 4;
                         buffer[dst] = frame.Rgba[src];

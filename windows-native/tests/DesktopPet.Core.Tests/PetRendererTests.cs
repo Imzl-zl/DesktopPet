@@ -54,16 +54,16 @@ public class PetRendererTests
         => buffer[(y * bufferW + x) * 4 + 3];
 
     [Fact]
-    public void DrawFrame_AnchorsBottomCenter_WithIntegerScale()
+    public void DrawFrame_AnchorsBottomCenter_WithFloatScale()
     {
         var renderer = new PetRenderer(MakeSheet((0, 1, 32, 36)));
         renderer.SetState("idle");
 
         var buffer = DrawBuffer(renderer);
 
-        // scale = floor(min(260/32, 320/36)) = floor(8.125) = 8 → 256x288，底部居中
-        Assert.Equal((2, 32, 256, 288), renderer.SpriteRect);
-        Assert.Equal((320 - 288) / (double)320, renderer.Headroom);
+        // scale = min(260/32, 320/36) = 8.125（浮点最近邻）→ 260x292，底部居中
+        Assert.Equal((0, 28, 260, 292), renderer.SpriteRect);
+        Assert.Equal(28 / (double)320, renderer.Headroom);
         Assert.Equal(0, AlphaAt(buffer, 260, 0, 0));       // 左上角透明
         Assert.Equal(0, AlphaAt(buffer, 260, 130, 10));    // 精灵上方透明
         Assert.Equal(255, AlphaAt(buffer, 260, 130, 200)); // 精灵身体不透明
@@ -78,8 +78,8 @@ public class PetRendererTests
 
         var frame = renderer.PrepareFrame(260, 320);
 
-        Assert.Equal((2, 32, 256, 288), renderer.SpriteRect);
-        Assert.Equal((320 - 288) / (double)320, renderer.Headroom);
+        Assert.Equal((0, 28, 260, 292), renderer.SpriteRect);
+        Assert.Equal(28 / (double)320, renderer.Headroom);
         Assert.True(renderer.HitTest(130, 200));
         Assert.Same(renderer.CurrentFrame(), frame);
     }
@@ -132,13 +132,13 @@ public class PetRendererTests
         renderer.SetState("idle");
         DrawBuffer(renderer);
 
-        // fit = min(260/30, 320/20) = min(8.67, 16) → floor = 8；帧 0 宽 20 → 160px
-        Assert.Equal((50, 160, 160, 160), renderer.SpriteRect);
+        // fit = min(260/30, 320/20) = 8.667；帧 0 宽 20 → 173px
+        Assert.Equal((43, 147, 173, 173), renderer.SpriteRect);
 
         renderer.AdvanceFrame();
         DrawBuffer(renderer);
-        // 帧 1 宽 30 → 240px，两帧底部对齐
-        Assert.Equal((10, 160, 240, 160), renderer.SpriteRect);
+        // 帧 1 宽 30 → 260px，两帧底部对齐
+        Assert.Equal((0, 147, 260, 173), renderer.SpriteRect);
     }
 
     [Fact]
@@ -202,19 +202,19 @@ public class PetRendererTests
         var renderer = new PetRenderer(MakeSheet((0, 1, 32, 36)));
         renderer.SetState("idle");
         renderer.PrepareFrame(260, 320);
-        Assert.Equal((2, 32, 256, 288), renderer.SpriteRect); // 100%：floor(8.125)=8 → 256x288
+        Assert.Equal((0, 28, 260, 292), renderer.SpriteRect); // 100%：8.125 → 260x292
 
-        renderer.SetSizePercent(0.7); // 70%：floor(8.125*0.7)=floor(5.6875)=5 → 160x180
+        renderer.SetSizePercent(0.7); // 70%：8.125*0.7=5.6875 → 182x204
         renderer.PrepareFrame(260, 320);
-        Assert.Equal((50, 140, 160, 180), renderer.SpriteRect);
-        Assert.Equal((320 - 180) / (double)320, renderer.Headroom);
+        Assert.Equal((39, 116, 182, 204), renderer.SpriteRect);
+        Assert.Equal(116 / (double)320, renderer.Headroom);
 
-        renderer.SetSizePercent(1.3); // 130%：fit=8.125*1.3=10.5625 → floor=10 → 320x360 溢出顶部
+        renderer.SetSizePercent(1.3); // 130%：8.125*1.3=10.5625 → 338x380 溢出顶部
         renderer.PrepareFrame(260, 320);
         var (_, y, w, h) = renderer.SpriteRect;
-        Assert.Equal(320, w);
-        Assert.Equal(360, h);
-        Assert.Equal(-40, y);  // 顶部溢出，但仍贴底（bottom-center 锚定）
+        Assert.Equal(338, w);
+        Assert.Equal(380, h);
+        Assert.Equal(-60, y);  // 顶部溢出，但仍贴底（bottom-center 锚定）
     }
 
     [Fact]
@@ -225,8 +225,28 @@ public class PetRendererTests
         renderer.SetSizePercent(9.0);
         renderer.SetState("idle");
         renderer.PrepareFrame(260, 320);
-        // 钳制到 [0.7, 1.3] → 1.3 分支：fit = 8.125*1.3 = 10.5625 → 非整数缩放
-        Assert.NotEqual(256, renderer.SpriteRect.W);
+        // 钳制到 [0.7, 1.3] → 1.3 分支：fit = 8.125*1.3 = 10.5625 → 浮点缩放
+        Assert.Equal(338, renderer.SpriteRect.W);
+    }
+
+    [Fact]
+    public void SizePercent_EnlargesSpriteThatFillsBuffer_Regression()
+    {
+        // 回归：缓冲 260x320 下，贴近缓冲的精灵（fit 基线 = 1.0）在旧实现里
+        // 被 Math.Floor 吞掉（1.3 → 1），100%→130% 调大完全无效。
+        var renderer = new PetRenderer(MakeSheet((0, 1, 260, 320)));
+        renderer.SetState("idle");
+        renderer.PrepareFrame(260, 320);
+        Assert.Equal((0, 0, 260, 320), renderer.SpriteRect); // 100%：填满缓冲
+
+        renderer.SetSizePercent(1.3);
+        renderer.PrepareFrame(260, 320);
+        var (_, y, w, h) = renderer.SpriteRect;
+        Assert.True(w > 260, $"130% 必须放大，实际 w={w}");
+        Assert.True(h > 320, $"130% 必须放大，实际 h={h}");
+
+        var buffer = DrawBuffer(renderer); // 放大溢出场景不崩、不写穿
+        Assert.Equal(255, AlphaAt(buffer, 260, 130, 315));
     }
 
     [Fact]
@@ -235,7 +255,7 @@ public class PetRendererTests
         var renderer = new PetRenderer(MakeSheet((0, 1, 32, 36)));
         renderer.SetState("idle");
         renderer.PrepareFrame(260, 320);
-        Assert.Equal(32, renderer.SpriteRect.Y); // 无 bob：贴底
+        Assert.Equal(28, renderer.SpriteRect.Y); // 无 bob：贴底
 
         renderer.SetBob(true);
         var minY = int.MaxValue;
@@ -247,12 +267,12 @@ public class PetRendererTests
             minY = Math.Min(minY, renderer.SpriteRect.Y);
             maxY = Math.Max(maxY, renderer.SpriteRect.Y);
         }
-        Assert.True(minY <= 31 && minY >= 26, $"bob 上浮应在 0-6px：minY={minY}");
-        Assert.Equal(32, maxY); // 最低回到贴地（不穿底）
+        Assert.True(minY <= 23 && minY >= 22, $"bob 上浮应在 0-6px：minY={minY}");
+        Assert.Equal(28, maxY); // 最低回到贴地（不穿底）
 
         renderer.SetBob(false);
         renderer.PrepareFrame(260, 320);
-        Assert.Equal(32, renderer.SpriteRect.Y); // 关闭后回贴底
+        Assert.Equal(28, renderer.SpriteRect.Y); // 关闭后回贴地
     }
 
     [Fact]
@@ -334,7 +354,7 @@ public class PetRendererTests
         renderer.SetState("idle");
         renderer.SetSizePercent(1.3);
         renderer.PrepareFrame(260, 320);
-        Assert.Equal(-40, renderer.SpriteRect.Y); // 顶部溢出 40px
+        Assert.Equal(-60, renderer.SpriteRect.Y); // 顶部溢出 60px
 
         var buffer = DrawBuffer(renderer); // 不应抛异常（裁剪保证不写穿缓冲）
 
@@ -374,5 +394,45 @@ public class PetRendererTests
 
         renderer.ClearRow(); // 旧 API：清除任意
         Assert.Equal(0, renderer.ActiveRow);
+    }
+
+    [Fact]
+    public void Headroom_AccountsForFrameTransparentTopInset()
+    {
+        // 帧矩形 32x36，内容从帧内 y=10 开始（切片保留帧内透明边/多帧行带帧顶错位）
+        var frame = MakeFrame(32, 36, 255, 0, 0);
+        var sheet = new SpriteSheet
+        {
+            SourceName = "test",
+            SourceWidth = 0,
+            SourceHeight = 0,
+            Clips = new List<IReadOnlyList<SpriteFrame>> { new List<SpriteFrame> { frame } },
+            ClipMaxWidths = new List<int> { 32 },
+            ClipContentTops = new List<int> { 10 },
+        };
+        var renderer = new PetRenderer(sheet);
+        renderer.SetState("idle");
+
+        renderer.PrepareFrame(260, 320);
+
+        // scale = min(260/32, 320/36) = 8.125；帧顶 y=28，实际头顶 = 28 + 81 = 109
+        // Headroom = 窗口顶到实际可见头顶的比例（不是帧矩形顶 28/320）
+        Assert.Equal(109 / (double)320, renderer.Headroom);
+        Assert.Equal(81, renderer.ContentTopInset);
+
+        // 无修正时（旧行为/测试构造缺省）：帧顶即内容顶
+        var plain = new SpriteSheet
+        {
+            SourceName = "test",
+            SourceWidth = 0,
+            SourceHeight = 0,
+            Clips = sheet.Clips,
+            ClipMaxWidths = new List<int> { 32 },
+        };
+        var plainRenderer = new PetRenderer(plain);
+        plainRenderer.SetState("idle");
+        plainRenderer.PrepareFrame(260, 320);
+        Assert.Equal(0, plainRenderer.ContentTopInset);
+        Assert.Equal(28 / (double)320, plainRenderer.Headroom);
     }
 }

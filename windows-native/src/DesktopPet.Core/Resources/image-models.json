@@ -1,0 +1,187 @@
+{
+  "models": [
+    {
+      "id": "gpt-image-2",
+      "family": "openai",
+      "name": "GPT Image 2",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
+        "scales": ["1K", "2K", "4K"],
+        "editing": true,
+        "maxReferenceImages": 1
+      },
+      "priceHint": "$0.025~0.211",
+      "note": "画质最强；无原生透明，透明走绿幕后处理管线"
+    },
+    {
+      "id": "gpt-image-1.5",
+      "family": "openai",
+      "name": "GPT Image 1.5",
+      "capabilities": {
+        "nativeTransparency": true,
+        "aspectRatios": ["1:1", "3:2", "2:3"],
+        "scales": ["1K"],
+        "editing": true,
+        "maxReferenceImages": 1
+      },
+      "priceHint": "$0.009~0.2",
+      "note": "唯一原生透明的前排模型；透明精灵图首选"
+    },
+    {
+      "id": "gpt-image-1-mini",
+      "family": "openai",
+      "name": "GPT Image 1 Mini",
+      "capabilities": {
+        "nativeTransparency": true,
+        "aspectRatios": ["1:1", "3:2", "2:3"],
+        "scales": ["1K"],
+        "editing": true,
+        "maxReferenceImages": 1
+      },
+      "priceHint": "$0.005",
+      "note": "预算档，快速迭代"
+    },
+    {
+      "id": "grok-imagine-image",
+      "family": "openai",
+      "name": "Grok Imagine",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
+        "scales": ["1K"],
+        "editing": true,
+        "maxReferenceImages": 3
+      },
+      "priceHint": "$0.02",
+      "note": "最快（约 4s），迭代神器"
+    },
+    {
+      "id": "grok-imagine-image-quality",
+      "family": "openai",
+      "name": "Grok Imagine Quality",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
+        "scales": ["1K", "2K"],
+        "editing": true,
+        "maxReferenceImages": 3
+      },
+      "priceHint": "$0.05",
+      "note": "2K 档"
+    },
+    {
+      "id": "Qwen/Qwen-Image",
+      "family": "openai",
+      "name": "Qwen-Image",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
+        "scales": ["1K"],
+        "editing": false,
+        "seed": true
+      },
+      "priceHint": "$0.02",
+      "note": "中文/双语文字强（硅基流动等端点）"
+    },
+    {
+      "id": "Qwen/Qwen-Image-Edit",
+      "family": "openai",
+      "name": "Qwen-Image Edit",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
+        "scales": ["1K"],
+        "editing": true,
+        "maxReferenceImages": 3,
+        "seed": true
+      },
+      "priceHint": "$0.04",
+      "note": "编辑专用（最多 3 参考图）"
+    },
+    {
+      "id": "black-forest-labs/FLUX.1-schnell",
+      "family": "openai",
+      "name": "FLUX.1 Schnell",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "4:3", "3:4", "16:9", "9:16"],
+        "scales": ["1K"],
+        "editing": false,
+        "seed": true
+      },
+      "priceHint": "$0.0014",
+      "note": "开源生态最便宜档"
+    },
+    {
+      "id": "black-forest-labs/FLUX.1-dev",
+      "family": "openai",
+      "name": "FLUX.1 Dev",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "4:3", "3:4", "16:9", "9:16"],
+        "scales": ["1K"],
+        "editing": false,
+        "seed": true
+      },
+      "priceHint": "$0.014",
+      "note": ""
+    },
+    {
+      "id": "Kwai-Kolors/Kolors",
+      "family": "openai",
+      "name": "Kolors（快手）",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "3:4", "9:16"],
+        "scales": ["1K"],
+        "editing": false,
+        "seed": true
+      },
+      "priceHint": "$0.02",
+      "note": ""
+    },
+    {
+      "id": "gemini-2.5-flash-image",
+      "family": "google",
+      "name": "Nano Banana",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"],
+        "scales": ["1K", "2K"],
+        "editing": true,
+        "maxReferenceImages": 4
+      },
+      "priceHint": "$0.04",
+      "note": "快（约 8s）；全系无 alpha，透明走绿幕管线"
+    },
+    {
+      "id": "gemini-3.1-flash-image",
+      "family": "google",
+      "name": "Nano Banana 2",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"],
+        "scales": ["1K", "2K", "4K"],
+        "editing": true,
+        "maxReferenceImages": 14
+      },
+      "priceHint": "$0.06~0.07",
+      "note": "综合性价比之王"
+    },
+    {
+      "id": "gemini-3-pro-image-preview",
+      "family": "google",
+      "name": "Nano Banana Pro",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"],
+        "scales": ["1K", "2K", "4K"],
+        "editing": true,
+        "maxReferenceImages": 14
+      },
+      "priceHint": "$0.08~0.13",
+      "note": "4K 档"
+    }
+  ]
+}

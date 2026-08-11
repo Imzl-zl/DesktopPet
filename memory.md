@@ -5,9 +5,9 @@
 
 ## 当前基线
 - macOS 主版（SwiftPM）：`swift build` / `swift test` 通过；打包 `./scripts/build-app.sh release`。
-- Windows 版（.NET 8 + WPF）：Core 374 / Infra 96 / Agent 33 / App 38 顺序测试通过（541 total）；`dotnet build windows-native/DesktopPet.sln --no-restore -p:Platform=x64` 为 0 warning / 0 error。
+- Windows 版（.NET 8 + WPF）：Core 480 / Infra 161 / Agent 35 / App 53 顺序测试通过（729 total）；`dotnet build windows-native/DesktopPet.sln --no-restore -p:Platform=x64` 编译 0 CS error（桌宠运行中 App 复制阶段报 MSB3021 锁，验证以 dotnet test 为准）。
 - Windows 上 Swift core 验证：`./scripts/verify-core-windows.sh`（54 个 core 测试）。
-- 最后更新：2026-08-09
+- 最后更新：2026-08-11
 
 ## 版本锁定（详见 tools.md Environment）
 - macOS：Swift 6.3 / macOS 13+ / Sparkle 2.9.4（锁）。
@@ -18,20 +18,20 @@
 - macOS 桌宠完整功能：养成（XP/五阶段/成就）、精灵导入切片、气泡、休息提醒、4 语言本地化、菜单栏应用 + Sparkle 更新。
 - Windows .NET 8 + WPF 迁移全部完工，Tauri 旧版（`windows/`）已删除。
 - Windows 版：宠物/漫游、气泡、引导、分层会话记忆、可插拔模型/TTS/生图、三优先级（P0/P1/P2）AI 运行时、捕获/渲染/拖拽/弹幕资源生命周期、可配置事务型全局快捷键与连接级凭据迁移。
-- Windows 重要项 I1-I17 的实现子任务 1-4 已完成：726-key 英/简中/繁中/越南语同集 catalog 与持久化后发布的实时刷新；`%APPDATA%/DesktopPet/logs` 滚动脱敏/ZIP 导出；CPU/WorkingSet 诊断；Credential Manager 前缀恢复出厂；多屏/DPI 全屏主动输出抑制；I15 原子文件/调用方补偿闭环。
+- Windows 重要项 I1-I17 实现子任务 1-4 完成：726-key 四语言同集 catalog 实时刷新；日志滚动脱敏/ZIP 导出；CPU/WorkingSet 诊断；Credential Manager 前缀恢复出厂；多屏/DPI 全屏抑制；I15 原子文件/调用方补偿闭环。
+- **生图模块全部阶段完工（docs/windows-imagegen-design.md）**：阶段 1-4b（契约/目录 13 模型/透明管线/双协议族适配器/门面/连接列表迁移/总结图改道）→ 阶段 4c（设置页多连接列表编辑器 + 总结图模型下拉 + AiSettings.SummaryImageModelRef 持久化与 runtime 签名修复）→ 阶段 5（生图页：连接×模型/提示词/按能力参数面板/生成/取消/错误分类 + 历史画廊落盘 `%APPDATA%/DesktopPet/gallery/`：PNG+index.json 原子写、删除、200 上限修剪、损坏容错）。
 
 ## 进行中 / 未完成
-- **生图模块剩余（契约已冻结，纯 UI 工作，见 docs/windows-imagegen-design.md §9）**：阶段 4c 设置页连接列表编辑器（多连接管理 + 总结图模型下拉 `SummaryImageModelRef`）；阶段 5 生图页（MVVM + 历史画廊落盘）。
-- **已知 flaky**：SchedulerTests 两个并发时序测试（`Scheduler_RunsConcurrently_NotSerialized` / `Scheduler_Deadline_CompletesWhenProviderIgnoresCancellation`）全量并行时偶发失败，单跑恒过（既有问题，非生图模块引入，待排查）。
-- `.tasks/windows-important-hardening` child 5 待执行：真实 Windows 验收（托盘可见性/GraphicsCapture 分辨率变化/弹幕防追尾视觉/GPU/Win32/Credential Manager/日志导出/恢复出厂重启/多屏 mixed-DPI）。
+- **已知 flaky**：SchedulerTests 两个并发时序测试全量并行时偶发失败，单跑恒过（既有问题，非生图模块引入，待排查）。
+- `.tasks/windows-important-hardening` child 5 待执行：真实 Windows 验收（托盘可见性/GraphicsCapture 分辨率变化/弹幕防追尾视觉/GPU/Win32/Credential Manager/日志导出/恢复出厂重启/多屏 mixed-DPI）+ **生图模块 UI 冒烟**（设置页连接编辑器多连接增删改、总结图模型下拉、生图页生成/取消/画廊删除，需真实端点或 mock）。
 - Roadmap 后续项：v0.2 桌面感知深化；Provider 默认范围、自动更新方案等产品决策见 `docs/windows-architecture.md` §10。
 
 ## 关键决策（仍有效）
 - Tauri → .NET 8 + WPF 整体迁移（透明窗口软渲染是卡顿根因，原生渲染是唯一合理选择）。
 - 双进程架构：PetApp.exe + PetAgent.exe（截屏/分析/总结），Agent 崩溃看门狗自动重启。
 - 模型/TTS/生图统一 OpenAI 兼容协议，Provider 可插拔；API Key 存 Windows Credential Manager，不落明文。
-- TTS 三级 Provider 栈已实施（`docs/windows-tts-design.md`）：SAPI 兜底 + OneCore 系统自然语音（App 层 WinRT）+ OpenAI 兼容端点（Infra，providers.json `tts` 段，Key 存 Credential Manager）；`ITtsProvider` 契约下沉 Core（TtsContracts.cs），设置页引擎单选/音色下拉/试听/语速（50-200%）；Edge TTS 直连不做（TLS 指纹 + 地域风控实证，EdgeTts.cs 保留标记不可用）。
-- 坑点：SAPI `synth.Rate` 合法范围 -10..+10，语速映射必须 clamp（200% 不 clamp 会抛 ArgumentOutOfRangeException）；`OpenAiCompatibleTtsProvider.ListVoicesAsync` 的 401 必须显式抛 auth（吞掉会导致设置页假成功）；OneCore SSML `xml:lang` 必须跟随选中语音语言；设置页异步音色加载需 generation token 防竞态。
+- 生图模块：目录驱动（模型是数据）+ 两协议族适配器（模板方法基类）+ 透明=后处理策略（原生直传/绿幕 HSV 键控）+ 门面统一入口 + 多模型容错（auth/rate-limit 不换模型）。
+- TTS 三级 Provider 栈（`docs/windows-tts-design.md`）：SAPI 兜底 + OneCore + OpenAI 兼容；`ITtsProvider` 契约下沉 Core；Edge TTS 直连不做。
 - 领域层（Core）零 UI 零 IO、可单测；宠物窗口自绘渲染器豁免 MVVM，设置/对话走 MVVM。
 - AI 总开关：关闭即纯桌宠模式，无截屏/网络/后台进程。
 - Windows 本地化以 Core embedded JSON 为唯一词典；语言变更必须先保存 settings，再刷新已跟踪静态槽位；用户/模型/日记/自定义人格内容显式排除。
@@ -42,20 +42,19 @@
 - Windows 上 `swift test` 崩溃（SwiftPM llbuild bug #6605），core 测试必须走 `verify-core-windows.sh`。
 - `windows-native/测试.txt` 含密钥，勿读取/提交。
 - 模型请求限流：固定 worker 池 + P0/P1/P2 优先级、分场景 deadline；Provider transport 只分类错误，调度层拥有超时/重试。
-- P/Invoke 结构体含 string 字段必须显式 `CharSet = CharSet.Unicode`：`CredNative.Credential` 曾缺省按 ANSI 编组，`CredWrite` 写出的凭据 target 名被系统按 UTF-16 解释成乱码（`敄歳潴偰瑥...`），`CredRead` 永远 NOT_FOUND → 迁移器每次启动误报 target-conflict 并累积垃圾凭据（2026-08-07 已修复 + round-trip 回归测试）。垃圾凭据特征：target 名的 UTF-16LE hex 含紧凑 ASCII 序列（如 `4465736B746F70...`），`CredEnumerate("DesktopPet/*")` 过滤不到，需全量枚举清理。
-- 单元测试不能替代真实 GraphicsCapture/Win2D、Win32 热键/拖拽、Credential Manager、WPF/tray、多屏 mixed-DPI、CPU/内存和恢复出厂重启验收；这些证据必须在 child 5 明确记录。
-- **GraphicsCapture 帧池死锁（已修复）**：FrameArrived 内节流拒绝时不得直接 return——任何帧滞留 FramePool（未 TryGetNextFrame）都会占满缓冲（bufferCount=1 时一帧即满），后续新帧被丢弃且 FrameArrived 永不再触发（静默失效，无异常无日志）。节流必须取出帧后丢弃（`using var dropped = sender.TryGetNextFrame()`）；bufferCount 用 2。
+- **AiSettings 是位置参数 record + 手写 converter：追加字段必须 Normalize/converter Read/Write 三处同步 + round-trip 测试覆盖新字段**（4b 只同步 Write，Read/Normalize 双遗漏导致总结图模型选择保存后丢失，阶段 4c 才修复）。
+- **设置生效链四环**：持久化（converter）→ 运行时消费（Signature/runtime 构建）→ UI 显示，每环都需测试或显式核对（SummaryImageModelRef 曾不在 SignatureOf → 改设置不重建 runtime）。
+- P/Invoke 结构体含 string 字段必须显式 `CharSet = CharSet.Unicode`（曾致 CredWrite target 名乱码、迁移器每次启动误报 target-conflict 并累积垃圾凭据；垃圾凭据特征：target 名 UTF-16LE hex 含紧凑 ASCII 序列，需全量枚举清理）。
+- 单元测试不能替代真实 GraphicsCapture/Win2D、Win32 热键/拖拽、Credential Manager、WPF/tray、多屏 mixed-DPI、CPU/内存和恢复出厂重启验收；生图页/连接编辑器 UI 冒烟同样留 child 5。
+- **GraphicsCapture 帧池死锁（已修复）**：FrameArrived 内节流拒绝时不得直接 return——任何帧滞留 FramePool 都会占满缓冲，后续新帧被丢且 FrameArrived 永不再触发（静默失效）。节流必须取出帧后丢弃（`using var dropped = sender.TryGetNextFrame()`）；bufferCount 用 2。
 - **构建输出目录陷阱**：`dotnet build -p:Platform=x64` 输出 `bin/x64/`，而 `ResolveAgentHostPath` 回退探测 `bin/Debug/`（无 x64）——改 Agent 代码后必须不带 Platform 参数重新构建 AgentHost，否则 App 启动的仍是旧 DLL。
 
 ## 最近活跃窗口
-- 2026-08-11（生图模块阶段 1-4b，提交 57cb0cc/922f555）：设计定稿 `docs/windows-imagegen-design.md` + Core 契约/目录（13 模型 embedded JSON）/透明管线（绿幕 prompt+HSV 键控）+ OpenAI 兼容/Gemini 双协议族适配器（模板方法基类）+ ImageGenService 门面（能力分流/按(连接,模型)缓存/多模型容错）+ providers.json image 段连接列表迁移（converter 兼容旧平铺格式，凭据每连接独立引用）+ 总结图改道（16:9+1K+不透明+GenerateWithFallbackAsync）+ 旧 IImageProvider 退役。711 测试全绿。坑点：① 适配器按连接缓存但模型构造时固定 → fallback 换模型拿到旧模型适配器（已修为按(连接,模型)缓存）；② `JsonIgnore(WhenWritingDefault)` 对反序列化同样生效，旧平铺格式读不进来 → 改自定义 converter；③ AiSettings 位置参数追加字段，Normalize/converter Read/Write 必须同步；④ 运行中 PetApp 锁 bin 输出，build 复制报 MSB3021 但编译成功，验证以 dotnet test 为准。
-- 2026-08-11（屏幕事件 journal + 行为会话化）：总结素材从“最近 4 条内存事件”升级为“按天 jsonl 落盘 + 行为会话归并”——`diary/screen-YYYY-MM-DD.jsonl` 一行一条事件（camelCase + 枚举字符串 + 中文不转义），`ActivitySessionBuilder` 连续同 kind 合并成段（起止时间+最后评论+计数），总结注入 `ActivitySummaryFormatter`（40 段预算+总段数注明）；启动清理 30 天前 journal；`ScreenEventKind` 新增 `Music`（听歌/网易云/Spotify 关键词）+ InteractionEngine active 列表收录；文案修复“今天的总结出炉啦”→中性（4 语言同集 749 keys）；生图超时 120s→300s + `SummaryImageRetryPolicy`（失败当天最多补试 2 次/间隔 30min）；626+ 测试全绿 + 真机 journal 落盘验证（中文直读）。坑：sln x64 平台映射 AnyCPU，验证运行版本认 `bin/Debug/.../win-x64/` 时间戳，`bin/x64/` 是旧残留。
-- 2026-08-09（TTS 实施）：P0-P3 全部完成——契约下沉 Core（TtsContracts/Registry）、SAPI 适配新契约（ListVoices+语速）、OneCoreTtsProvider（App）、OpenAiCompatibleTtsProvider（/v1/audio/speech+voices）、AiSettings 加 TtsProviderId/TtsSpeedPercent、providers.json tts 段、设置页引擎/音色/试听/语速/连接编辑器；603 tests 全绿 + build 0 warn/error + 真机（SAPI/OneCore 全语速合成、App 冒烟）；独立 code review 发现 I-1~I-4（SAPI 200% 越界/ListVoices 吞 401/Speak 每次拉列表/SSML lang 硬编码）+ M-1~M-5 全部修复并补回归测试。
-- 2026-08-09：设置审计修复——① Windows TTS 声音列表从硬编码 Edge 名改为 SAPI 动态枚举（`SapiTtsProvider.GetInstalledVoices`，旧 Edge 名回落"自动"）；`SapiTtsProvider` 语言回退加 `TryParseCulture` 兜底；② macOS 声音设置从"死设置"接入真实事件（Event 重构为 click/breakReminder，默认 Pop/Purr；`PetWindowModel` 点击、`BreakReminderController` 提醒改走 `SoundSettings.play`；SetupView 文案与 4 语言 strings 同步）。验证：Windows 557 tests 全过 + build 0 error + System.Speech 8.0 真机全路径（枚举/精确选中/语言回退/合成 WAV）+ PetApp F5 冒烟零错误日志；macOS 端未编译验证（用户暂缓）。
-- 2026-08-07（晚）：修复截屏分析静默失效——根因 GraphicsCapture FrameArrived 节流拒绝不取帧→帧滞留占满 FramePool→FrameArrived 永不再触发（永久死锁，无异常无日志）；VS MCP 附加调试 + 独立探测程序 + 自包含对照实验三重实证；修复 = 节流拒绝时取帧即弃 + bufferCount 1→2；端到端恢复（push event kind=Coding 连续产出，弹幕路由正常）；Agent.Tests 33 / 全量 550 全过。另发现并移除 PetWindow.cs:406 残留调试断点（VS F5 启动必停导致 App 卡在启动流程、Agent 不启动）。
-- 2026-08-07：修复 Windows 版气泡压头/悬空——根因：气泡按帧矩形顶定位（Headroom 固定偏移），不同宠物帧内透明边不同；改为底部锚定 + 按实际可见头顶（ContentTopInset）向上平移；新增 SpriteSheet/PetRenderer 测试（Core 374）。
-- 2026-08-07：定位并修复启动必现的"模型连接的目标凭据已存在且内容不同"误报——根因是 `CredNative.Credential` 缺 `CharSet.Unicode` 致 CredWrite target 名编组损坏（见坑点）；已清理 2 条垃圾凭据、迁移 myovo 连接凭据到新引用（providers.json 已更新）、新增 round-trip 回归测试（Infra.Tests 104 全过）。
-- 2026-08-06：C1-C6 与 Important child 1-4 完成；最新顺序验证 537 tests + clean x64 build。
-- 2026-08-06：完成 I1 四语言实时本地化，修复 catalog canonical 盲区、ComboBox 字符串、可见窗口刷新和动态内容 key 碰撞。
-- 2026-08-06：完成 I5 诊断/恢复出厂/全屏；审查后补齐日志硬上限与轮转恢复、整字段 Authorization 脱敏、父进程退出/PID 复用重启、迁移损坏可见性。
-- 2026-08-06：I15 production caller 审计闭环（sprite import/delete、ball position、diary metadata commit ordering）；真实机器 smoke 留 child 5。
+- 2026-08-11（生图模块阶段 4c/5，未提交）：多连接列表编辑器（列表/新建/编辑/删除/凭据回滚与清理）+ AI 页总结图模型下拉（AiSettings.SummaryImageModelRef）；修复该字段持久化缺口（converter Read + Normalize 双遗漏）与 runtime 签名未含该字段（改设置不重建）；阶段 5 生图页（连接×模型带价格/提示词计数/按能力参数面板：宽高比·档位·质量仅 openai·张数·seed·透明+绿幕提示/生成循环/取消/错误分类）+ 历史画廊落盘（GalleryIndex 契约 Core 7 测试、GalleryStore Infra 原子写/删除/修剪/损坏容错 9 测试）；入口=设置页 AI 页「打开生图页」。729 测试全绿。坑：GalleryStore 放 Infra 而非 App（纯 IO 分层，App.Tests 直接引用可测）；缩略图 BitmapImage 必须 OnLoad+Freeze；真机 UI 冒烟未跑（桌宠锁 bin，MSB3021 但编译成功）。
+- 2026-08-11（生图模块阶段 1-4b，提交 57cb0cc/922f555）：设计定稿 + Core 契约/目录（13 模型 embedded JSON）/透明管线（绿幕 prompt+HSV 键控）+ OpenAI 兼容/Gemini 双协议族适配器 + ImageGenService 门面 + providers.json image 段连接列表迁移 + 总结图改道 + 旧 IImageProvider 退役。711 测试全绿。坑点：适配器按连接缓存但模型构造时固定 → fallback 换模型拿到旧适配器（已修为按(连接,模型)缓存）；`JsonIgnore(WhenWritingDefault)` 对反序列化同样生效（改自定义 converter）；AiSettings 位置参数追加字段三处同步（本次验证）；运行中 PetApp 锁 bin 报 MSB3021 但编译成功。
+- 2026-08-11（屏幕事件 journal + 行为会话化）：diary/screen-YYYY-MM-DD.jsonl 一行一事件 + ActivitySessionBuilder 归并 + ActivitySummaryFormatter 注入（40 段预算）；启动清理 30 天前 journal；ScreenEventKind 新增 Music；文案中性化（4 语言同集 749 keys）；生图超时 120s→300s + SummaryImageRetryPolicy。626+ 测试全绿。坑：sln x64 平台映射 AnyCPU，验证运行版本认 `bin/Debug/.../win-x64/` 时间戳，`bin/x64/` 是旧残留。
+- 2026-08-09（TTS 实施）：P0-P3 全部完成——契约下沉 Core、SAPI/OneCore/OpenAI 兼容三级栈、设置页引擎/音色/试听/语速/连接编辑器；603 tests 全绿 + build 0 warn/error + 真机验证；独立 code review 发现 I-1~I-4/M-1~M-5 全部修复并补回归测试。
+- 2026-08-09：设置审计修复（macOS 声音死设置接入真实事件；Windows TTS 声音列表 SAPI 动态枚举 + 语言回退 TryParseCulture）。
+- 2026-08-07（晚）：修复截屏分析静默失效（FrameArrived 节流死锁三重实证）；移除 PetWindow.cs:406 残留调试断点。
+- 2026-08-07：修复气泡压头/悬空（底部锚定 + ContentTopInset）；启动必现凭据误报根因（CharSet.Unicode）+ 垃圾凭据清理。
+- 2026-08-06：C1-C6 与 Important child 1-4 完成；I1 四语言实时本地化；I5 诊断/恢复出厂/全屏；I15 生产调用方审计闭环。

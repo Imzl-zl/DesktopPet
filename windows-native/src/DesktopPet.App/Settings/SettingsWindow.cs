@@ -24,6 +24,7 @@ using DesktopPet.Core.Roaming;
 using DesktopPet.Core.Storage;
 using DesktopPet.Infra.Diagnostics;
 using DesktopPet.Infra.Providers;
+using DesktopPet.Infra.Storage;
 using DesktopPet.Infra.Tts;
 
 namespace DesktopPet.App.Settings;
@@ -57,6 +58,11 @@ public sealed class SettingsWindow : Window
     private readonly SpriteFrameBitmapSourceCache _frameSourceCache = new();
 
     private readonly Ai.AiCoordinator? _ai;
+    /// <summary>生图历史画廊落盘（阶段 5；与生图页共享同一存储实例，索引并发写由内部串行化）。</summary>
+    private readonly GalleryStore _gallery = new(AppDataPaths.ForCurrentUser().Gallery);
+    /// <summary>内置模型目录缓存（设置页/生图页共用；embedded JSON 加载一次）。</summary>
+    private static readonly Lazy<ImageModelCatalog> CatalogCache =
+        new(ImageModelCatalog.LoadBuiltIn);
     private readonly Func<HotkeySettings, HotkeySettingsUpdateResult>? _applyHotkeys;
     private readonly Func<AppLang, CancellationToken, Task<LanguageChangeResult>>? _changeLanguage;
     private readonly Func<int?> _agentProcessId;
@@ -2244,6 +2250,17 @@ public sealed class SettingsWindow : Window
         };
         diaryButton.Click += (_, _) => ShowDiaryViewer();
         extraRow.Children.Add(diaryButton);
+        var imageGenButton = new Button
+        {
+            Content = "打开生图页",
+            Style = AppStyle("ButtonDefaultStyle"),
+            Height = 28,
+            FontSize = 12,
+            Margin = new Thickness(0, 0, 8, 0),
+            Padding = new Thickness(12, 3, 12, 3),
+        };
+        imageGenButton.Click += (_, _) => OpenImageGenPage();
+        extraRow.Children.Add(imageGenButton);
         providerPanel.Children.Add(extraRow);
         stack.Children.Add(SectionCard("模型连接（OpenAI 兼容：云端 / 本地 Ollama 通吃）", providerPanel));
 
@@ -2383,6 +2400,7 @@ public sealed class SettingsWindow : Window
             v => Save(s => s with { Ai = s.Ai with { DailySummary = v } }), margin: 8));
         companionPanel.Children.Add(ToggleRow("总结图", "默认关：用生图模型给日记配插图，需配置生图连接", ai.SummaryImage,
             v => Save(s => s with { Ai = s.Ai with { SummaryImage = v } }), margin: 8));
+        companionPanel.Children.Add(BuildSummaryImageModelPicker(providers, ai));
         companionPanel.Children.Add(ToggleRow("语音朗读", "对话模式朗读回复；弹幕模式不朗读", ai.TtsEnabled,
             v => Save(s => s with { Ai = s.Ai with { TtsEnabled = v } }), margin: 0));
 
@@ -3319,99 +3337,359 @@ public sealed class SettingsWindow : Window
 
     // ---- Phase 6f：生图连接（providers.json image 段）----
 
+    /// <summary>打开生图页（阶段 5）：模型选择/提示词/参数/生成/历史画廊。</summary>
+    private void OpenImageGenPage()
+    {
+        if (_ai is null) return;
+        var window = new Windows.ImageGenWindow(_ai, _gallery, _i18n) { Owner = this };
+        window.ShowDialog();
+    }
+
+    /// <summary>
+    /// 总结图模型下拉（阶段 4c，windows-imagegen-design.md §8.2）：连接×模型两级平铺；
+    /// 保存到 AiSettings.SummaryImageModelRef（"{connectionId}/{modelId}"；空 = 自动）。
+    /// 模型为空白的连接按协议族目录全量展开；无连接时显示不可用提示。
+    /// </summary>
+    private UIElement BuildSummaryImageModelPicker(
+        Core.Scheduling.ProvidersFileModel providers, Core.Storage.AiSettings ai)
+    {
+        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "总结图模型",
+            FontSize = 12,
+            Foreground = Brush("TextPrimaryBrush"),
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "给每日总结配图的模型；自动 = 首选连接的第一个模型",
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            Margin = new Thickness(0, 2, 0, 4),
+        });
+
+        var connections = providers.Image?.Connections ?? [];
+        if (connections.Count == 0)
+        {
+            panel.Children.Add(new TextBlock
+            {
+                Text = "未配置生图连接，总结图不可用",
+                FontSize = 11,
+                Foreground = Brush("TextTertiaryBrush"),
+            });
+            return panel;
+        }
+
+        var combo = new ComboBox
+        {
+            FontSize = 12,
+            MaxWidth = 420,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        var catalog = CatalogCache.Value;
+        combo.Items.Add(new ComboBoxItem { Content = "自动（推荐）", Tag = "" });
+        foreach (var connection in connections)
+        {
+            var modelIds = connection.Models.Count > 0
+                ? connection.Models
+                : catalog.ForFamily(connection.Family).Select(m => m.Id).ToList();
+            foreach (var modelId in modelIds)
+            {
+                var descriptor = catalog.Resolve(modelId, connection.Family);
+                combo.Items.Add(new ComboBoxItem
+                {
+                    Content = $"{connection.Name} · {descriptor.Name}（{modelId}）",
+                    Tag = $"{connection.Id}/{modelId}",
+                });
+            }
+        }
+
+        var current = ai.SummaryImageModelRef ?? "";
+        var selectedIndex = 0;
+        for (var i = 0; i < combo.Items.Count; i++)
+        {
+            var tag = (combo.Items[i] as ComboBoxItem)?.Tag as string ?? "";
+            if (string.Equals(tag, current, StringComparison.OrdinalIgnoreCase))
+            {
+                selectedIndex = i;
+                break;
+            }
+        }
+        combo.SelectedIndex = selectedIndex;
+        combo.SelectionChanged += (_, _) =>
+        {
+            var tag = (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+            Save(s => s with { Ai = s.Ai with { SummaryImageModelRef = tag } });
+        };
+        panel.Children.Add(combo);
+        return panel;
+    }
+
+    /// <summary>
+    /// 生图连接列表编辑器（阶段 4c，windows-imagegen-design.md §6）：多连接管理。
+    /// 左列表（新建/选中）→ 右表单（名称/协议族/BaseUrl/模型白名单/API Key）→ 保存/删除。
+    /// 凭据语义沿用模型连接编辑器：Key 存 Windows Credential Manager，JSON 只存引用；
+    /// 引用变更时先写新凭据再提交配置，提交失败回滚凭据；旧引用无引用方时清理。
+    /// </summary>
     private void ShowImageConnectionEditor()
     {
         if (_ai is null) return;
-        var providers = _ai.Providers;
-        // 编辑第一个连接（单连接 UI；多连接列表编辑器随生图页阶段 5 提供）
-        var cfg = providers.Image?.Connections.FirstOrDefault();
         var creds = new Infra.Providers.WindowsCredentialStore();
-
-        var baseBox = new TextBox { Text = cfg?.BaseUrl ?? "", FontSize = 12, Height = 30 };
-        var modelBox = new TextBox { Text = cfg?.Models.FirstOrDefault() ?? "", FontSize = 12, Height = 30 };
-        var keyBox = new PasswordBox { FontSize = 12, Height = 30 };
-
-        var form = new StackPanel { Margin = new Thickness(20, 16, 20, 0) };
-        form.Children.Add(FormLabel("生图 BaseUrl（OpenAI 兼容，如 https://api.openai.com/v1）"));
-        form.Children.Add(baseBox);
-        form.Children.Add(FormLabel("生图模型（如 gpt-image-1 / qwen-image）", new Thickness(0, 12, 0, 5)));
-        form.Children.Add(modelBox);
-        form.Children.Add(FormLabel("API Key（存 Windows 凭据管理器，不落明文 JSON）", new Thickness(0, 12, 0, 5)));
-        form.Children.Add(keyBox);
-        if (!string.IsNullOrEmpty(cfg?.ApiKeyRef))
-        {
-            form.Children.Add(new TextBlock
-            {
-                Text = "已保存凭据；留空保持不变",
-                FontSize = 11,
-                Foreground = Brush("TextTertiaryBrush"),
-                Margin = new Thickness(0, 4, 0, 0),
-            });
-        }
 
         var window = new Window
         {
-            Title = "生图连接（总结图）",
-            Width = 440,
-            Height = 360,
+            Title = "生图连接",
+            Width = 840,
+            Height = 580,
+            MinWidth = 720,
+            MinHeight = 500,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             Background = Brush("WindowBgBrush"),
-            ResizeMode = ResizeMode.NoResize,
             ShowInTaskbar = false,
+        };
+
+        // ---- 左侧：连接列表 ----
+        var listBox = new ListBox
+        {
+            FontSize = 13,
+            Margin = new Thickness(0, 8, 0, 0),
+            BorderThickness = new Thickness(0),
+            Background = Brushes.Transparent,
+        };
+        void RebuildList(string? selectedId)
+        {
+            listBox.Items.Clear();
+            var connections = _ai!.Providers.Image?.Connections ?? [];
+            foreach (var c in connections)
+            {
+                var family = string.Equals(c.Family, ImageModelCatalog.FamilyGoogle, StringComparison.OrdinalIgnoreCase)
+                    ? "Gemini"
+                    : "OpenAI 兼容";
+                var item = new StackPanel { Margin = new Thickness(4, 6, 4, 6) };
+                item.Children.Add(new TextBlock
+                {
+                    Text = c.Name,
+                    FontWeight = FontWeights.SemiBold,
+                    FontSize = 13,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                });
+                item.Children.Add(new TextBlock
+                {
+                    Text = $"{family} · {c.BaseUrl}",
+                    FontSize = 11,
+                    Foreground = Brush("TextTertiaryBrush"),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxWidth = 220,
+                });
+                item.Children.Add(new TextBlock
+                {
+                    Text = c.Models.Count == 0 ? "模型：协议族目录全量" : $"模型 {c.Models.Count} 个",
+                    FontSize = 11,
+                    Foreground = Brush("TextTertiaryBrush"),
+                });
+                var itemElement = new ListBoxItem { Content = item, Tag = c };
+                if (c.Id == selectedId) itemElement.IsSelected = true;
+                listBox.Items.Add(itemElement);
+            }
+        }
+
+        var newButton = new Button
+        {
+            Content = "+ 新建连接",
+            Style = AppStyle("ButtonDefaultStyle"),
+            Height = 30,
+            FontSize = 12,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 0, 0, 4),
+        };
+
+        var leftPanel = new DockPanel { Margin = new Thickness(20, 16, 8, 16), MinWidth = 240 };
+        DockPanel.SetDock(newButton, Dock.Top);
+        leftPanel.Children.Add(newButton);
+        leftPanel.Children.Add(listBox);
+
+        // ---- 右侧：编辑表单 ----
+        var nameBox = new TextBox { FontSize = 12, Height = 30 };
+        var familyCombo = new ComboBox { FontSize = 12, Height = 30 };
+        familyCombo.Items.Add(new ComboBoxItem { Content = "OpenAI 兼容（gpt-image / Grok / Qwen / FLUX 等）", Tag = ImageModelCatalog.FamilyOpenAi });
+        familyCombo.Items.Add(new ComboBoxItem { Content = "Google Gemini（Nano Banana 系列）", Tag = ImageModelCatalog.FamilyGoogle });
+        var baseBox = new TextBox { FontSize = 12, Height = 30 };
+        var modelsBox = new TextBox
+        {
+            FontSize = 12,
+            AcceptsReturn = true,
+            VerticalContentAlignment = VerticalAlignment.Top,
+            TextWrapping = TextWrapping.Wrap,
+            Height = 68,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+        var keyBox = new PasswordBox { FontSize = 12, Height = 30 };
+        var keyHint = new TextBlock
+        {
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+
+        var form = new StackPanel
+        {
+            Margin = new Thickness(12, 16, 20, 0),
+            MaxWidth = 440,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        form.Children.Add(FormLabel("连接名称"));
+        form.Children.Add(nameBox);
+        form.Children.Add(FormLabel("协议族（决定请求格式与能力；模型 id 须与端点实际支持的模型一致）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(familyCombo);
+        form.Children.Add(FormLabel("接口地址（如 https://api.openai.com/v1；Gemini 官方端点 https://generativelanguage.googleapis.com/v1beta）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(baseBox);
+        form.Children.Add(FormLabel("模型白名单（每行一个模型 id，如 gpt-image-1.5；留空 = 该协议族全部内置模型）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(modelsBox);
+        form.Children.Add(FormLabel("API Key（存 Windows 凭据管理器，不落明文 JSON；本地端点可留空）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(keyBox);
+        form.Children.Add(keyHint);
+        var status = new TextBlock
+        {
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Brush("TextSecondaryBrush"),
+            Margin = new Thickness(12, 8, 12, 0),
+            MaxWidth = 440,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+
+        var deleteButton = new Button
+        {
+            Content = "删除连接",
+            Style = AppStyle("ButtonDangerStyle"),
+            Width = 100,
+            Height = 32,
+            FontSize = 13,
+            HorizontalAlignment = HorizontalAlignment.Left,
         };
         var saveButton = new Button
         {
-            Content = "保存生图连接",
+            Content = "保存连接",
             Style = AppStyle("ButtonPrimaryStyle"),
             Width = 130,
             Height = 32,
             FontSize = 13,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 16, 0, 0),
         };
+        var footer = new Grid { Margin = new Thickness(12, 10, 20, 16) };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(deleteButton, 0);
+        footer.Children.Add(deleteButton);
+        Grid.SetColumn(status, 1);
+        status.Margin = new Thickness(10, 0, 10, 0);
+        footer.Children.Add(status);
+        Grid.SetColumn(saveButton, 2);
+        footer.Children.Add(saveButton);
+
+        var root = new Grid();
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(280, GridUnitType.Pixel) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(leftPanel, 0);
+        root.Children.Add(leftPanel);
+        var rightPanel = new DockPanel();
+        DockPanel.SetDock(footer, Dock.Bottom);
+        DockPanel.SetDock(form, Dock.Top);
+        rightPanel.Children.Add(footer);
+        rightPanel.Children.Add(status);
+        rightPanel.Children.Add(form);
+        Grid.SetColumn(rightPanel, 1);
+        root.Children.Add(rightPanel);
+        window.Content = root;
+
+        // 当前编辑目标；null = 新建模式（保存时生成新连接 id）
+        ImageConnection? editing = null;
+        void LoadForm(ImageConnection? connection)
+        {
+            editing = connection;
+            nameBox.Text = connection?.Name ?? "";
+            familyCombo.SelectedIndex = connection is null
+                || string.Equals(connection.Family, ImageModelCatalog.FamilyOpenAi, StringComparison.OrdinalIgnoreCase)
+                    ? 0
+                    : 1;
+            baseBox.Text = connection?.BaseUrl ?? "";
+            modelsBox.Text = connection is null ? "" : string.Join("\n", connection.Models);
+            keyBox.Password = "";
+            keyHint.Text = string.IsNullOrEmpty(connection?.ApiKeyRef)
+                ? ""
+                : "已保存凭据；留空保持不变";
+            deleteButton.IsEnabled = connection is not null;
+            status.Text = "";
+        }
+
+        void SelectConnection(string? id)
+        {
+            var connections = _ai!.Providers.Image?.Connections ?? [];
+            LoadForm(connections.FirstOrDefault(c => c.Id == id));
+            RebuildList(id);
+        }
+
+        newButton.Click += (_, _) =>
+        {
+            listBox.SelectedItem = null;
+            listBox.UnselectAll();
+            LoadForm(null);
+        };
+        listBox.SelectionChanged += (_, _) =>
+        {
+            if (listBox.SelectedItem is ListBoxItem { Tag: ImageConnection connection })
+                LoadForm(connection);
+        };
+
         saveButton.Click += (_, _) =>
         {
+            var providers = _ai!.Providers;
+            var name = nameBox.Text.Trim();
             var baseUrl = baseBox.Text.Trim();
-            var model = modelBox.Text.Trim();
-            if (baseUrl.Length == 0 || model.Length == 0)
+            var family = (familyCombo.SelectedItem as ComboBoxItem)?.Tag as string
+                         ?? ImageModelCatalog.FamilyOpenAi;
+            var models = modelsBox.Text
+                .Split(new[] { '\n', '\r', ',', '，' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(m => m.Trim())
+                .Where(m => m.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (name.Length == 0 || baseUrl.Length == 0)
             {
-                MessageBox.Show(window, _i18n.T("BaseUrl 和模型名不能为空"), "DesktopPet");
+                status.Text = _i18n.T("连接名称和接口地址不能为空");
+                status.Foreground = Brush("DangerBrush");
                 return;
             }
 
             try
             {
-                var oldSecret = string.IsNullOrEmpty(cfg?.ApiKeyRef) ? null : creds.Get(cfg.ApiKeyRef);
-                if (!string.IsNullOrEmpty(cfg?.ApiKeyRef)
+                var connectionId = editing?.Id ?? Infra.Providers.ProviderCredentialRefs.NewConnectionId();
+                var oldRef = editing?.ApiKeyRef ?? "";
+                var oldSecret = string.IsNullOrEmpty(oldRef) ? null : creds.Get(oldRef);
+                if (!string.IsNullOrEmpty(oldRef)
                     && oldSecret is null
                     && string.IsNullOrEmpty(keyBox.Password))
                 {
-                    MessageBox.Show(window, _i18n.T("已保存的凭据不存在，请重新输入 API Key"), "DesktopPet");
+                    status.Text = _i18n.T("已保存的凭据不存在，请重新输入 API Key");
+                    status.Foreground = Brush("DangerBrush");
                     return;
                 }
                 var secret = string.IsNullOrEmpty(keyBox.Password) ? oldSecret : keyBox.Password;
-                // 连接 id 稳定（"main"）：凭据引用随连接走，避免每次保存换引用残留旧凭据
-                var connectionId = cfg?.Id ?? "main";
-                var keyRef = secret is null ? "" : ProviderCredentialRefs.ForImage(connectionId);
+                var keyRef = secret is null ? "" : Infra.Providers.ProviderCredentialRefs.ForImage(connectionId);
                 _ = ProviderEndpointPolicy.BuildRequestUri(baseUrl, "images/generations", secret is not null);
                 var previousTargetSecret = keyRef.Length == 0 ? null : creds.Get(keyRef);
                 var credentialChanged = keyRef.Length > 0
                     && !string.Equals(previousTargetSecret, secret, StringComparison.Ordinal);
                 if (credentialChanged) creds.Set(keyRef, secret!);
 
-                // 保留其余连接，替换/追加第一个
-                var connections = providers.Image?.Connections.ToList() ?? [];
-                var updated = new ImageConnection(
-                    connectionId,
-                    cfg?.Name ?? "生图连接",
-                    cfg?.Family ?? ImageModelCatalog.FamilyOpenAi,
-                    baseUrl,
-                    keyRef,
-                    [model]);
-                if (connections.Count == 0) connections.Add(updated);
-                else connections[0] = updated;
-
+                var connections = (providers.Image?.Connections ?? []).ToList();
+                var updated = new ImageConnection(connectionId, name, family, baseUrl, keyRef, models);
+                var index = connections.FindIndex(c => c.Id == connectionId);
+                if (index >= 0) connections[index] = updated;
+                else connections.Add(updated);
                 var nextProviders = new Core.Scheduling.ProvidersFileModel
                 {
                     Models = providers.Models.ToList(),
@@ -3427,6 +3705,7 @@ public sealed class SettingsWindow : Window
                 }
                 catch (JsonStoreException ex)
                 {
+                    var credentialRollbackComplete = true;
                     if (credentialChanged)
                     {
                         try
@@ -3436,21 +3715,27 @@ public sealed class SettingsWindow : Window
                         }
                         catch (CredentialStoreException)
                         {
-                            MessageBox.Show(window, _i18n.T("配置保存失败，凭据未能完整恢复。"), "DesktopPet");
+                            credentialRollbackComplete = false;
                         }
                     }
                     PersistenceErrorPresenter.Report(ex, window);
+                    status.Text = credentialRollbackComplete
+                        ? _i18n.T("保存失败，凭据已恢复")
+                        : _i18n.T("保存失败，凭据未能完整恢复");
+                    status.Foreground = Brush("DangerBrush");
                     return;
                 }
 
-                if (!string.IsNullOrEmpty(cfg?.ApiKeyRef)
-                    && !string.Equals(cfg.ApiKeyRef, keyRef, StringComparison.Ordinal)
-                    && nextProviders.Models.All(connection => connection.ApiKeyRef != cfg.ApiKeyRef))
+                // 旧引用清理：引用变更且不再被任何模型/生图连接使用
+                if (!string.IsNullOrEmpty(oldRef)
+                    && !string.Equals(oldRef, keyRef, StringComparison.Ordinal)
+                    && nextProviders.Models.All(m => m.ApiKeyRef != oldRef)
+                    && nextProviders.Image?.Connections.All(c => c.ApiKeyRef != oldRef) != false)
                 {
-                    try { creds.Delete(cfg.ApiKeyRef); }
+                    try { creds.Delete(oldRef); }
                     catch (CredentialStoreException)
                     {
-                        MessageBox.Show(window, _i18n.T("生图连接已保存，但旧凭据清理失败。"), "DesktopPet");
+                        MessageBox.Show(window, _i18n.T("连接已保存，但旧凭据清理失败。"), "DesktopPet");
                     }
                 }
                 window.Close();
@@ -3458,29 +3743,80 @@ public sealed class SettingsWindow : Window
             }
             catch (CredentialStoreException ex)
             {
-                MessageBox.Show(
-                    window,
-                    _i18n.Format("Windows 凭据操作失败（系统错误 {0}）", ex.NativeError),
-                    "DesktopPet");
+                status.Text = _i18n.Format("Windows 凭据操作失败（系统错误 {0}）", ex.NativeError);
+                status.Foreground = Brush("DangerBrush");
             }
             catch (Core.Scheduling.ProviderException ex)
             {
-                MessageBox.Show(
-                    window,
-                    ex.Code == "insecure-transport"
-                        ? _i18n.T("远程 HTTP 连接不能保存 API Key，请使用 HTTPS")
-                        : _i18n.T("生图接口地址无效"),
-                    "DesktopPet");
+                status.Text = ex.Code == "insecure-transport"
+                    ? _i18n.T("远程 HTTP 连接不能保存 API Key，请使用 HTTPS")
+                    : _i18n.T("生图接口地址无效");
+                status.Foreground = Brush("DangerBrush");
             }
         };
-        var footer = new Grid { Margin = new Thickness(20, 4, 20, 16) };
-        footer.Children.Add(saveButton);
-        var root = new DockPanel();
-        DockPanel.SetDock(form, Dock.Top);
-        DockPanel.SetDock(footer, Dock.Bottom);
-        root.Children.Add(footer);
-        root.Children.Add(form);
-        window.Content = root;
+
+        deleteButton.Click += (_, _) =>
+        {
+            if (editing is null) return;
+            var removed = editing;
+            var confirmed = MessageBox.Show(
+                window,
+                _i18n.Format("删除连接「{0}」？关联的 API Key 凭据会一并清理。", removed.Name),
+                "DesktopPet",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (confirmed != MessageBoxResult.Yes) return;
+
+            var providers = _ai!.Providers;
+            var connections = (providers.Image?.Connections ?? [])
+                .Where(c => c.Id != removed.Id)
+                .ToList();
+            var nextProviders = new Core.Scheduling.ProvidersFileModel
+            {
+                Models = providers.Models.ToList(),
+                Image = new ImageConnectionsConfig
+                {
+                    Connections = connections,
+                    SummaryModelRef = providers.Image?.SummaryModelRef ?? "",
+                },
+            };
+            try
+            {
+                _ai.ApplyProviders(nextProviders);
+            }
+            catch (JsonStoreException ex)
+            {
+                PersistenceErrorPresenter.Report(ex, window);
+                return;
+            }
+
+            // 凭据清理：引用不再被任何模型/生图连接使用
+            if (!string.IsNullOrEmpty(removed.ApiKeyRef)
+                && nextProviders.Models.All(m => m.ApiKeyRef != removed.ApiKeyRef)
+                && nextProviders.Image?.Connections.All(c => c.ApiKeyRef != removed.ApiKeyRef) != false)
+            {
+                try { creds.Delete(removed.ApiKeyRef); }
+                catch (CredentialStoreException)
+                {
+                    MessageBox.Show(window, _i18n.T("连接已删除，但凭据清理失败。"), "DesktopPet");
+                }
+            }
+
+            // 总结图引用失效：清空回退「自动」（引用指向已删连接时 Resolve 会静默回退首连接首模型，
+            // 但设置页下拉应同步显示）
+            if (_settings.Ai.SummaryImageModelRef.StartsWith(removed.Id + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                Save(s => s with { Ai = s.Ai with { SummaryImageModelRef = "" } });
+            }
+
+            SelectConnection(connections.FirstOrDefault()?.Id);
+        };
+
+        // 初始加载
+        var initial = _ai.Providers.Image?.Connections.FirstOrDefault(c =>
+            _settings.Ai.SummaryImageModelRef.StartsWith(c.Id + "/", StringComparison.OrdinalIgnoreCase))
+            ?? _ai.Providers.Image?.Connections.FirstOrDefault();
+        SelectConnection(initial?.Id);
         WpfLocalizer.ApplyNew(window, _i18n);
         window.ShowDialog();
     }

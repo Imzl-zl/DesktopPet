@@ -382,6 +382,24 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     /// <summary>打开对话窗（用户主动对话入口，任何模式可用）。</summary>
     public void EnsureChatWindow() => OnUiThread(_chatWindow.Show);
 
+    /// <summary>
+    /// 生图页入口（阶段 5）：按连接 + 模型生成（透明请求由门面按模型能力自动分流：
+    /// 原生直传 / 绿幕两段式）。无 runtime（AI 关 / 未配置连接）或连接不存在时抛 ProviderException。
+    /// </summary>
+    public async Task<ImageGenOutput> GenerateImageAsync(
+        string connectionId, string modelId, ImageGenSpec spec, CancellationToken ct)
+    {
+        using var runtimeLease = _runtime.Acquire();
+        var runtime = runtimeLease?.Value;
+        if (runtime?.ImageGen is null)
+            throw new ProviderException("invalid-request", "生图未配置（无可用生图连接）");
+        var connection = _providers.Image?.Connections.FirstOrDefault(c =>
+            string.Equals(c.Id, connectionId, StringComparison.OrdinalIgnoreCase));
+        if (connection is null)
+            throw new ProviderException("invalid-request", $"生图连接不存在: {connectionId}");
+        return await runtime.ImageGen.GenerateAsync(connection, modelId, spec, ct);
+    }
+
     private void QueueRuntimeReconcile(long revision)
         => ObserveTask(ReconcileRuntimeAsync(revision), "runtime reconcile");
 

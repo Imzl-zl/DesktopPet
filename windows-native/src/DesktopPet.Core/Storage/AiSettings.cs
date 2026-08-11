@@ -125,7 +125,8 @@ public sealed record AiSettings(
             Math.Clamp(raw.QuietHoursStart, 0, 23),
             Math.Clamp(raw.QuietHoursEnd, 0, 23),
             providerId,
-            Math.Clamp(raw.TtsSpeedPercent, 50, 200));
+            Math.Clamp(raw.TtsSpeedPercent, 50, 200),
+            raw.SummaryImageModelRef ?? "");
     }
 }
 
@@ -163,6 +164,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         var quietHoursEnd = defaults.QuietHoursEnd;
         var ttsProviderId = defaults.TtsProviderId;
         var ttsSpeedPercent = defaults.TtsSpeedPercent;
+        var summaryImageModelRef = defaults.SummaryImageModelRef;
 
         var camel = options.PropertyNamingPolicy ?? JsonNamingPolicy.CamelCase;
         while (reader.Read())
@@ -196,6 +198,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
                 case "quietHoursEnd": quietHoursEnd = ReadInt(ref reader) ?? defaults.QuietHoursEnd; break;
                 case "ttsProviderId": ttsProviderId = ReadString(ref reader) ?? defaults.TtsProviderId; break;
                 case "ttsSpeedPercent": ttsSpeedPercent = ReadInt(ref reader) ?? defaults.TtsSpeedPercent; break;
+                case "summaryImageModelRef": summaryImageModelRef = ReadString(ref reader) ?? ""; break;
                 default: reader.Skip(); break; // 未知字段容忍（前向兼容）
             }
         }
@@ -204,7 +207,8 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
             enabled, screenAnalysis, outputMode, screenContextEnabled, providerId,
             memoryEnabled, activeInteraction, interactionFrequency, screenAwareness,
             intimacyEnabled, dailySummary, summaryImage, ttsEnabled, allReply, screenAnalysisIntervalSeconds, onboarded, ttsVoiceName,
-            quietHoursEnabled, quietHoursStart, quietHoursEnd, ttsProviderId, ttsSpeedPercent);
+            quietHoursEnabled, quietHoursStart, quietHoursEnd, ttsProviderId, ttsSpeedPercent,
+            summaryImageModelRef);
     }
 
     public override void Write(Utf8JsonWriter writer, AiSettings value, JsonSerializerOptions options)

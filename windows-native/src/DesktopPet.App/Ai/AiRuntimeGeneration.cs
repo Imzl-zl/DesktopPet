@@ -38,12 +38,14 @@ internal sealed class AiRuntimeGeneration(
 
     /// <summary>运行时形态签名：关键输入引用变化才需要重建。
     /// 注意：OutputMode 只影响 Agent 启停（reconcile 后半段处理），不影响 runtime 本体——
-    /// danmaku/chat/bubble 共用同一 provider 运行时。</summary>
+    /// danmaku/chat/bubble 共用同一 provider 运行时。
+    /// SummaryImageModelRef 在 runtime 构建时解析为 SummaryImageTarget（AiCoordinator.BuildRuntime），
+    /// 不在签名内则改设置不重建、新选择不生效（阶段 4c 修复）。</summary>
     public static string SignatureOf(
         AppSettings settings,
         ProvidersFileModel providers,
         PersonasFileModel personas)
-        => $"{settings.Ai.Enabled}|{settings.Ai.ProviderId}|{ReferenceEquality(providers)}|{ReferenceEquality(personas)}";
+        => $"{settings.Ai.Enabled}|{settings.Ai.ProviderId}|{settings.Ai.SummaryImageModelRef}|{ReferenceEquality(providers)}|{ReferenceEquality(personas)}";
 
     private static string ReferenceEquality(object o) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o).ToString();
 }

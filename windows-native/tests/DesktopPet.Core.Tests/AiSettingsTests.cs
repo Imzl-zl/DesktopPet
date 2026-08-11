@@ -101,6 +101,27 @@ public class AiSettingsTests
     }
 
     [Fact]
+    public void Serialize_Deserialize_RoundtripsSummaryImageModelRef()
+    {
+        // 总结图模型引用（阶段 4c）：写入后必须能读回——converter Read 曾遗漏该字段导致
+        // 设置页下拉选择保存后丢失（回退"自动"）。
+        var ai = AiSettings.Defaults with { SummaryImageModelRef = "my-relay/gpt-image-1.5" };
+        var json = JsonSerializer.Serialize(ai, TestJsonOptions);
+        Assert.Contains("\"summaryImageModelRef\":\"my-relay/gpt-image-1.5\"", json);
+        var back = JsonSerializer.Deserialize<AiSettings>(json, TestJsonOptions)!;
+        Assert.Equal(ai, back);
+    }
+
+    [Fact]
+    public void Normalize_KeepsSummaryImageModelRef()
+    {
+        // Normalize 曾按位置参数构造时漏传第 23 个参数（默认空），引用被静默清空。
+        var raw = AiSettings.Defaults with { SummaryImageModelRef = "google/gemini-3.1-flash-image" };
+        Assert.Equal("google/gemini-3.1-flash-image", AiSettings.Normalize(raw).SummaryImageModelRef);
+        Assert.Equal("", AiSettings.Normalize(AiSettings.Defaults).SummaryImageModelRef);
+    }
+
+    [Fact]
     public void Serialize_Deserialize_RoundtripsAllPhase6Fields()
     {
         var ai = AiSettings.Defaults with

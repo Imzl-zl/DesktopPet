@@ -33,6 +33,8 @@ public sealed class GraphicsCaptureSource :
     private const uint D3D11_SDK_VERSION = 7;
     private const int D3D_DRIVER_TYPE_HARDWARE = 1;
     private const int D3D_DRIVER_TYPE_WARP = 5;
+    private const int MonitorDefaultToPrimary = 1; // MONITOR_DEFAULTTOPRIMARY：固定捕获主屏
+    private const int MonitorDefaultToNearest = 2; // MONITOR_DEFAULTTONEAREST
     private static readonly Guid IID_IDXGIDevice = new("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
 
     private readonly object _gate = new();
@@ -42,6 +44,7 @@ public sealed class GraphicsCaptureSource :
     private Direct3D11CaptureFramePool? _framePool;
     private IDirect3DDevice? _device;
     private SoftwareBitmap? _latest;
+    private Windows.Graphics.SizeInt32 _lastSize; // 上次帧池尺寸（分辨率变化检测）
     private GraphicsCaptureState _state;
     private bool _hasFrame;
     private int _consecutiveFailures;
@@ -61,10 +64,13 @@ public sealed class GraphicsCaptureSource :
                 throw new NotSupportedException("当前设备不支持 Windows.Graphics.Capture");
 
             _device = CreateD3DDevice();
-            _item = CreateCaptureItemForMonitor(MonitorFromPoint(0, 0, 1 /* MONITOR_DEFAULTTONEAREST */));
+            // 主屏（MONITOR_DEFAULTTOPRIMARY）：桌宠分析以用户主工作屏为准。
+            // 原注释误标 TONEAREST(2)；行为一直是主屏，此处显式命名。
+            _item = CreateCaptureItemForMonitor(MonitorFromPoint(0, 0, MonitorDefaultToPrimary));
             _item.Closed += OnItemClosed;
             _framePool = Direct3D11CaptureFramePool.Create(
                 _device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, _item.Size);
+            _lastSize = _item.Size; // 分辨率变化基准（FrameArrived 内比较）
             _framePool.FrameArrived += OnFrameArrived;
             _session = _framePool.CreateCaptureSession(_item);
             _session.StartCapture();
@@ -126,6 +132,21 @@ public sealed class GraphicsCaptureSource :
             lock (_gate)
             {
                 if (_state != GraphicsCaptureState.Running) return;
+            }
+
+            // 分辨率/DPI/热插拔变化：item.Size 与帧池尺寸不一致时用新尺寸重建帧池。
+            // GraphicsCaptureItem 只有 Closed 事件（无 SizeChanged），官方示例即在此处
+            // 比较尺寸后 Recreate（原实现缺失 → 分辨率变化后帧内容缩放/裁剪错误）。
+            var device = _device;
+            var item = _item;
+            if (device is not null && item is not null && item.Size != _lastSize)
+            {
+                _framePool?.Recreate(
+                    device,
+                    DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                    2,
+                    item.Size);
+                _lastSize = item.Size;
             }
 
             if (!_copyCadence.TryAcquire())
@@ -344,6 +365,7 @@ public sealed class GraphicsCaptureSource :
         }
 
         if (item is not null) item.Closed -= OnItemClosed;
+        if (item is not null) item.Closed -= OnItemClosed;
         if (framePool is not null) framePool.FrameArrived -= OnFrameArrived;
         session?.Dispose();
         framePool?.Dispose();
@@ -353,7 +375,6 @@ public sealed class GraphicsCaptureSource :
 
     [ComImport]
     [Guid("3628E81B-3CAC-4C60-B7F4-23CE0E0C3356")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IGraphicsCaptureItemInterop
     {
         [PreserveSig] int CreateForWindow(IntPtr window, ref Guid iid, out IntPtr value);

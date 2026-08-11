@@ -316,12 +316,6 @@ public sealed class PetWindow : Window
         _broadcastQuickBubble = broadcast;
     }
 
-    /// <summary>气泡时长（设置页 1-10s，对齐 readQuickBubbleDurationMs）。</summary>
-    public void ApplyQuickBubbleDuration(int seconds)
-    {
-        _quickBubbleDurationSeconds = Math.Clamp(seconds, 1, 10);
-    }
-
     /// <summary>
     /// 全量下发设置（对齐 Tauri 版 listen/emit 语义）：点击动作/气泡池/时长 +
     /// 外观（主题/不透明度/字号/字体）、宠物尺寸、待机浮动、闲谈气泡、漫游。

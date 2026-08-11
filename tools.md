@@ -45,4 +45,5 @@
 - 模型请求并发受固定 worker 池和 P0>P1>P2 优先级队列控制；超时/重试策略由调度层拥有，Provider 只分类 transport 错误。
 - WPF 自动文本扫描不得直接覆盖动态内容；即使当前内容恰好等于 catalog key，也必须保持用户/模型原文。
 - Agent 代码改动后必须**不带 Platform 参数**构建 AgentHost（`dotnet build src/DesktopPet.AgentHost/...`）：`-p:Platform=x64` 输出 `bin/x64/`，而 `ResolveAgentHostPath` 回退探测 `bin/Debug/`（无 x64），App 实际启动的是后者——否则改 Agent 不生效。
+- **App 构建输出陷阱**：sln 平台映射 `Debug|x64 → Debug|Any CPU`，`dotnet build DesktopPet.sln -p:Platform=x64` 与不带 Platform 输出**相同**（`bin/Debug/net8.0-windows10.0.19041.0/win-x64/`）；`bin/x64/` 是历史残留（旧构建），启动 App 前用 `find src/DesktopPet.App/bin -name DesktopPet.App.exe -exec stat -c '%y %n' {} \;` 确认最新时间戳的路径再启动。
 - Windows 文件发布/重置/凭据/GraphicsCapture/多屏 DPI 逻辑的单测不等于原生验收；最终报告要显式列出未跑的真实机器 smoke。

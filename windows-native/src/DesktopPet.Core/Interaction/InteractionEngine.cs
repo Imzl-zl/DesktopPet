@@ -93,27 +93,28 @@ public sealed class InteractionEngine
 
         var recent = events.Where(e => now - e.Timestamp <= AppSwitchWindow).ToList();
 
-        // coding：连续编码 ≥ 2h（最早 Coding 事件 ≥ 阈值前）——最具体先查
-        var coding = events.Where(e => e.Kind == ScreenEventKind.Coding).ToList();
-        if (coding.Count > 0 && now - coding.Min(e => e.Timestamp) >= CodingThreshold)
+        // 事件流只在屏幕变化时产生：事件间隙 = 持续同一状态（无新事件 = 没切走）。
+        // 因此「连续编码 2h」= 最新事件是 Coding 且 ≥2h 前；期间切换应用必然产生新事件覆盖它。
+        // 修复：原实现用最早 Coding 事件判定（now - Min >= 2h），只要日志里有 2h 前的编码事件
+        // 就误报——用户早已切走/离开也会被评论「连续编码两小时」。
+        var latest = events.MaxBy(e => e.Timestamp);
+        if (latest is not null
+            && latest.Kind == ScreenEventKind.Coding
+            && now - latest.Timestamp >= CodingThreshold)
         {
             trigger = new InteractionTrigger("coding", "用户已连续编码超过两小时", now);
             _state = _state with { LastEventAt = now };
             return true;
         }
 
-        // sitting：连续活动 ≥ 60min（最早活动事件 ≥ 阈值前）
-        var active = events.Where(e => e.Kind is ScreenEventKind.Coding or ScreenEventKind.Browsing
-            or ScreenEventKind.Video or ScreenEventKind.Gaming).ToList();
-        if (active.Count > 0)
+        // sitting：连续活动 ≥ 60min（最新事件是活动类且 ≥ 阈值前；Idle 结尾 = 已离开/静止不触发）
+        if (latest is not null
+            && IsActiveKind(latest.Kind)
+            && now - latest.Timestamp >= SittingThreshold)
         {
-            var earliest = active.Min(e => e.Timestamp);
-            if (now - earliest >= SittingThreshold)
-            {
-                trigger = new InteractionTrigger("sitting", "用户已连续工作/使用电脑超过一小时，提醒休息", now);
-                _state = _state with { LastEventAt = now };
-                return true;
-            }
+            trigger = new InteractionTrigger("sitting", "用户已连续工作/使用电脑超过一小时，提醒休息", now);
+            _state = _state with { LastEventAt = now };
+            return true;
         }
 
         // app-switch：最近 10min 内切换窗口
@@ -127,6 +128,10 @@ public sealed class InteractionEngine
 
         return false;
     }
+
+    private static bool IsActiveKind(ScreenEventKind kind)
+        => kind is ScreenEventKind.Coding or ScreenEventKind.Browsing
+            or ScreenEventKind.Video or ScreenEventKind.Music or ScreenEventKind.Gaming;
 
     private bool TryTimedGreeting(DateTime now, out InteractionTrigger? trigger)
     {

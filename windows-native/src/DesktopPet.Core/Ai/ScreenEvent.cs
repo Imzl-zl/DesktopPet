@@ -8,6 +8,7 @@ public enum ScreenEventKind
     Coding,
     Browsing,
     Video,
+    Music,
     Gaming,
     Idle,
 }

@@ -83,6 +83,8 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     private InteractionEngine _interaction;             // 主动互动（频率/感知随设置更新）
     private DateOnly? _lastDiaryDate;                   // 日记最近生成日期
     private DateOnly? _pendingDiaryDate;
+    // 总结图失败补试（渠道慢/抖动：文本照常，图片当天自动补，防当天图永远缺失）
+    private readonly SummaryImageRetryPolicy _imageRetry = new();
     // L1/L2 分层会话记忆（简洁版）：L1 最近消息按 token 预算保留（预算 = 模型上下文 50%，
     // 256k 配置下几百轮不触发）；L2 真超预算时最早轮次压缩进滚动摘要注入，不静默丢弃；
     // 摘要可合并进 L3 画像（RecordChatSuccess）。
@@ -91,8 +93,8 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     // 引擎选择/降级由 TtsProviderRegistry 处理；Speak 按设置选引擎，失败降级 sapi
     private readonly ITtsProvider _sapiTts = new SapiTtsProvider();
     private readonly IReadOnlyList<ITtsProvider> _baseTtsProviders;
-    private IReadOnlyList<ITtsProvider> _ttsProviders;
-    private ITtsProvider _tts;
+    private IReadOnlyList<ITtsProvider> _ttsProviders = [];
+    private ITtsProvider _tts = null!; // 构造函数 RebuildTtsProviders 赋值
     private readonly MediaPlayer _ttsPlayer = new();
     // 待清理的 TTS 临时文件（MediaEnded 只订阅一次，防闭包随朗读次数累积）
     private string? _pendingTtsTempPath;
@@ -100,6 +102,14 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     // 修复：原实现 Speak 只看持久设置，对话窗朗读按钮点击无效。
     private bool _ttsSessionEnabled;
     private System.Threading.Timer? _tickTimer;         // 30s 周期：主动互动 + 每日总结
+
+    // ---- 分析活性看门狗：心跳只证明进程活着，不证明分析在产事件。
+    // capture 死锁/引擎故障时事件流停滞但心跳正常——超过阈值强制重启 Agent。
+    // 阈值 10min：静止屏幕（无变化无事件）属正常，10min 一次重启成本极低（对用户透明）。
+    private const long AnalysisStallThresholdMs = 10 * 60 * 1000;
+    private const long AnalysisRestartMinIntervalMs = 5 * 60 * 1000;
+    private long _lastScreenEventTick;
+    private long _lastWatchdogRestartTick;
 
     public AiCoordinator(
         FileJsonStore store,
@@ -142,6 +152,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             _settings.Ai.QuietHoursStart,
             _settings.Ai.QuietHoursEnd);
         _tickTimer = new System.Threading.Timer(Tick, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        CleanupOldScreenEventJournals();
     }
 
     public PersonasFileModel Personas => _personas;
@@ -381,7 +392,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             AppSettings settings;
             ProvidersFileModel providers;
             PersonasFileModel personas;
-            Task retirement;
+            Task retirement = Task.CompletedTask;
             lock (_stateLock)
             {
                 if (_shuttingDown || revision != _runtimeRevision) return;
@@ -393,6 +404,16 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
                 {
                     using var active = _runtime.Acquire();
                     active?.Value.RequestStop();
+                }
+
+                // 签名相同 = 关键输入未变（改气泡外观/TTS 音色等无关设置）→ 跳过重建。
+                // 修复：原实现无条件 ReplaceAsync，每次保存设置都重建 provider/scheduler/worker 池，
+                // 旧代际 drain 会让退出偶发阻塞（对话租约最长 30s）。
+                var current = _runtime.Current;
+                var nextSignature = AiRuntimeGeneration.SignatureOf(settings, providers, personas);
+                if (current is not null && current.Signature == nextSignature)
+                {
+                    return;
                 }
                 retirement = _runtime.ReplaceAsync(BuildRuntime(settings, providers, personas));
             }
@@ -708,9 +729,19 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     private async Task PushConfigAsync(PipeRpcClient? rpc, CancellationToken ct)
     {
         if (rpc is null) return;
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, _coordinatorLifetime.Token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(3));
-        await _agentConfigSend.WaitAsync(deadline.Token).ConfigureAwait(false);
+        // 等待写锁：事件/心跳 Pong 可能占用管道，宽松超时。
+        // 修复：超时 = 拥塞不是断连——原实现 3s 统一截止并销毁连接，
+        // 偶发拥塞会误杀健康连接触发整轮重启（含指数退避）。
+        try
+        {
+            await _agentConfigSend.WaitAsync(ct).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            DebugLog("config push skipped: pipe write busy");
+            return; // 放弃本次推送；下次设置变更/重连会重新下发
+        }
+
         long revision = 0;
         try
         {
@@ -723,13 +754,25 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
                 cfg = AgentConfigBuilder.Build(_settings, _personas, _providers, revision);
             }
 
+            using var sendDeadline = CancellationTokenSource.CreateLinkedTokenSource(
+                ct, _coordinatorLifetime.Token);
+            sendDeadline.CancelAfter(TimeSpan.FromSeconds(3));
             await rpc.SendAsync(new RpcMessage(RpcType.Config,
-                JsonSerializer.SerializeToElement(cfg, JsonOpts)), deadline.Token).ConfigureAwait(false);
+                JsonSerializer.SerializeToElement(cfg, JsonOpts)), sendDeadline.Token).ConfigureAwait(false);
             Volatile.Write(ref _agentRevisionFloor, revision);
             Interlocked.CompareExchange(ref _pendingAgentRevision, 0, revision);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
+            // 真断连/对端关闭：连接失效，看门狗负责重启
+            if (revision != 0) Interlocked.CompareExchange(ref _pendingAgentRevision, 0, revision);
+            await InvalidateAgentConnectionAsync(rpc).ConfigureAwait(false);
+            throw;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested
+                                                   && !_coordinatorLifetime.IsCancellationRequested)
+        {
+            // 发送超时（对端 3s 无响应）：连接疑似已坏，失效走看门狗重启
             if (revision != 0) Interlocked.CompareExchange(ref _pendingAgentRevision, 0, revision);
             await InvalidateAgentConnectionAsync(rpc).ConfigureAwait(false);
             throw;
@@ -769,7 +812,9 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
                 ? t : DateTime.Now;
             var hash = payload.TryGetProperty("frameHash", out var h) ? h.GetUInt64() : 0ul;
             var evt = new ScreenEvent(timestamp, kind, summary, hash);
+            _lastScreenEventTick = Environment.TickCount64; // 活性看门狗信号
             _eventLog.Add(evt); // 对话屏幕上下文用（最近 N 条）
+            AppendScreenEvent(evt); // journal 落盘（按天，重启不丢，总结/回顾用）
             // 无模型/分析失败时事件降级（summary 空）→ 默认台词（UI 有反馈，不静默）
             var text = string.IsNullOrWhiteSpace(summary)
                 ? _i18n.T("（看到你的屏幕有变化~）")
@@ -804,13 +849,17 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         IImageProvider? imageProvider = null;
         if (providers.Image is not null)
         {
+            // 生图超时 300s：实测慢渠道单张需 3 分半（210s），120s 必然超时；
+            // 再慢由 SummaryImageRetryPolicy 当天补试兜底。
             imageProvider = new OpenAiCompatibleImageProvider(
-                providers.Image, _credentials, _providerHttp, requestTimeout: TimeSpan.FromSeconds(120));
+                providers.Image, _credentials, _providerHttp, requestTimeout: TimeSpan.FromSeconds(300));
         }
 
         return scheduler is null && imageProvider is null
             ? null
-            : new AiRuntimeGeneration(scheduler, pipeline, imageProvider);
+            : new AiRuntimeGeneration(
+                scheduler, pipeline, imageProvider,
+                AiRuntimeGeneration.SignatureOf(settings, providers, personas));
     }
 
     private void RecordTokens(int tokens)
@@ -892,12 +941,33 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             summary);
     }
 
-    /// <summary>周期 tick（30s）：每日总结检查 + 主动互动。AI 总开关关 = 全部失效。</summary>
+    /// <summary>周期 tick（30s）：每日总结检查 + 总结图补试 + 主动互动 + 分析活性看门狗。
+    /// AI 总开关关 = 全部失效。</summary>
     private void Tick(object? state)
     {
         if (_shuttingDown || !_settings.Ai.Enabled) return;
         TryDailySummary();
+        TryRetrySummaryImage();
         TryProactiveInteraction();
+        CheckAnalysisLiveness();
+    }
+
+    /// <summary>分析事件停滞检测：Agent 心跳正常但长时间无任何事件（capture 死锁/引擎故障）→ 强制重启。</summary>
+    private void CheckAnalysisLiveness()
+    {
+        if (!_settings.Ai.ScreenAnalysis || _settings.Ai.OutputMode == "silent") return;
+        bool running;
+        lock (_lock) running = _agent is not null;
+        if (!running) return;
+
+        var now = Environment.TickCount64;
+        if (now - _lastScreenEventTick < AnalysisStallThresholdMs) return;
+        if (now - _lastWatchdogRestartTick < AnalysisRestartMinIntervalMs) return;
+
+        _lastWatchdogRestartTick = now;
+        DebugLog($"analysis watchdog: no screen events for {AnalysisStallThresholdMs / 60000}min, restarting agent");
+        RequestAgentStopNow();
+        StartAgent();
     }
 
     /// <summary>主动互动：定时/事件触发 → 多宠物分派 → 并行独立请求（P1）→ 当前模式输出。</summary>
@@ -1021,7 +1091,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             var data = new DailySummaryData(
                 day,
                 _profile.Summary,
-                ScreenContextFormatter.Format(_eventLog.Recent(), 4),
+                LoadActivityHighlights(day),
                 InferMood(),
                 petName);
             var request = new ChatRequest(
@@ -1050,13 +1120,14 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
                 catch (Exception ex)
                 {
                     DebugLog("summary image failed (text kept): " + ex.Message); // 降级：文本照常
+                    _imageRetry.RecordFailure(day, DateTime.Now);               // 当天补试
                 }
             }
 
             _store.SaveDiaryLastGenerated(completionDate);
             completed = true;
             OnUiThread(() => _modeService.RouteOutput(new AiOutput(
-                _i18n.T("今天的总结出炉啦~（日记已保存）"),
+                _i18n.T("总结出炉啦~（日记已保存）"),
                 FromAnalysis: true)));
         }
         catch (JsonStoreException ex)
@@ -1079,18 +1150,18 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
 
     /// <summary>朗读（语音开关 + 仅对话模式；合成流 → 临时文件 → MediaPlayer）。</summary>
     /// <summary>当前选中模型连接的最大输出配置（空 = 不发送 max_tokens，上游默认）。
-    /// 对话路径与互动/评论路径分离：互动/评论固定内置短句 120，不受此配置影响。</summary>
+    /// 对话路径与互动/评论路径分离：互动/评论固定内置短句 120，不受此配置影响。
+    /// 修复：原实现未命中选中连接时回退到第一个连接——多连接时 A 的 max_tokens 会串到 B。</summary>
     private int? CurrentMaxOutputTokens()
-        => _providers.Models.FirstOrDefault(m => m.Id == _settings.Ai.ProviderId)?.MaxOutputTokens
-           ?? _providers.Models.FirstOrDefault()?.MaxOutputTokens;
+        => _providers.Models.FirstOrDefault(m => m.Id == _settings.Ai.ProviderId)?.MaxOutputTokens;
 
     /// <summary>重开对话（ChatWindow“从这里重新开始”）：清空 L1/L2 会话记忆；记忆画像/亲密度保留。</summary>
     public void ClearChatHistory() => _conversation.Clear();
 
-    /// <summary>当前选中模型连接的上下文长度（未配置 = 默认 32k 估算）。</summary>
+    /// <summary>当前选中模型连接的上下文长度（未配置 = 默认 32k 估算）。
+    /// 修复：原实现同样回退到第一个连接（串配置），未命中时只用默认估算。</summary>
     private int CurrentContextTokens()
         => _providers.Models.FirstOrDefault(m => m.Id == _settings.Ai.ProviderId)?.ContextWindowTokens
-           ?? _providers.Models.FirstOrDefault()?.ContextWindowTokens
            ?? ConversationMemory.DefaultContextTokens;
 
     public void Speak(string text)
@@ -1173,6 +1244,124 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     private string FirstPetName()
         => (_store.LoadPetStore()?.Instances.FirstOrDefault()?.Name) ?? "桌宠";
 
+    // ---- 屏幕事件 journal（按天 jsonl 落盘：总结/回顾的"当天活动"素材）----
+
+    /// <summary>屏幕事件按天追加到 journal；写失败静默降级（不阻塞事件流）。</summary>
+    private void AppendScreenEvent(ScreenEvent evt)
+    {
+        try
+        {
+            var path = ScreenEventStore.Path(_store.DirectoryPath, DateOnly.FromDateTime(evt.Timestamp));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.AppendAllText(path, JsonSerializer.Serialize(evt, JournalJsonOpts) + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            DebugLog("screen event journal append failed: " + ex.Message);
+        }
+    }
+
+    /// <summary>当天活动回顾（journal 读取 → 会话归并 → 格式化；文件缺失/损坏降级空串）。</summary>
+    private string LoadActivityHighlights(DateOnly day)
+    {
+        try
+        {
+            var path = ScreenEventStore.Path(_store.DirectoryPath, day);
+            if (!File.Exists(path)) return "";
+            // FileShare.ReadWrite：与 AppendScreenEvent 的追加写入并发（总结触发时事件流仍在写）
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            var events = new List<ScreenEvent>();
+            while (reader.ReadLine() is { } line)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    var evt = JsonSerializer.Deserialize<ScreenEvent>(line, JournalJsonOpts);
+                    if (evt is not null) events.Add(evt);
+                }
+                catch (JsonException)
+                {
+                    // 坏行跳过（半行写入/文件损坏），不影响其余事件
+                }
+            }
+            return ActivitySummaryFormatter.Format(ActivitySessionBuilder.Build(events));
+        }
+        catch (Exception ex)
+        {
+            DebugLog("screen event journal read failed: " + ex.Message);
+            return "";
+        }
+    }
+
+    /// <summary>清理 30 天前的 journal 文件（只删本命名规则的文件；单文件失败不中断）。</summary>
+    private void CleanupOldScreenEventJournals()
+    {
+        try
+        {
+            var diaryDir = Path.Combine(_store.DirectoryPath, "diary");
+            if (!Directory.Exists(diaryDir)) return;
+            var cutoff = DateOnly.FromDateTime(DateTime.Now).AddDays(-30);
+            foreach (var file in Directory.EnumerateFiles(diaryDir, ScreenEventStore.FilePrefix + "*"))
+            {
+                if (ScreenEventStore.ParseDateFromFileName(Path.GetFileName(file)) is { } day && day < cutoff)
+                {
+                    try { File.Delete(file); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        DebugLog("screen event journal cleanup failed: " + ex.Message);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog("screen event journal cleanup error: " + ex.Message);
+        }
+    }
+
+    /// <summary>总结图补试检查（tick 调用）：到点且有额度则后台重试当天/昨日失败的图。</summary>
+    private void TryRetrySummaryImage()
+    {
+        if (!_settings.Ai.DailySummary || !_settings.Ai.SummaryImage) return;
+        if (!_imageRetry.TryConsumeRetry(DateOnly.FromDateTime(DateTime.Now), DateTime.Now, out var day)) return;
+        _ = Task.Run(() => RetrySummaryImageAsync(day));
+    }
+
+    /// <summary>补试：读已落盘的总结文本 → 重新生图 → 写 png；成功清状态，失败等下一窗口。</summary>
+    private async Task RetrySummaryImageAsync(DateOnly day)
+    {
+        try
+        {
+            using var runtimeLease = _runtime.Acquire();
+            var runtime = runtimeLease?.Value;
+            if (runtime?.ImageProvider is null)
+            {
+                _imageRetry.Reset(); // 生图连接已不可用（配置变更）→ 放弃补试
+                return;
+            }
+            var txtPath = DiaryStore.TextPath(_store.DirectoryPath, day);
+            if (!File.Exists(txtPath))
+            {
+                _imageRetry.Reset(); // 文本缺失（异常状态）→ 放弃补试
+                return;
+            }
+            var text = await File.ReadAllTextAsync(txtPath);
+            var image = await runtime.ImageProvider.GenerateAsync(
+                new ImageGenRequest(ImagePromptBuilder.Build(text, FirstPetName())), runtime.LifetimeToken);
+            AtomicFileWriter.WriteAllBytes(
+                DiaryStore.ImagePath(_store.DirectoryPath, day),
+                image.PngBytes);
+            _imageRetry.Reset();
+            DebugLog($"summary image retry succeeded for {day:yyyy-MM-dd}");
+        }
+        catch (Exception ex)
+        {
+            _imageRetry.RecordRetryFailure(DateTime.Now);
+            DebugLog("summary image retry failed: " + ex.Message);
+        }
+    }
+
     public void Dispose()
     {
         BeginShutdown();
@@ -1227,5 +1416,14 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
+    /// <summary>journal 编解码选项：枚举存字符串（文件可读，兼容 kind 枚举演进）；
+    /// 中文不转义（本地数据文件，非 HTML 上下文，无注入面）。</summary>
+    private static readonly JsonSerializerOptions JournalJsonOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 }

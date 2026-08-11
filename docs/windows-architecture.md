@@ -161,6 +161,7 @@ public interface IImageProvider {
 
 - 配置复用 `providers.json`（新增 `image` 段：baseUrl/apiKey/modelName/size/quality），设置页 AI 助手 → 「生图连接」卡片（测试连接复用 `/models` 或发一张小图验证）
 - **总结图流程**：每日总结文本 → `ImagePromptBuilder`（总结摘要 + 宠物形象描述 + Lumen 画风约束，如"轻盈简约、柔和光感、像素宠物拟人化"）→ 生图 → 保存 `%APPDATA%/DesktopPet/diary/yyyy-MM-dd.png` → 日记展示
+- **总结素材（屏幕部分）**：屏幕事件按天 journal 落盘 `diary/screen-yyyy-MM-dd.jsonl`（一行一条，重启不丢）→ `ActivitySessionBuilder` 行为会话化（连续同类合并成段）→ `ActivitySummaryFormatter` 格式化后作为 `DailySummaryData.ScreenHighlights` 注入；旧文件启动时清理 30 天
 - 失败降级：生图失败不影响总结文本生成（文本照常入日记，图留空位可手动重试）
 - 成本护栏：默认每日 1 张；开关可关；失败重试不超过 2 次
 

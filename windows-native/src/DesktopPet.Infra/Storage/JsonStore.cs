@@ -23,6 +23,10 @@ public sealed class FileJsonStore : IJsonStore
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private readonly string _directory;
 
+    /// <summary>JSON 损坏（解析失败）：损坏文件已被隔离保留（.corrupt-*），参数为隔离后路径。
+    /// 修复：原实现损坏 = 静默返回 null，后续保存直接覆盖原文件，用户数据无感知丢失。</summary>
+    public event Action<string>? FileCorrupted;
+
     public string DirectoryPath => _directory;
 
     public FileJsonStore(string directory)
@@ -57,6 +61,24 @@ public sealed class FileJsonStore : IJsonStore
         }
     }
 
+    /// <summary>损坏文件隔离：改名保留现场（.corrupt-时间戳-guid），触发事件供 UI 提示。
+    /// 隔离失败不阻断（保持原加载语义），但不再让后续保存覆盖原始数据。</summary>
+    private void OnCorruptFile(string name)
+    {
+        var path = PathFor(name);
+        try
+        {
+            if (!File.Exists(path)) return;
+            var quarantine = path + $".corrupt-{DateTime.Now:yyyyMMddHHmmss}-{Guid.NewGuid():N}";
+            File.Move(path, quarantine);
+            FileCorrupted?.Invoke(quarantine);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 隔离失败：保留原文件（数据不丢），本次仍按无数据加载
+        }
+    }
+
     private void WriteFile(string name, string content)
     {
         var path = PathFor(name);
@@ -86,6 +108,7 @@ public sealed class FileJsonStore : IJsonStore
         }
         catch (JsonException)
         {
+            OnCorruptFile("pet-store.json");
             return null;
         }
     }
@@ -115,6 +138,7 @@ public sealed class FileJsonStore : IJsonStore
         }
         catch (JsonException)
         {
+            OnCorruptFile("care.json");
             return [];
         }
     }
@@ -133,6 +157,7 @@ public sealed class FileJsonStore : IJsonStore
         }
         catch (JsonException)
         {
+            OnCorruptFile("app-settings.json");
             return null;
         }
     }
@@ -151,6 +176,7 @@ public sealed class FileJsonStore : IJsonStore
         }
         catch (JsonException)
         {
+            OnCorruptFile("memory.json");
             return null;
         }
     }
@@ -169,6 +195,7 @@ public sealed class FileJsonStore : IJsonStore
         }
         catch (JsonException)
         {
+            OnCorruptFile("intimacy.json");
             return null;
         }
     }
@@ -195,6 +222,7 @@ public sealed class FileJsonStore : IJsonStore
         }
         catch (JsonException)
         {
+            OnCorruptFile("diary-meta.json");
             return null;
         }
     }
@@ -213,6 +241,7 @@ public sealed class FileJsonStore : IJsonStore
         }
         catch (JsonException)
         {
+            OnCorruptFile("personas.json");
             return null;
         }
     }

@@ -29,6 +29,8 @@ public sealed class ModelRequestScheduler : IAsyncDisposable
     public static readonly TimeSpan DefaultBackgroundTimeout = TimeSpan.FromSeconds(60);
     public const int DefaultConcurrency = 3;
     private static readonly TimeSpan ProviderCancellationDrainTimeout = TimeSpan.FromMilliseconds(250);
+    /// <summary>队列看门狗间隔：清理已过排队预算但无人取走的 P0（全忙场景）。</summary>
+    private static readonly TimeSpan QueueBudgetCheckInterval = TimeSpan.FromMilliseconds(250);
 
     private readonly IModelProvider _provider;
     private readonly int _concurrency;
@@ -71,6 +73,14 @@ public sealed class ModelRequestScheduler : IAsyncDisposable
         RequestPriority priority, ChatRequest request, CancellationToken ct = default)
     {
         var job = new Job(priority, request, ct);
+        // P0 排队预算从入队起算：worker 全忙时排队等待也受对话超时约束。
+        // 修复：原实现 deadline 在 worker 取到任务后才创建，P0 对话可无限排队
+        // （最坏 ~90s 无响应），与架构 §3.3「对话不能等」矛盾。
+        // 预算只约束排队：取到后执行/重试仍按每次尝试独立 deadline。
+        if (priority == RequestPriority.Conversation)
+        {
+            job.ConversationQueueBudgetDeadlineUtc = DateTime.UtcNow + _conversationTimeout;
+        }
         lock (_queueLock)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(ModelRequestScheduler));
@@ -82,17 +92,21 @@ public sealed class ModelRequestScheduler : IAsyncDisposable
     }
 
     /// <summary>
-    /// 有界并行 worker 池（worker 数 = concurrency）：每个 worker 独立 dequeue → 执行 → 再取，
-    /// 任何时刻在飞请求 ≤ concurrency；空闲 worker 总是取队列中最高优先级（P0 插队语义由队列保证，
-    /// 不被先入队的 P1/P2 阻塞）。修复：原单 worker 循环把请求全部串行化，并发闸形同虚设。
+    /// 有界并行 worker 池：worker 数 = concurrency + 1（最后一个为 P0 预留槽位）。
+    /// 每个 worker 独立 dequeue → 执行 → 再取；任何时刻在飞请求 ≤ concurrency。
+    /// 空闲 worker 总是取队列中最高优先级（P0 插队语义由队列保证）。
+    /// 修复：原实现 worker 数 = concurrency，全忙时 P0 对话必须排队等待；
+    /// 现在预留一个只服务 P0 的 worker，P0 到达即执行（P1/P2 永远占不满它）。
     /// </summary>
     private async Task RunLoopAsync(CancellationToken ct)
     {
-        var workers = new Task[Math.Max(1, _concurrency)];
-        for (var i = 0; i < workers.Length; i++)
+        var workerCount = Math.Max(1, _concurrency) + 1;
+        var workers = new Task[workerCount + 1];
+        for (var i = 0; i < workerCount; i++)
         {
-            workers[i] = WorkerAsync(ct);
+            workers[i] = WorkerAsync(ct, reservedForConversation: i == workerCount - 1);
         }
+        workers[workerCount] = QueueWatchdogAsync(ct);
         try
         {
             await Task.WhenAll(workers);
@@ -102,20 +116,76 @@ public sealed class ModelRequestScheduler : IAsyncDisposable
         }
     }
 
-    private async Task WorkerAsync(CancellationToken ct)
+    /// <summary>周期性清理已过排队预算的 P0（worker 全忙时无人取走它，必须主动失败）。
+    /// 队列头是最高优先级，过期的 P0 必然在队头（P0 永不被 P1/P2 压住）。</summary>
+    private async Task QueueWatchdogAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(QueueBudgetCheckInterval, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { break; }
+            ExpireOverdueQueuedConversations();
+        }
+    }
+
+    private void ExpireOverdueQueuedConversations()
+    {
+        List<Job> expired = [];
+        lock (_queueLock)
+        {
+            while (_queue.TryPeek(out var top, out _)
+                   && top.Priority == RequestPriority.Conversation
+                   && top.ConversationQueueBudgetDeadlineUtc is { } deadline
+                   && DateTime.UtcNow > deadline)
+            {
+                _queue.TryDequeue(out var job, out _);
+                if (job is not null) expired.Add(job);
+            }
+        }
+        foreach (var job in expired)
+        {
+            job.Completion.TrySetException(CreateTimeoutException(_conversationTimeout, null));
+        }
+    }
+
+    private async Task WorkerAsync(CancellationToken ct, bool reservedForConversation)
     {
         while (!ct.IsCancellationRequested)
         {
             Job? job;
             lock (_queueLock)
             {
-                _queue.TryDequeue(out job, out _);
+                if (reservedForConversation)
+                {
+                    // 预留 worker 只取 P0；队列头非 P0 时保持等待（不消费 P1/P2）。
+                    if (_queue.TryPeek(out var top, out _)
+                        && top.Priority == RequestPriority.Conversation)
+                    {
+                        _queue.TryDequeue(out job, out _);
+                    }
+                    else
+                    {
+                        job = null;
+                    }
+                }
+                else if (!_queue.TryDequeue(out job, out _))
+                {
+                    job = null;
+                }
             }
 
             if (job is null)
             {
                 try { await _wake.WaitAsync(ct); }
                 catch (OperationCanceledException) { break; }
+                continue;
+            }
+
+            // P0 排队预算：入队后等待超过对话超时 → 直接超时（不开始执行）。
+            if (job.ConversationQueueBudgetDeadlineUtc is { } budgetDeadline
+                && DateTime.UtcNow > budgetDeadline)
+            {
+                job.Completion.TrySetException(CreateTimeoutException(_conversationTimeout, null));
                 continue;
             }
 
@@ -139,7 +209,8 @@ public sealed class ModelRequestScheduler : IAsyncDisposable
         }
     }
 
-    /// <summary>按优先级策略执行：由调度器拥有截止时间；超时按对话策略重试。</summary>
+    /// <summary>按优先级策略执行：由调度器拥有截止时间；超时按对话策略重试。
+    /// 执行/重试每次尝试独立 deadline（预算只约束排队，见 WorkerAsync）。</summary>
     private async Task<ChatResult> ExecuteWithPolicyAsync(Job job)
     {
         var timeout = job.Priority switch
@@ -227,7 +298,7 @@ public sealed class ModelRequestScheduler : IAsyncDisposable
             linked.Token).ConfigureAwait(false);
     }
 
-    private static ProviderException CreateTimeoutException(TimeSpan timeout, Exception inner)
+    private static ProviderException CreateTimeoutException(TimeSpan timeout, Exception? inner)
         => new("timeout", $"模型请求超时（{timeout.TotalSeconds:0.#} 秒）", inner);
 
     public ValueTask DisposeAsync()
@@ -265,5 +336,9 @@ public sealed class ModelRequestScheduler : IAsyncDisposable
     {
         public TaskCompletionSource<ChatResult> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>P0 专属：排队预算截止时刻（入队时间 + conversationTimeout）。
+        /// worker 取到前超时 → 直接失败；非 P0 为 null（尽力语义）。</summary>
+        public DateTime? ConversationQueueBudgetDeadlineUtc;
     }
 }

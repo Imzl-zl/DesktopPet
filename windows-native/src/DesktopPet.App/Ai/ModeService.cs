@@ -18,7 +18,7 @@ public enum OutputMode
 public sealed record AiOutput(string Text, bool FromAnalysis);
 
 /// <summary>
-/// 输出模式服务：三模式切换（创建/销毁弹幕窗；AI 输出路由到弹幕/对话/丢弃）。
+/// 输出模式服务：四模式切换（创建/销毁弹幕窗；AI 输出路由到弹幕/对话/气泡/丢弃）。
 /// 模式切换 <300ms 且关闭后无窗口残留（窗口实例即建即毁）。
 /// </summary>
 public sealed class ModeService

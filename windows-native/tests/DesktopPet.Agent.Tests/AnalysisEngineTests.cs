@@ -241,6 +241,8 @@ public class AnalysisEngineTests
     [InlineData("又在写代码", ScreenEventKind.Coding)]
     [InlineData("打开浏览器看网页", ScreenEventKind.Browsing)]
     [InlineData("在看视频", ScreenEventKind.Video)]
+    [InlineData("在听歌", ScreenEventKind.Music)]
+    [InlineData("打开网易云听音乐", ScreenEventKind.Music)]
     [InlineData("在打游戏", ScreenEventKind.Gaming)]
     [InlineData("离开了一会儿", ScreenEventKind.Idle)]
     [InlineData("随便说说", ScreenEventKind.AppSwitch)]

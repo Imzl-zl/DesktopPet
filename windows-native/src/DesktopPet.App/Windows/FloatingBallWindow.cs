@@ -30,7 +30,7 @@ public sealed class FloatingBallWindow : Window
     private readonly Func<string> _readPresetPool;
     private readonly Func<SpriteSheet?> _selectedSprite;
     private readonly Action _openSettings;
-    private readonly Action<string>? _setOutputMode; // danmaku/chat/silent（AI 输出模式）
+    private readonly Action<string>? _setOutputMode; // bubble/danmaku/chat/silent（AI 输出模式）
     private Action? _openChat;                        // 打开对话窗（用户主动聊天入口；回调后置需可写）
     private I18nService _i18n;
     private readonly IAppLogger _logger;
@@ -466,10 +466,19 @@ public sealed class FloatingBallWindow : Window
         }
     }
 
-    /// <summary>右键：打开设置窗口。</summary>
+    /// <summary>右键：设置 / 退出（退出入口兜底——即使托盘异常也必须能退出应用）。</summary>
     private void ShowSettingsPlaceholder()
     {
-        _openSettings();
+        var menu = new System.Windows.Controls.ContextMenu();
+        var settingsItem = new System.Windows.Controls.MenuItem { Header = _i18n.T("Settings") };
+        settingsItem.Click += (_, _) => _openSettings();
+        var quitItem = new System.Windows.Controls.MenuItem { Header = _i18n.T("Quit") };
+        quitItem.Click += (_, _) => System.Windows.Application.Current.Shutdown();
+        menu.Items.Add(settingsItem);
+        menu.Items.Add(new System.Windows.Controls.Separator());
+        menu.Items.Add(quitItem);
+        menu.PlacementTarget = this; // 默认 Placement=MousePoint：在鼠标位置弹出
+        menu.IsOpen = true;
     }
 
     protected override void OnClosed(EventArgs e)

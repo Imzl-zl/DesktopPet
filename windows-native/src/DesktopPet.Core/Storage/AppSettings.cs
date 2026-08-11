@@ -183,7 +183,7 @@ public sealed class AppSettingsJsonConverter : JsonConverter<AppSettings>
             theme, bubbleOpacity, fontSize, fontFamily, showIdleChatter,
             idleChatterIntervalSeconds, animationEnabled, bobAnimation, petSizePercent,
             leftClickAction, quickBubbleDurationSeconds, quickBubblePresets,
-            idleChatterLines, hungryLines, roam, lang, ai, hotkeys,
+            idleChatterLines, hungryLines, roam, lang, ai, hotkeys!,
             danmakuFontSize, danmakuSpeedPercent, danmakuTrackCount);
     }
 

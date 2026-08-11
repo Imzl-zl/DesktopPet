@@ -91,6 +91,7 @@ public partial class App : Application
         _logger = new RollingFileLogger(paths.Logs, "app");
         _logger.Info("App", "startup");
         _store = new FileJsonStore(dataDir);
+        _store.FileCorrupted += OnStoreFileCorrupted;
 
         var store = isBench ? PetStoreModel.EmptyPetStore() : InitializeStore();
         _manager = new PetWindowManager(
@@ -226,6 +227,21 @@ public partial class App : Application
             else if (arg.StartsWith("--bench-idle")) BenchMode.RunIdle(_manager, ms);
         }
         _startupInProgress = false;
+    }
+
+    /// <summary>数据文件损坏（已隔离保留）：弹窗提示，避免用户无感知丢失数据。</summary>
+    private void OnStoreFileCorrupted(string quarantinePath)
+    {
+        var fileName = System.IO.Path.GetFileName(quarantinePath);
+        Dispatcher.BeginInvoke(() =>
+        {
+            var i18n = _i18n ?? new DesktopPet.Core.I18n.I18nService();
+            MessageBox.Show(
+                i18n.Format("Data file {0} was corrupted; the original was backed up.", fileName),
+                i18n.T("DesktopPet Data Recovery"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        });
     }
 
     /// <summary>
@@ -735,13 +751,15 @@ public partial class App : Application
         return IntPtr.Zero;
     }
 
-    /// <summary>Ctrl+Alt+M：弹幕 → 对话 → 静默 循环切换（立即生效 + 持久化）。</summary>
+    /// <summary>Ctrl+Alt+M：弹幕 → 对话 → 静默 → 气泡 循环切换（立即生效 + 持久化）。
+    /// 修复：原循环不含 bubble（默认模式），热键永远回不到默认输出模式。</summary>
     private void CycleOutputMode()
     {
         var next = _modeService?.Mode switch
         {
             OutputMode.Danmaku => "chat",
             OutputMode.Chat => "silent",
+            OutputMode.Silent => "bubble",
             _ => "danmaku",
         };
         ApplyOutputModeFromBall(next);

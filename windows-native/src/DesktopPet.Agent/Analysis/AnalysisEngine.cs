@@ -112,6 +112,9 @@ public sealed class AnalysisEngine
         if (text.Contains("视频") || text.Contains("电影") || text.Contains("追剧")
             || text.Contains("直播") || text.Contains("看剧"))
             return ScreenEventKind.Video;
+        if (text.Contains("听歌") || text.Contains("音乐") || text.Contains("网易云")
+            || text.Contains("酷狗") || text.Contains("Spotify") || text.Contains("music"))
+            return ScreenEventKind.Music;
         if (text.Contains("游戏") || text.Contains("打游戏") || text.Contains("对战")
             || text.Contains("副本"))
             return ScreenEventKind.Gaming;

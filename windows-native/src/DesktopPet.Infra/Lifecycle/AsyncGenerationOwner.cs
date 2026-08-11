@@ -21,6 +21,15 @@ public sealed class AsyncGenerationOwner<T> : IAsyncDisposable where T : class, 
         }
     }
 
+    /// <summary>当前代际的值（不增加租约；仅比较用，不保证存活——调用方不得持有）。</summary>
+    public T? Current
+    {
+        get
+        {
+            lock (_sync) return _current?.Value;
+        }
+    }
+
     /// <summary>
     /// Publishes <paramref name="next"/> immediately and returns a task that completes after the
     /// previous generation has drained and been disposed.
@@ -52,7 +61,13 @@ public sealed class AsyncGenerationOwner<T> : IAsyncDisposable where T : class, 
         return retired?.Disposed.Task ?? Task.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync() => await DisposeAsync(DefaultDisposeTimeout);
+
+    /// <summary>
+    /// 带超时的释放：租约泄漏（调用方未释放）时强制回收底层资源，防退出/恢复出厂挂死。
+    /// 修复：原实现无限等待全部租约释放，任何泄漏路径都会让 DisposeAsync 永久挂起。
+    /// </summary>
+    public async ValueTask DisposeAsync(TimeSpan timeout)
     {
         Task[] pending;
         Entry? disposeNow = null;
@@ -73,8 +88,38 @@ public sealed class AsyncGenerationOwner<T> : IAsyncDisposable where T : class, 
         }
 
         if (disposeNow is not null) _ = DisposeEntryAsync(disposeNow);
-        if (pending.Length > 0) await Task.WhenAll(pending).ConfigureAwait(false);
+        if (pending.Length == 0) return;
+
+        var all = Task.WhenAll(pending);
+        var completed = await Task.WhenAny(
+            all,
+            Task.Delay(timeout > TimeSpan.Zero ? timeout : DefaultDisposeTimeout)).ConfigureAwait(false);
+        if (completed == all)
+        {
+            await all.ConfigureAwait(false);
+            return;
+        }
+
+        // 租约泄漏：不再等待调用方，强制释放底层资源（泄漏租约后续 Release 幂等无害——
+        // DisposeStarted 已置位，不会二次 Dispose）。
+        List<Entry> forced = [];
+        lock (_sync)
+        {
+            foreach (var entry in _entries)
+            {
+                if (!entry.DisposeStarted)
+                {
+                    entry.DisposeStarted = true;
+                    forced.Add(entry);
+                }
+            }
+        }
+        foreach (var entry in forced) _ = DisposeEntryAsync(entry);
+        await Task.WhenAll(
+            pending.Concat(forced.Select(entry => entry.Disposed.Task))).ConfigureAwait(false);
     }
+
+    private static readonly TimeSpan DefaultDisposeTimeout = TimeSpan.FromSeconds(30);
 
     private void Release(Entry entry)
     {

@@ -42,9 +42,11 @@ public sealed class PetWindowManager
     private DesktopPet.App.Settings.SettingsWindow? _settingsWindow;
     private DesktopPet.Core.I18n.I18nService? _i18n;
 
-    /// <summary>Phase 2 内置预设池（Phase 4 设置页可编辑，对齐 ap_quick_bubbles）。</summary>
+    /// <summary>内置预设池（ApplySettings 全量下发覆盖；默认值单一真值 = AppSettings）。</summary>
     public string PresetPoolJson { get; set; } =
-        "[\"辛苦了~\",\"摸摸头\",\"加油！\",\"休息一下吧\",\"盯——\",\"(*´∀`*)\"]";
+        System.Text.Json.JsonSerializer.Serialize(
+            DesktopPet.Core.Storage.AppSettings.Defaults(
+                DesktopPet.Core.I18n.I18nService.Detect()).QuickBubblePresets);
 
     public bool GloballyVisible => _globallyVisible;
     public bool IsSettingsForeground => _settingsForeground;
@@ -326,7 +328,7 @@ public sealed class PetWindowManager
     public void SetFactoryResetHandler(Func<CancellationToken, Task<FactoryResetResult>>? handler)
         => _factoryReset = handler;
 
-    /// <summary>注入浮球 AI 输出模式切换回调（danmaku/chat/silent）。</summary>
+    /// <summary>注入浮球 AI 输出模式切换回调（bubble/danmaku/chat/silent）。</summary>
     public void SetOutputModeHandler(Action<string>? handler) => _setOutputMode = handler;
 
     /// <summary>对话窗打开回调（浮球“💬 聊天”按钮）。浮球可能已创建（回调后置），需同步更新。</summary>

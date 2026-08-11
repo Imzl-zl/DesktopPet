@@ -43,6 +43,10 @@ public sealed class TrayController : IDisposable
         menu.Items.Add(quitItem);
         _menu = menu;
         _icon.ContextMenu = menu;
+        // H.NotifyIcon 2.1.4：代码方式创建（非 XAML 视觉树）不会自动创建托盘图标——
+        // Shell_NotifyIcon 只由 ForceCreate 触发（Loaded 事件只在加入视觉树后发生）。
+        // 缺失时托盘入口（设置/显示隐藏/退出）整体失效。
+        _icon.ForceCreate(false);
         WpfLocalizer.ApplyNew(menu, i18n ?? new I18nService());
 
         manager.GlobalVisibilityChanged += OnGlobalVisibilityChanged;

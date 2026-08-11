@@ -88,12 +88,13 @@ public class SchedulerTests
         var background = Enqueue(s, RequestPriority.Background, "bg");
         var conversation = Enqueue(s, RequestPriority.Conversation, "conv");
         await Task.Delay(50);
-        Assert.Empty(provider.ExecutionOrder);
+        // P0 预留槽位：对话不排队，立即执行（不等 interactive 释放）
+        Assert.Equal(["p:conv"], provider.ExecutionOrder);
 
-        gate.SetResult(); // 释放闸：下一个执行的必须是 P0（conv），不是 P2（bg）
+        gate.SetResult(); // 释放闸：interactive 完成，bg 最后
 
         await Task.WhenAll(interactive, conversation, background);
-        Assert.Equal(["p:interactive", "p:conv", "p:bg"], provider.ExecutionOrder);
+        Assert.Equal(["p:conv", "p:interactive", "p:bg"], provider.ExecutionOrder);
     }
 
     [Fact]
@@ -411,5 +412,73 @@ public class SchedulerTests
         await Task.WhenAll(p1, p2a, p2b, p0);
         Assert.Equal(4, provider.ExecutionOrder.Count);
         Assert.Equal("p:p0", provider.ExecutionOrder[0]); // P0 最先完成（未被 P1/P2 阻塞）
+    }
+
+    [Fact]
+    public async Task Scheduler_Conversation_StartsImmediatelyWhenAllWorkersBusy()
+    {
+        // 修复：P0 预留槽位——全部 worker 被 P1/P2 占满时，P0 对话仍必须立即开始执行
+        // （架构文档 §3.3「对话发出即占并发闸」；原实现 P0 排队等待，最坏 ~90s 无响应）。
+        var provider = new FakeProvider();
+        var gateP1 = new TaskCompletionSource();
+        var gateP2 = new TaskCompletionSource();
+        var p0Started = new TaskCompletionSource();
+        provider.Handler = async (req, ct) =>
+        {
+            if (req.SystemPrompt == "p:p1") { await gateP1.Task.WaitAsync(ct); return new ChatResult("p1", 1); }
+            if (req.SystemPrompt == "p:p2a") { await gateP2.Task.WaitAsync(ct); return new ChatResult("p2a", 1); }
+            if (req.SystemPrompt == "p:p0") { p0Started.TrySetResult(); return new ChatResult("p0", 1); }
+            return new ChatResult("ok", 1);
+        };
+        await using var s = new ModelRequestScheduler(provider, concurrency: 2);
+        var p1 = Enqueue(s, RequestPriority.Interactive, "p1");
+        await Task.Delay(50); // p1 占住 worker1
+        var p2a = Enqueue(s, RequestPriority.Background, "p2a");
+        var p2b = Enqueue(s, RequestPriority.Background, "p2b");
+        await Task.Delay(100); // worker2 取走 p2a 挂起；p2b 排队
+        var p0 = Enqueue(s, RequestPriority.Conversation, "p0");
+        // P0 不应排队：预留槽位必须让它立即开始（不等 p1/p2a 释放）
+        await p0Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        gateP1.SetResult();
+        gateP2.SetResult();
+        await Task.WhenAll(p1, p2a, p2b, p0);
+        Assert.Equal("p:p0", provider.ExecutionOrder[0]);
+    }
+
+    [Fact]
+    public async Task Scheduler_Conversation_QueueWaitCountsTowardTimeout()
+    {
+        // 修复：P0 排队预算从入队起算——所有 worker（含 P0 预留槽位）都忙时，
+        // 排队的 P0 在预算耗尽后必须失败（原实现排队可无限等）。
+        var provider = new FakeProvider();
+        var gateP2a = new TaskCompletionSource();
+        var gateP2b = new TaskCompletionSource();
+        var gateConv = new TaskCompletionSource();
+        provider.Handler = async (req, ct) =>
+        {
+            if (req.SystemPrompt == "p:p2a") { await gateP2a.Task.WaitAsync(ct); return new ChatResult("p2a", 1); }
+            if (req.SystemPrompt == "p:p2b") { await gateP2b.Task.WaitAsync(ct); return new ChatResult("p2b", 1); }
+            if (req.SystemPrompt == "p:slow-conv") { await gateConv.Task.WaitAsync(ct); return new ChatResult("slow", 1); }
+            return new ChatResult("ok", 1);
+        };
+        await using var s = new ModelRequestScheduler(
+            provider,
+            concurrency: 2,
+            conversationTimeout: TimeSpan.FromMilliseconds(300));
+        var p2a = Enqueue(s, RequestPriority.Background, "p2a");
+        await Task.Delay(50); // 占普通 worker1
+        var p2b = Enqueue(s, RequestPriority.Background, "p2b");
+        await Task.Delay(50); // 占普通 worker2
+        var slowConv = Enqueue(s, RequestPriority.Conversation, "slow-conv");
+        await Task.Delay(50); // 占 P0 预留 worker
+        var p0 = Enqueue(s, RequestPriority.Conversation, "p0"); // 全部 worker 忙 → 排队
+        // 排队等待（300ms 预算耗尽）→ 超时失败，而不是等 slow-conv 释放后执行
+        var ex = await Assert.ThrowsAsync<ProviderException>(async () => await p0.WaitAsync(TimeSpan.FromSeconds(3)));
+        Assert.Equal("timeout", ex.Code);
+        Assert.DoesNotContain("p:p0", provider.ExecutionOrder); // 从未开始执行
+        gateConv.SetResult();
+        gateP2a.SetResult();
+        gateP2b.SetResult();
+        await Task.WhenAll(p2a, p2b, slowConv);
     }
 }

@@ -20,7 +20,7 @@ namespace DesktopPet.Core.Storage;
 public sealed record AiSettings(
     bool Enabled,               // AI 总开关：关 = 纯桌宠（无截屏/无网络/无后台进程）
     bool ScreenAnalysis,        // 截屏分析开关（默认关，隐私优先）
-    string OutputMode,          // danmaku | chat | silent（模式只决定 AI 主动输出形式）
+    string OutputMode,          // bubble | danmaku | chat | silent（模式只决定 AI 主动输出形式）
     bool ScreenContextEnabled,  // 对话携带屏幕上下文（默认关，隐私）
     string ProviderId,          // 选中的模型 provider id（空 = 未配置）
     bool MemoryEnabled,         // 记忆开关（默认开；关 = 不记录不注入，画像文件不落盘）

@@ -616,7 +616,6 @@
   "（出错了）": "(Đã xảy ra lỗi.)",
   "（Agent 进程启动失败）": "(Không thể khởi động tiến trình Agent.)",
   "（看到你的屏幕有变化~）": "(Mình thấy màn hình của bạn vừa thay đổi~)",
-  "今天的总结出炉啦~（日记已保存）": "Bản tổng kết hôm nay đã xong~ (Nhật ký đã được lưu.)",
   "快捷键已应用": "Đã áp dụng phím tắt",
   "设置保存失败，运行时快捷键已恢复": "Không thể lưu cài đặt. Các phím tắt đang chạy đã được khôi phục.",
   "设置保存失败，运行时快捷键未能完整恢复": "Không thể lưu cài đặt và không thể khôi phục đầy đủ các phím tắt đang chạy.",
@@ -747,5 +746,8 @@
   "开机自启设置失败：{0}": "Khong the dat khoi dong cung Windows: {0}",
   "屏幕事件评论": "Binh luan su kien man hinh",
   "此页为全局漫游设置，应用于所有宠物（导入宠物自带的独立漫游配置以全局为准）。": "Day la cai dat di chuyen toan cuc, ap dung cho tat ca thu cung (cau hinh rieng cua thu cung duoc nhap se bi ghi de boi cai dat toan cuc).",
-  "宠物在桌面上的活动方式（应用于所有宠物）": "Cach thu cung di chuyen tren man hinh (ap dung cho tat ca)"
+  "宠物在桌面上的活动方式（应用于所有宠物）": "Cach thu cung di chuyen tren man hinh (ap dung cho tat ca)",
+  "总结出炉啦~（日记已保存）": "Bản tổng kết đã xong~ (Nhật ký đã được lưu.)",
+  "Data file {0} was corrupted; the original was backed up.": "Tệp dữ liệu {0} bị hỏng; bản gốc đã được sao lưu. Ứng dụng sẽ tiếp tục với cài đặt mặc định; bạn có thể khôi phục bản sao lưu sau khi đóng ứng dụng nếu cần.",
+  "DesktopPet Data Recovery": "DesktopPet khôi phục dữ liệu"
 }

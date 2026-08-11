@@ -67,8 +67,8 @@ public class InteractionTests
     {
         var e = New();
         var now = new DateTime(2026, 8, 5, 12, 0, 0); // 中午（无问候窗口，隔离冷却断言）
-        var start = now.AddHours(-1);
-        var events = new[] { Ev(ScreenEventKind.Coding, start), Ev(ScreenEventKind.Coding, start.AddMinutes(30)) };
+        // 最新事件是活动类且 ≥60min 前 = 期间无切走，连续活动成立
+        var events = new[] { Ev(ScreenEventKind.Coding, now.AddMinutes(-90)), Ev(ScreenEventKind.Coding, now.AddMinutes(-65)) };
         Assert.True(e.TryNextTrigger(now, events, out var t));
         Assert.Equal("sitting", t!.Reason);
         // 触发后冷却期内不重复
@@ -81,6 +81,7 @@ public class InteractionTests
         var e = New();
         var start = new DateTime(2026, 8, 5, 11, 30, 0); // 中午（无问候窗口，隔离事件判定）
         var events = new[] { Ev(ScreenEventKind.Coding, start) };
+        // 最新事件仅 30min 前，未到 60min 阈值
         Assert.False(e.TryNextTrigger(start.AddMinutes(30), events, out _));
     }
 
@@ -89,9 +90,38 @@ public class InteractionTests
     {
         var e = New();
         var start = Morning.AddHours(-2);
-        var events = new[] { Ev(ScreenEventKind.Coding, start), Ev(ScreenEventKind.Coding, start.AddHours(1)) };
+        // 最新事件是 Coding 且 ≥2h 前（期间无切走）
+        var events = new[] { Ev(ScreenEventKind.Coding, start.AddHours(-2)), Ev(ScreenEventKind.Coding, start) };
         Assert.True(e.TryNextTrigger(Morning, events, out var t));
         Assert.Equal("coding", t!.Reason);
+    }
+
+    [Fact]
+    public void NoCodingComment_WhenSwitchedAwayAfterCoding()
+    {
+        // 修复回归：2h 前编码过但之后切到浏览器（最新事件 = Browsing）→ 不得误报「连续编码两小时」
+        var e = New();
+        var now = new DateTime(2026, 8, 5, 12, 0, 0);
+        var events = new[]
+        {
+            Ev(ScreenEventKind.Coding, now.AddHours(-3)),
+            Ev(ScreenEventKind.Browsing, now.AddMinutes(-30)), // 最新事件非 Coding
+        };
+        Assert.False(e.TryNextTrigger(now, events, out _));
+    }
+
+    [Fact]
+    public void NoTrigger_WhenLatestEventIsIdle()
+    {
+        // 修复回归：Idle 结尾 = 模型判定已离开/空闲，不得触发连续活动评论
+        var e = New();
+        var now = new DateTime(2026, 8, 5, 12, 0, 0);
+        var events = new[]
+        {
+            Ev(ScreenEventKind.Coding, now.AddHours(-3)),
+            Ev(ScreenEventKind.Idle, now.AddMinutes(-10)),
+        };
+        Assert.False(e.TryNextTrigger(now, events, out _));
     }
 
     [Fact]

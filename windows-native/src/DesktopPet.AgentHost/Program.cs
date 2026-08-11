@@ -62,10 +62,22 @@ internal static class Program
 
         var capture = new SwitchableScreenCaptureSource(
             () => CreateCaptureSource(dispatcher),
-            source => dispatcher.Invoke(() =>
+            source =>
             {
-                if (source is IDisposable disposable) disposable.Dispose();
-            }));
+                // 释放必须回到创建它的 STA 线程（WinRT COM）；InvokeShutdown 后调用会抛异常，
+                // 双保险：任何路径释放失败只记日志，不炸退出流程。
+                try
+                {
+                    dispatcher.Invoke(() =>
+                    {
+                        if (source is IDisposable disposable) disposable.Dispose();
+                    });
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or TaskCanceledException)
+                {
+                    Log($"Capture source dispose skipped (dispatcher shutting down): {ex.Message}");
+                }
+            });
         Log("GraphicsCapture deferred until ScreenAnalysis is enabled");
 
         var service = new AgentService(
@@ -97,6 +109,11 @@ internal static class Program
                 try { await parentExitTask; }
                 catch (OperationCanceledException) { }
                 catch (Exception ex) { Log($"Parent process monitor failed: {ex.Message}"); }
+                // 修复：必须先释放 capture 源再关消息泵——capture 释放经 dispatcher.Invoke
+                // （STA 线程释放 WinRT COM），InvokeShutdown 后调用必然抛异常，
+                // 导致 service.DisposeAsync 的 capture.Dispose 失败 + 每次正常退出走 FATAL 路径。
+                try { capture.Dispose(); }
+                catch (Exception ex) { Log($"Capture dispose failed: {ex.Message}"); }
                 // 任何路径都必须关掉消息泵：否则 Dispatcher.Run 永不返回 →
                 // service.DisposeAsync 不执行，Agent 进程静默挂死（看门狗感知不到）
                 dispatcher.InvokeShutdown();

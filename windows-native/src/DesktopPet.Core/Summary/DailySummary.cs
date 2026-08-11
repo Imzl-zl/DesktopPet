@@ -4,7 +4,7 @@ namespace DesktopPet.Core.Summary;
 public sealed record DailySummaryData(
     DateOnly Day,
     string UserHighlights,     // 用户当天消息要点（MemoryProfileExtractor.Compress 输出）
-    string ScreenHighlights,   // 当天屏幕事件要点（ScreenContextFormatter 输出）
+    string ScreenHighlights,   // 当天屏幕活动回顾（ActivitySummaryFormatter 输出）
     string Mood,               // 当天心情（CareState 推导）
     string PetName);           // 宠物名（写入日记口吻）
 

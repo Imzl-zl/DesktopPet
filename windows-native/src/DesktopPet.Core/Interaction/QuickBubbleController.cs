@@ -69,21 +69,13 @@ public sealed class QuickBubbleController
     }
 }
 
-/// <summary>时长归一化：1:1 移植 normalizeQuickBubbleDurationSeconds/readQuickBubbleDurationMs。</summary>
+/// <summary>时长归一化：1:1 移植 normalizeQuickBubbleDurationSeconds（生产走 AppSettings.QuickBubbleDurationSeconds）。</summary>
 public static class QuickBubbleDuration
 {
-    public const string DurationKey = "ap_quick_bubble_duration";
     public const double DefaultDurationSeconds = 4;
 
     public static double NormalizeSeconds(double? value)
         => value is { } seconds && double.IsFinite(seconds) && seconds >= 1
             ? seconds
             : DefaultDurationSeconds;
-
-    public static long ReadDurationMs(Func<string, string?> storage)
-    {
-        var raw = storage(DurationKey);
-        double? value = double.TryParse(raw, out var parsed) ? parsed : null;
-        return (long)Math.Round(NormalizeSeconds(value) * 1000);
-    }
 }

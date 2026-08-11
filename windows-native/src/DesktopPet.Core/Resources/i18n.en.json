@@ -257,7 +257,6 @@
   "（出错了）": "(Something went wrong.)",
   "（Agent 进程启动失败）": "(The Agent process could not be started.)",
   "（看到你的屏幕有变化~）": "(I noticed something changed on your screen~)",
-  "今天的总结出炉啦~（日记已保存）": "Today's summary is ready~ (The diary has been saved.)",
   "快捷键已应用": "Hotkeys applied",
   "设置保存失败，运行时快捷键已恢复": "The settings could not be saved. The runtime hotkeys were restored.",
   "设置保存失败，运行时快捷键未能完整恢复": "The settings could not be saved, and the runtime hotkeys could not be fully restored.",
@@ -747,5 +746,8 @@
   "开机自启设置失败：{0}": "Failed to set launch-at-startup: {0}",
   "屏幕事件评论": "Screen-event comments",
   "此页为全局漫游设置，应用于所有宠物（导入宠物自带的独立漫游配置以全局为准）。": "These are global roam settings applied to all pets (a pet's own imported roam config is overridden by the global one).",
-  "宠物在桌面上的活动方式（应用于所有宠物）": "How pets move around the desktop (applies to all pets)"
+  "宠物在桌面上的活动方式（应用于所有宠物）": "How pets move around the desktop (applies to all pets)",
+  "总结出炉啦~（日记已保存）": "Summary is ready~ (The diary has been saved.)",
+  "Data file {0} was corrupted; the original was backed up.": "Data file {0} was corrupted; the original was backed up. The app will continue with defaults; you can restore the backup after closing the app if needed.",
+  "DesktopPet Data Recovery": "DesktopPet Data Recovery"
 }

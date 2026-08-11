@@ -129,14 +129,33 @@ public class DanmakuEngineTests
     [Fact]
     public void Enqueue_RespectsTrackCount()
     {
+        // 3 轨道：连发 3 条各占一轨；第 4 条全部轨道尾部仍贴近入场点 → 限流丢弃
         var engine = new DanmakuEngine(width: 1000, trackCount: 3);
         var tracks = new HashSet<int>();
-        for (var i = 0; i < 6; i++)
+        for (var i = 0; i < 3; i++)
         {
             var item = engine.Enqueue($"t{i}", DateTime.Now);
             Assert.NotNull(item);
             tracks.Add(item!.Track);
         }
         Assert.True(tracks.SetEquals(new[] { 0, 1, 2 })); // 只用 3 轨道
+        Assert.Null(engine.Enqueue("t3", DateTime.Now)); // 全轨道被占 → 限流
+    }
+
+    [Fact]
+    public void Enqueue_TrackReuse_AfterTailMovesAway()
+    {
+        // 修复回归：尾部条目走远（距入场点 ≥ minGap）后，轨道可再次使用（宽屏下旧实现
+        // 尾部恒为入场点且限流永不触发 → 全部弹幕挤轨道 0）。
+        var engine = new DanmakuEngine(width: 1000, trackCount: 2, minSpeed: 200, maxSpeed: 200, minGap: 100);
+        var a = engine.Enqueue("a", DateTime.Now)!;
+        var b = engine.Enqueue("b", DateTime.Now)!;
+        Assert.NotEqual(a.Track, b.Track);
+        Assert.Null(engine.Enqueue("c", DateTime.Now)); // 两条尾部都在入场点附近 → 限流
+
+        engine.Tick(2.0); // a/b 前进 400px：-300 → 100 ≥ -200（entry + minGap）→ 轨道可复用
+        var c = engine.Enqueue("c", DateTime.Now);
+        Assert.NotNull(c);
+        Assert.Contains(c!.Track, new[] { a.Track, b.Track }); // 回到已走远的轨道
     }
 }

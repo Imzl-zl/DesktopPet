@@ -21,8 +21,9 @@
 - Windows 重要项 I1-I17 的实现子任务 1-4 已完成：726-key 英/简中/繁中/越南语同集 catalog 与持久化后发布的实时刷新；`%APPDATA%/DesktopPet/logs` 滚动脱敏/ZIP 导出；CPU/WorkingSet 诊断；Credential Manager 前缀恢复出厂；多屏/DPI 全屏主动输出抑制；I15 原子文件/调用方补偿闭环。
 
 ## 进行中 / 未完成
-- `.tasks/windows-review-fix`（2026-08-07 闭环）：审查落盘 + 官方文档查证 + 四批次修复全部完成并提交（4 commits：App 行为风险 / Infra-Agent / Core 结构 / 文档对齐）；544 tests 全过，x64 build 0 warn/error。UI 线程类修复需真实机器 smoke（并入 windows-important-hardening child 5 矩阵）。
-- `.tasks/windows-important-hardening` child 5 待执行：真实 Windows 验收（托盘可见性/GraphicsCapture 分辨率变化/弹幕防追尾视觉/GPU/Win32/Credential Manager/日志导出/恢复出厂重启/多屏 mixed-DPI）。`windows-review-fix2`（2026-08-11）审查发现修复已闭环，真机 smoke 待补。
+- **生图模块剩余（契约已冻结，纯 UI 工作，见 docs/windows-imagegen-design.md §9）**：阶段 4c 设置页连接列表编辑器（多连接管理 + 总结图模型下拉 `SummaryImageModelRef`）；阶段 5 生图页（MVVM + 历史画廊落盘）。
+- **已知 flaky**：SchedulerTests 两个并发时序测试（`Scheduler_RunsConcurrently_NotSerialized` / `Scheduler_Deadline_CompletesWhenProviderIgnoresCancellation`）全量并行时偶发失败，单跑恒过（既有问题，非生图模块引入，待排查）。
+- `.tasks/windows-important-hardening` child 5 待执行：真实 Windows 验收（托盘可见性/GraphicsCapture 分辨率变化/弹幕防追尾视觉/GPU/Win32/Credential Manager/日志导出/恢复出厂重启/多屏 mixed-DPI）。
 - Roadmap 后续项：v0.2 桌面感知深化；Provider 默认范围、自动更新方案等产品决策见 `docs/windows-architecture.md` §10。
 
 ## 关键决策（仍有效）

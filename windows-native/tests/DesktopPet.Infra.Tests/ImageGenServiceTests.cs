@@ -202,6 +202,115 @@ public class ImageGenServiceTests
         Assert.Contains(ImageScale.S2K, caps.Scales);
     }
 
+    // ── 多模型容错（总结图，windows-imagegen-design.md §8）──
+
+    [Fact]
+    public async Task GenerateWithFallback_PreferredSucceeds_SingleRequest()
+    {
+        var handler = new RecordingHandler((_, __) => OkB64());
+        var service = Service(handler);
+        var connection = new ImageConnection("relay", "relay", "openai",
+            "https://api.test.local/v1", "cred:test", ["gpt-image-2", "grok-imagine-image"]);
+
+        var output = await service.GenerateWithFallbackAsync(
+            connection, "gpt-image-2", new ImageGenSpec("cat"), CancellationToken.None);
+
+        Assert.Equal(FakePng(), output.Bytes);
+        Assert.Single(handler.RequestBodies);
+        var body = JsonSerializer.Deserialize<JsonElement>(handler.RequestBodies[0]);
+        Assert.Equal("gpt-image-2", body.GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public async Task GenerateWithFallback_PreferredFails_SwitchesToNextModel()
+    {
+        var handler = new RecordingHandler((body, __) =>
+        {
+            var parsed = JsonSerializer.Deserialize<JsonElement>(body);
+            if (parsed.GetProperty("model").GetString() == "gpt-image-2")
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable); // server → 可换模型
+            return OkB64();
+        });
+        var service = Service(handler);
+        var connection = new ImageConnection("relay", "relay", "openai",
+            "https://api.test.local/v1", "cred:test", ["gpt-image-2", "grok-imagine-image"]);
+
+        var output = await service.GenerateWithFallbackAsync(
+            connection, "gpt-image-2", new ImageGenSpec("cat"), CancellationToken.None);
+
+        Assert.Equal(FakePng(), output.Bytes);
+        Assert.Equal(2, handler.RequestBodies.Count);
+        var second = JsonSerializer.Deserialize<JsonElement>(handler.RequestBodies[1]);
+        Assert.Equal("grok-imagine-image", second.GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public async Task GenerateWithFallback_AllFail_ThrowsLast()
+    {
+        var handler = new RecordingHandler((_, __) =>
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        var service = Service(handler);
+        var connection = new ImageConnection("relay", "relay", "openai",
+            "https://api.test.local/v1", "cred:test", ["gpt-image-2", "grok-imagine-image"]);
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() =>
+            service.GenerateWithFallbackAsync(connection, "gpt-image-2",
+                new ImageGenSpec("cat"), CancellationToken.None));
+
+        Assert.Equal("server", ex.Code);
+        Assert.Equal(2, handler.RequestBodies.Count);
+    }
+
+    [Fact]
+    public async Task GenerateWithFallback_AuthError_DoesNotSwitchModels()
+    {
+        // 凭据问题换模型无意义：auth 直接抛，不浪费请求
+        var handler = new RecordingHandler((_, __) =>
+            new HttpResponseMessage(HttpStatusCode.Unauthorized));
+        var service = Service(handler);
+        var connection = new ImageConnection("relay", "relay", "openai",
+            "https://api.test.local/v1", "cred:test", ["gpt-image-2", "grok-imagine-image"]);
+
+        var ex = await Assert.ThrowsAsync<ProviderException>(() =>
+            service.GenerateWithFallbackAsync(connection, "gpt-image-2",
+                new ImageGenSpec("cat"), CancellationToken.None));
+
+        Assert.Equal("auth", ex.Code);
+        Assert.Single(handler.RequestBodies);
+    }
+
+    [Fact]
+    public async Task GenerateWithFallback_Transparent_AppliesStrategyPerModel()
+    {
+        // 透明 + 容错组合：换模型时透明编排照常生效
+        var greenPng = MakeGreenPng(8, 8);
+        var handler = new RecordingHandler((body, __) =>
+        {
+            var parsed = JsonSerializer.Deserialize<JsonElement>(body);
+            if (parsed.GetProperty("model").GetString() == "gpt-image-2")
+                return new HttpResponseMessage(HttpStatusCode.GatewayTimeout); // timeout → 可换
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(
+                    new { data = new[] { new { b64_json = Convert.ToBase64String(greenPng) } } })),
+            };
+        });
+        var service = Service(handler);
+        var connection = new ImageConnection("relay", "relay", "openai",
+            "https://api.test.local/v1", "cred:test", ["gpt-image-2", "grok-imagine-image"]);
+
+        var output = await service.GenerateWithFallbackAsync(connection, "gpt-image-2",
+            new ImageGenSpec("cat", Transparent: true), CancellationToken.None);
+
+        Assert.Equal("image/png", output.MimeType);
+        Assert.Equal(2, handler.RequestBodies.Count);
+        // 第二个模型走了绿幕：prompt 增强 + 输出键控
+        var second = JsonSerializer.Deserialize<JsonElement>(handler.RequestBodies[1]);
+        Assert.Contains("CHROMAKEY", second.GetProperty("prompt").GetString());
+        using var result = Image.Load<Rgba32>(output.Bytes);
+        Assert.Equal(0, result[4, 4].A);
+    }
+
     private static byte[] MakeGreenPng(int w, int h)
     {
         using var image = new Image<Rgba32>(w, h);

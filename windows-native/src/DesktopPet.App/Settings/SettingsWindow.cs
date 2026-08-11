@@ -17,6 +17,7 @@ using DesktopPet.Core.Tts;
 using DesktopPet.Core.Care;
 using DesktopPet.Core.Hotkeys;
 using DesktopPet.Core.I18n;
+using DesktopPet.Core.ImageGen;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Rendering;
 using DesktopPet.Core.Roaming;
@@ -3243,7 +3244,7 @@ public sealed class SettingsWindow : Window
                 if (!string.IsNullOrEmpty(cfg?.ApiKeyRef)
                     && !string.Equals(cfg.ApiKeyRef, keyRef, StringComparison.Ordinal)
                     && nextProviders.Models.All(model => model.ApiKeyRef != cfg.ApiKeyRef)
-                    && nextProviders.Image?.ApiKeyRef != cfg.ApiKeyRef)
+                    && nextProviders.Image?.Connections.All(c => c.ApiKeyRef != cfg.ApiKeyRef) != false)
                 {
                     try { creds.Delete(cfg.ApiKeyRef); }
                     catch (CredentialStoreException)
@@ -3322,11 +3323,12 @@ public sealed class SettingsWindow : Window
     {
         if (_ai is null) return;
         var providers = _ai.Providers;
-        var cfg = providers.Image;
+        // 编辑第一个连接（单连接 UI；多连接列表编辑器随生图页阶段 5 提供）
+        var cfg = providers.Image?.Connections.FirstOrDefault();
         var creds = new Infra.Providers.WindowsCredentialStore();
 
         var baseBox = new TextBox { Text = cfg?.BaseUrl ?? "", FontSize = 12, Height = 30 };
-        var modelBox = new TextBox { Text = cfg?.ModelName ?? "", FontSize = 12, Height = 30 };
+        var modelBox = new TextBox { Text = cfg?.Models.FirstOrDefault() ?? "", FontSize = 12, Height = 30 };
         var keyBox = new PasswordBox { FontSize = 12, Height = 30 };
 
         var form = new StackPanel { Margin = new Thickness(20, 16, 20, 0) };
@@ -3389,17 +3391,35 @@ public sealed class SettingsWindow : Window
                     return;
                 }
                 var secret = string.IsNullOrEmpty(keyBox.Password) ? oldSecret : keyBox.Password;
-                var keyRef = secret is null ? "" : ProviderCredentialRefs.Image;
+                // 连接 id 稳定（"main"）：凭据引用随连接走，避免每次保存换引用残留旧凭据
+                var connectionId = cfg?.Id ?? "main";
+                var keyRef = secret is null ? "" : ProviderCredentialRefs.ForImage(connectionId);
                 _ = ProviderEndpointPolicy.BuildRequestUri(baseUrl, "images/generations", secret is not null);
                 var previousTargetSecret = keyRef.Length == 0 ? null : creds.Get(keyRef);
                 var credentialChanged = keyRef.Length > 0
                     && !string.Equals(previousTargetSecret, secret, StringComparison.Ordinal);
                 if (credentialChanged) creds.Set(keyRef, secret!);
 
+                // 保留其余连接，替换/追加第一个
+                var connections = providers.Image?.Connections.ToList() ?? [];
+                var updated = new ImageConnection(
+                    connectionId,
+                    cfg?.Name ?? "生图连接",
+                    cfg?.Family ?? ImageModelCatalog.FamilyOpenAi,
+                    baseUrl,
+                    keyRef,
+                    [model]);
+                if (connections.Count == 0) connections.Add(updated);
+                else connections[0] = updated;
+
                 var nextProviders = new Core.Scheduling.ProvidersFileModel
                 {
                     Models = providers.Models.ToList(),
-                    Image = new Core.Scheduling.ImageGenConfig(baseUrl, keyRef, model),
+                    Image = new ImageConnectionsConfig
+                    {
+                        Connections = connections,
+                        SummaryModelRef = providers.Image?.SummaryModelRef ?? "",
+                    },
                 };
                 try
                 {

@@ -39,7 +39,8 @@ public sealed record AiSettings(
     int QuietHoursStart = 23,   // 免打扰开始小时（0-23，默认 23）
     int QuietHoursEnd = 5,      // 免打扰结束小时（0-23，默认 5；跨午夜：23→5）
     string TtsProviderId = "sapi", // 朗读引擎（windows-tts-design.md §3）：sapi | onecore | openai；未知归一化回 sapi
-    int TtsSpeedPercent = 100)  // 朗读语速 50-200%（默认 100）
+    int TtsSpeedPercent = 100,  // 朗读语速 50-200%（默认 100）
+    string SummaryImageModelRef = "") // 总结图模型引用 "{connectionId}/{modelId}"（windows-imagegen-design.md §8）；空 = 自动首连接首模型
 {
     public const string FrequencyLow = "low";
     public const string FrequencyMedium = "medium";
@@ -238,6 +239,7 @@ public sealed class AiSettingsJsonConverter : JsonConverter<AiSettings>
         v.QuietHoursEnd,
         v.TtsProviderId,
         v.TtsSpeedPercent,
+        v.SummaryImageModelRef,
     };
 
     private static bool ReadBool(ref Utf8JsonReader reader)

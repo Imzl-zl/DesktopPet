@@ -65,7 +65,7 @@ public class GeminiImageGenAdapterTests
         };
 
     private static GeminiImageGenAdapter Adapter(RecordingHandler handler, string? key = "k", string model = "gemini-3.1-flash-image")
-        => new(Connection(model), new StubCredentialStore(key), new HttpClient(handler, disposeHandler: false));
+        => new(Connection(model), model, new StubCredentialStore(key), new HttpClient(handler, disposeHandler: false));
 
     [Fact]
     public async Task Generate_UsesXGoogApiKeyHeader()

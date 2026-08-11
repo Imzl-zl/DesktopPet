@@ -40,7 +40,7 @@ public sealed class ImageGenService
         ImageConnection connection, string modelId, ImageGenSpec spec, CancellationToken ct)
     {
         var descriptor = _catalog.Resolve(modelId, connection.Family);
-        var provider = GetAdapter(connection);
+        var provider = GetAdapter(connection, modelId);
         var transparent = spec.Transparent;
 
         if (!transparent || descriptor.Capabilities.NativeTransparency)
@@ -66,7 +66,7 @@ public sealed class ImageGenService
             throw new ProviderException("invalid-request", "编辑至少需要一张参考图");
 
         var descriptor = _catalog.Resolve(modelId, connection.Family);
-        var provider = GetAdapter(connection);
+        var provider = GetAdapter(connection, modelId);
 
         if (!spec.Transparent || descriptor.Capabilities.NativeTransparency)
             return await provider.EditAsync(spec, references, ct);
@@ -81,24 +81,63 @@ public sealed class ImageGenService
         return await strategy.PostProcessAsync(output, ct);
     }
 
-    private IImageGenProvider GetAdapter(ImageConnection connection)
+    /// <summary>
+    /// 多模型容错生成（总结图用，windows-imagegen-design.md §8）：首选模型失败时依次换
+    /// 同连接其他模型重试；auth/rate-limit 不换（同凭据换模型无意义），直接抛。
+    /// 透明请求由 GenerateAsync 内按能力分流（原生直传 / 绿幕两段式）。
+    /// </summary>
+    public async Task<ImageGenOutput> GenerateWithFallbackAsync(
+        ImageConnection connection, string preferredModelId, ImageGenSpec spec, CancellationToken ct)
     {
-        var key = connection.Id;
+        ProviderException? last = null;
+        foreach (var modelId in ModelsInOrder(connection, preferredModelId))
+        {
+            try
+            {
+                return await GenerateAsync(connection, modelId, spec, ct);
+            }
+            catch (ProviderException ex) when (IsFallbackable(ex.Code))
+            {
+                last = ex; // 换下一个模型
+            }
+        }
+        throw last ?? new ProviderException("invalid-request", "生图连接未配置可用模型");
+    }
+
+    private static IEnumerable<string> ModelsInOrder(ImageConnection connection, string preferred)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(preferred) && seen.Add(preferred))
+            yield return preferred;
+        foreach (var m in connection.Models)
+        {
+            if (seen.Add(m))
+                yield return m;
+        }
+    }
+
+    private static bool IsFallbackable(string code)
+        => code is "network" or "server" or "timeout" or "invalid-response";
+
+    private IImageGenProvider GetAdapter(ImageConnection connection, string modelId)
+    {
+        // 适配器按 (连接, 模型) 缓存：模型 id 在适配器构造时固定，换模型必须换适配器实例
+        var key = $"{connection.Id}/{modelId}";
         if (_adapters.TryGetValue(key, out var cached)) return cached;
 
-        var adapter = CreateAdapter(connection);
+        var adapter = CreateAdapter(connection, modelId);
         _adapters[key] = adapter;
         return adapter;
     }
 
-    private IImageGenProvider CreateAdapter(ImageConnection connection)
+    private IImageGenProvider CreateAdapter(ImageConnection connection, string modelId)
     {
         if (string.Equals(connection.Family, ImageModelCatalog.FamilyOpenAi, StringComparison.OrdinalIgnoreCase))
-            return new OpenAiImageGenAdapter(connection, _credentials, _http, _requestTimeout, _strictParams);
+            return new OpenAiImageGenAdapter(connection, modelId, _credentials, _http, _requestTimeout, _strictParams);
 
         // Gemini 族（Nano Banana 全系）
         if (string.Equals(connection.Family, ImageModelCatalog.FamilyGoogle, StringComparison.OrdinalIgnoreCase))
-            return new GeminiImageGenAdapter(connection, _credentials, _http, _requestTimeout);
+            return new GeminiImageGenAdapter(connection, modelId, _credentials, _http, _requestTimeout);
 
         throw new ProviderException("unsupported-family", $"未知生图协议族: {connection.Family}");
     }

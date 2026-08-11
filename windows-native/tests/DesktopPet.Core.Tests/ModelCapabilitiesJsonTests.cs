@@ -101,6 +101,9 @@ public class ModelCapabilitiesJsonTests
         Assert.Single(file.Models);
         Assert.Equal(ModelCapabilities.Chat | ModelCapabilities.Vision, file.Models[0].Capabilities);
         Assert.NotNull(file.Image);
-        Assert.Equal("gpt-image-1", file.Image!.ModelName);
+        // 旧单连接格式迁移为连接列表（windows-imagegen-design.md §6）
+        var conn = Assert.Single(file.Image!.Connections);
+        Assert.Equal("gpt-image-1", Assert.Single(conn.Models));
+        Assert.Equal("image-key", conn.ApiKeyRef);
     }
 }

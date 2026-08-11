@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace DesktopPet.Core.ImageGen;
@@ -182,3 +183,118 @@ public sealed record ImageModelCapabilitiesJson(
     bool Seed = false);
 
 public sealed record ImageModelCatalogFile(List<ImageModelCatalogEntry>? Models);
+
+/// <summary>
+/// providers.json image 段（windows-imagegen-design.md §6：连接列表 + 总结图模型引用）。
+/// 旧版单连接格式（baseUrl/apiKeyRef/modelName/size 平铺）由专用 converter 读入 Legacy* 字段，
+/// Normalize 时迁移为 Connections[0]；序列化只输出连接列表（不含 Legacy*）。
+/// </summary>
+[JsonConverter(typeof(ImageConnectionsConfigConverter))]
+public sealed class ImageConnectionsConfig
+{
+    public List<ImageConnection> Connections { get; set; } = [];
+
+    /// <summary>总结图模型引用 "{connectionId}/{modelId}"；空 = 自动（首连接首模型）。</summary>
+    public string SummaryModelRef { get; set; } = "";
+
+    // ── 旧版单连接格式（仅反序列化读取，迁移期消费；序列化永不输出）──
+    [JsonIgnore]
+    public string? LegacyBaseUrl { get; set; }
+
+    [JsonIgnore]
+    public string? LegacyApiKeyRef { get; set; }
+
+    [JsonIgnore]
+    public string? LegacyModelName { get; set; }
+
+    public static ImageConnectionsConfig? Normalize(ImageConnectionsConfig? raw)
+    {
+        if (raw is null) return null;
+
+        var connections = (raw.Connections ?? [])
+            .Where(c => !string.IsNullOrWhiteSpace(c.Id)
+                        && !string.IsNullOrWhiteSpace(c.BaseUrl))
+            .Select(c => c with
+            {
+                Name = string.IsNullOrWhiteSpace(c.Name) ? c.Id : c.Name.Trim(),
+                BaseUrl = c.BaseUrl.Trim(),
+                Models = (c.Models ?? [])
+                    .Where(m => !string.IsNullOrWhiteSpace(m))
+                    .Select(m => m.Trim())
+                    .ToList(),
+            })
+            .ToList();
+
+        // 旧版单连接迁移（模型 id 以旧 modelName 为准；family 默认 openai——旧实现只有这一族）
+        if (connections.Count == 0
+            && !string.IsNullOrWhiteSpace(raw.LegacyBaseUrl)
+            && !string.IsNullOrWhiteSpace(raw.LegacyModelName))
+        {
+            connections.Add(new ImageConnection(
+                Id: "legacy",
+                Name: raw.LegacyModelName,
+                Family: ImageModelCatalog.FamilyOpenAi,
+                BaseUrl: raw.LegacyBaseUrl.Trim(),
+                ApiKeyRef: raw.LegacyApiKeyRef ?? "",
+                Models: [raw.LegacyModelName.Trim()]));
+        }
+
+        return connections.Count == 0
+            ? null
+            : new ImageConnectionsConfig
+            {
+                Connections = connections,
+                SummaryModelRef = raw.SummaryModelRef ?? "",
+            };
+    }
+}
+
+/// <summary>
+/// 兼容读写：新格式（connections 数组）正常读；旧平铺格式（baseUrl/apiKeyRef/modelName/size）
+/// 读入 Legacy* 字段供 Normalize 迁移。写入永远输出新格式。
+/// </summary>
+public sealed class ImageConnectionsConfigConverter : JsonConverter<ImageConnectionsConfig>
+{
+    private sealed class RawConfig
+    {
+        public List<ImageConnection>? Connections { get; set; }
+        public string? SummaryModelRef { get; set; }
+        public string? BaseUrl { get; set; }
+        public string? ApiKeyRef { get; set; }
+        public string? ModelName { get; set; }
+    }
+
+    public override ImageConnectionsConfig? Read(
+        ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var raw = JsonSerializer.Deserialize<RawConfig>(ref reader, options);
+        if (raw is null) return null;
+        var cfg = new ImageConnectionsConfig
+        {
+            Connections = raw.Connections ?? [],
+            SummaryModelRef = raw.SummaryModelRef ?? "",
+        };
+        // 旧平铺格式字段（存在 connections 时忽略旧字段）
+        if ((raw.Connections is null || raw.Connections.Count == 0) && !string.IsNullOrWhiteSpace(raw.BaseUrl))
+        {
+            cfg.LegacyBaseUrl = raw.BaseUrl;
+            cfg.LegacyApiKeyRef = raw.ApiKeyRef;
+            cfg.LegacyModelName = raw.ModelName;
+        }
+        return cfg;
+    }
+
+    public override void Write(
+        Utf8JsonWriter writer, ImageConnectionsConfig value, JsonSerializerOptions options)
+    {
+        writer.WriteStartObject();
+        writer.WritePropertyName("connections");
+        JsonSerializer.Serialize(writer, value.Connections, options);
+        if (!string.IsNullOrEmpty(value.SummaryModelRef))
+        {
+            writer.WritePropertyName("summaryModelRef");
+            writer.WriteStringValue(value.SummaryModelRef);
+        }
+        writer.WriteEndObject();
+    }
+}

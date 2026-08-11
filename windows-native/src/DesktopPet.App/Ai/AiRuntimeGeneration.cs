@@ -1,7 +1,9 @@
 using DesktopPet.Core.Ai;
+using DesktopPet.Core.ImageGen;
 using DesktopPet.Core.Personas;
 using DesktopPet.Core.Scheduling;
 using DesktopPet.Core.Storage;
+using DesktopPet.Infra.Providers;
 
 namespace DesktopPet.App.Ai;
 
@@ -11,14 +13,17 @@ namespace DesktopPet.App.Ai;
 internal sealed class AiRuntimeGeneration(
     ModelRequestScheduler? scheduler,
     ChatPipeline? pipeline,
-    IImageProvider? imageProvider,
+    ImageGenService? imageGen,
+    SummaryImageTarget? summaryImageTarget,
     string signature) : IAsyncDisposable
 {
     private readonly CancellationTokenSource _lifetime = new();
 
     public ModelRequestScheduler? Scheduler { get; } = scheduler;
     public ChatPipeline? Pipeline { get; } = pipeline;
-    public IImageProvider? ImageProvider { get; } = imageProvider;
+    public ImageGenService? ImageGen { get; } = imageGen;
+    /// <summary>总结图目标（连接+模型，含容错链）；null = 未配置生图连接。</summary>
+    public SummaryImageTarget? SummaryImageTarget { get; } = summaryImageTarget;
     public CancellationToken LifetimeToken => _lifetime.Token;
     public string Signature { get; } = signature;
 

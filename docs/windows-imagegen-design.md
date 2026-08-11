@@ -270,21 +270,67 @@ public abstract class HttpImageAdapterBase : IImageGenProvider
 
 ---
 
-## 8. 实施阶段与验收
+## 8. 总结图集成（阶段 4b，已实施）
 
-| 阶段 | 内容 | 验收 |
+### 8.1 定位
+
+总结图（今日总结配图）是 ImageGen 子域的下游消费者：与生图页共用连接列表、模型目录、适配器与门面，但**参数形态不同**：
+
+| 维度 | 总结图 | 生图页（精灵图场景） |
 |---|---|---|
-| 1（本次） | Core 契约：`ImageGenContracts.cs` + `ImageModelCatalog`（embedded JSON）+ `ChromakeyStrategy`（ImageSharp）+ 测试 | Core.Tests 新增用例全绿；HSV 键控单测（纯色/边缘/含绿主体） |
-| 2（本次） | Infra：`HttpImageAdapterBase` + `OpenAiImageGenAdapter`（含像素换算/参数降级/b64+url）+ 测试 | Infra.Tests 新增用例全绿（MockHttp 端点矩阵） |
-| 3（后续） | `GeminiImageGenAdapter` + 测试 | 同上 |
-| 4（后续） | App：`ImageGenService` 门面 + 注册表 + 生图页（MVVM）+ 总结图改道 + 设置页连接列表编辑器 + providers.json 迁移 | 顺序测试全绿 + x64 build 0 warn/error + 真机 smoke（真实端点生成透明 PNG） |
-| 5（后续） | 历史落盘画廊 | 落盘/清理/损坏隔离单测 |
+| 尺寸 | 16:9 横版 + 1K 档（配图够用省钱） | 用户自选（宽高比 + 档位） |
+| 透明 | **不需要**（不透明，跳过绿幕管线） | 需要（透明精灵图） |
+| 模型 | 可配置（默认首连接首模型） | 用户自选 |
+| 容错 | 多模型轮换 + 当天补试 | 用户手动重试 |
 
-阶段 1-3 全部并行新增，不动现有总结图路径；阶段 4 迁移时删旧 `IImageProvider`/`ImageGenConfig` 单连接路径。
+### 8.2 配置与解析
+
+- `AiSettings.SummaryImageModelRef`：`"{connectionId}/{modelId}"`；空 = 自动（首连接首模型）
+- `SummaryImageTargetResolver`（Core 纯逻辑）：引用解析 + 回退规则——空引用 → 首连接首模型；连接匹配但模型不在白名单 → 该连接首模型；引用失效 → 首连接首模型；无有效连接 → null（跳过生图）
+
+### 8.3 多模型容错
+
+`ImageGenService.GenerateWithFallbackAsync(connection, preferredModelId, spec, ct)`：
+
+- 尝试顺序：首选模型 → 同连接其余模型（去重）
+- 可换模型错误码：`network` / `server` / `timeout` / `invalid-response`；**`auth` / `rate-limit` 不换**（同凭据换模型无意义）
+- 全部失败抛最后一个错误，交给 `SummaryImageRetryPolicy` 当天补试
+- 适配器按 (连接, 模型) 缓存：模型 id 在适配器构造时固定，换模型必须换适配器实例（HttpClient 复用）
+
+### 8.4 运行时路径
+
+```
+AiCoordinator 总结生成 → ImageGenService.GenerateWithFallbackAsync
+  → 连接解析（SummaryImageTargetResolver）→ 适配器 → 写 diary/yyyy-MM-dd.png
+失败 → SummaryImageRetryPolicy（当天最多 2 次/30min 间隔）→ 重读文本重试
+```
+
+### 8.5 providers.json 迁移（已实施）
+
+- `image` 段：单连接平铺格式（baseUrl/apiKeyRef/modelName/size）→ `connections[]` 列表 + `summaryModelRef`
+- 旧格式由 `ImageConnectionsConfigConverter` 读入 Legacy 字段，`Normalize` 迁移为 `connections[0]`（id=`legacy`，family=openai）
+- 凭据引用：每连接独立 `provider/image/{connectionId}/api-key`（对齐 `ForModel`）；旧引用由 `ProviderCredentialMigrator` 逐连接迁移
+- 旧 `IImageProvider` / `ImageGenConfig` / `OpenAiCompatibleImageProvider` 已删除（功能由新适配器超集覆盖）
 
 ---
 
-## 9. 明确不做（本期）
+## 9. 实施阶段与验收
+
+| 阶段 | 内容 | 验收 |
+|---|---|---|
+| 1 ✅ | Core 契约：`ImageGenContracts.cs` + `ImageModelCatalog`（embedded JSON）+ `ChromakeyStrategy`（ImageSharp）+ 测试 | Core.Tests 新增用例全绿；HSV 键控单测（纯色/边缘/含绿主体） |
+| 2 ✅ | Infra：`HttpImageAdapterBase` + `OpenAiImageGenAdapter`（含像素换算/参数降级/b64+url）+ 测试 | Infra.Tests 新增用例全绿（MockHttp 端点矩阵） |
+| 3 ✅ | `GeminiImageGenAdapter`（x-goog-api-key / generateContent / inlineData）+ 测试 | 同上 |
+| 4a ✅ | `ImageGenService` 门面 + 注册表（能力分流 + 绿幕两段式 + 适配器缓存） | 链路测试全绿（原生直传/绿幕/编辑+透明组合） |
+| 4b ✅ | providers.json 连接列表迁移 + `SummaryImageModelRef` + 多模型容错 + 总结图改道 + 设置页连接编辑器适配 | 迁移单测（旧格式→连接/序列化无旧字段/凭据迁移）；全量 700+ 测试；build 0 CS error |
+| 4c ⏳ | 设置页连接列表编辑器（多连接管理）+ 总结图模型下拉 | UI 验收 |
+| 5 ⏳ | 生图页（MVVM）+ 历史画廊 | 阶段 5 验收 |
+
+阶段 1-4b 全部并行新增后，旧 `IImageProvider`/`ImageGenConfig` 单连接路径已删除；剩余 UI 工作不动 Core/Infra 契约。
+
+---
+
+## 10. 明确不做（本期）
 
 - Seedream / Midjourney / Ideogram 等非兼容协议族（新 family 架构已预留）
 - 黑白双渲染 matting、本地 rembg 模型（二期策略）

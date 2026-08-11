@@ -8,6 +8,7 @@ using DesktopPet.Core.Ai;
 using DesktopPet.Core.Care;
 using DesktopPet.Core.Interaction;
 using DesktopPet.Core.I18n;
+using DesktopPet.Core.ImageGen;
 using DesktopPet.Core.Memory;
 using DesktopPet.Core.Personas;
 using DesktopPet.Core.Pets;
@@ -846,19 +847,25 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             pipeline = new ChatPipeline(scheduler, personas.ResolveSelected, _eventLog);
         }
 
-        IImageProvider? imageProvider = null;
+        IImageGenProvider? imageProvider = null;
+        ImageGenService? imageGen = null;
+        SummaryImageTarget? summaryImageTarget = null;
         if (providers.Image is not null)
         {
-            // 生图超时 300s：实测慢渠道单张需 3 分半（210s），120s 必然超时；
+            // 生图门面（windows-imagegen-design.md §8）：连接列表 + 能力分流 + 绿幕透明管线；
+            // 超时 300s：实测慢渠道单张需 3 分半（210s），120s 必然超时；
             // 再慢由 SummaryImageRetryPolicy 当天补试兜底。
-            imageProvider = new OpenAiCompatibleImageProvider(
-                providers.Image, _credentials, _providerHttp, requestTimeout: TimeSpan.FromSeconds(300));
+            imageGen = new ImageGenService(
+                ImageModelCatalog.LoadBuiltIn(), _credentials, _providerHttp,
+                requestTimeout: TimeSpan.FromSeconds(300));
+            summaryImageTarget = SummaryImageTargetResolver.Resolve(
+                providers.Image.Connections, settings.Ai.SummaryImageModelRef);
         }
 
-        return scheduler is null && imageProvider is null
+        return scheduler is null && imageGen is null
             ? null
             : new AiRuntimeGeneration(
-                scheduler, pipeline, imageProvider,
+                scheduler, pipeline, imageGen, summaryImageTarget,
                 AiRuntimeGeneration.SignatureOf(settings, providers, personas));
     }
 
@@ -1107,15 +1114,23 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             Directory.CreateDirectory(Path.GetDirectoryName(txtPath)!);
             AtomicFileWriter.WriteAllText(txtPath, text);
 
-            if (_settings.Ai.SummaryImage && runtime.ImageProvider is not null)
+            if (_settings.Ai.SummaryImage && runtime.SummaryImageTarget is not null && runtime.ImageGen is not null)
             {
                 try
                 {
-                    var image = await runtime.ImageProvider.GenerateAsync(
-                        new ImageGenRequest(ImagePromptBuilder.Build(text, petName)), runtime.LifetimeToken);
+                    // 总结图：16:9 横版配图 + 1K 档（配图够用省钱）；不透明（非精灵图，跳过绿幕管线）；
+                    // 多模型容错：首选失败自动换同连接下一模型（GenerateWithFallbackAsync）
+                    var image = await runtime.ImageGen.GenerateWithFallbackAsync(
+                        runtime.SummaryImageTarget.Connection,
+                        runtime.SummaryImageTarget.ModelId,
+                        new ImageGenSpec(
+                            ImagePromptBuilder.Build(text, petName),
+                            ImageAspectRatio.R16x9,
+                            ImageScale.S1K),
+                        runtime.LifetimeToken);
                     AtomicFileWriter.WriteAllBytes(
                         DiaryStore.ImagePath(_store.DirectoryPath, day),
-                        image.PngBytes);
+                        image.Bytes);
                 }
                 catch (Exception ex)
                 {
@@ -1335,7 +1350,7 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         {
             using var runtimeLease = _runtime.Acquire();
             var runtime = runtimeLease?.Value;
-            if (runtime?.ImageProvider is null)
+            if (runtime?.SummaryImageTarget is null || runtime.ImageGen is null)
             {
                 _imageRetry.Reset(); // 生图连接已不可用（配置变更）→ 放弃补试
                 return;
@@ -1347,11 +1362,17 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
                 return;
             }
             var text = await File.ReadAllTextAsync(txtPath);
-            var image = await runtime.ImageProvider.GenerateAsync(
-                new ImageGenRequest(ImagePromptBuilder.Build(text, FirstPetName())), runtime.LifetimeToken);
+            var image = await runtime.ImageGen.GenerateWithFallbackAsync(
+                runtime.SummaryImageTarget.Connection,
+                runtime.SummaryImageTarget.ModelId,
+                new ImageGenSpec(
+                    ImagePromptBuilder.Build(text, FirstPetName()),
+                    ImageAspectRatio.R16x9,
+                    ImageScale.S1K),
+                runtime.LifetimeToken);
             AtomicFileWriter.WriteAllBytes(
                 DiaryStore.ImagePath(_store.DirectoryPath, day),
-                image.PngBytes);
+                image.Bytes);
             _imageRetry.Reset();
             DebugLog($"summary image retry succeeded for {day:yyyy-MM-dd}");
         }

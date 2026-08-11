@@ -20,13 +20,13 @@ public sealed class GeminiImageGenAdapter : HttpImageAdapterBase
 
     public GeminiImageGenAdapter(
         ImageConnection connection,
+        string modelId,
         ICredentialStore credentials,
         HttpClient httpClient,
         TimeSpan? requestTimeout = null)
         : base(connection, credentials, httpClient, requestTimeout)
     {
-        _modelId = connection.Models.FirstOrDefault() ?? throw new ArgumentException(
-            "Google 兼容连接至少需要一个模型", nameof(connection));
+        _modelId = modelId ?? throw new ArgumentNullException(nameof(modelId));
     }
 
     public override string Family => GoogleFamily;

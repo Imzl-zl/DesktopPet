@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DesktopPet.Core.ImageGen;
 
 namespace DesktopPet.Core.Scheduling;
 
@@ -142,31 +143,6 @@ public sealed record TtsEndpointConfig(
     string ModelName,    // 如 FunAudioLLM/CosyVoice2-0.5B / tts-1 / gpt-sovits
     string Voice = "");  // 默认音色 id；空 = 自动（列表首个/按语言）
 
-/// <summary>
-/// 生图连接配置（架构文档 §3.4：providers.json 的 image 段，复用凭据引用机制）。
-/// </summary>
-public sealed record ImageGenConfig(
-    string BaseUrl,     // 如 https://api.openai.com/v1
-    string ApiKeyRef,   // 凭据引用 id（空 = 无鉴权）
-    string ModelName,   // 如 gpt-image-1 / qwen-image
-    string Size = "1024x1024");
-
-/// <summary>生图请求（总结图封面）。</summary>
-public sealed record ImageGenRequest(string Prompt, string? Size = null);
-
-/// <summary>生图结果（PNG 字节）。</summary>
-public sealed record ImageResult(byte[] PngBytes);
-
-/// <summary>
-/// 生图 Provider 契约（架构文档 §3.4）：OpenAI 兼容 /images/generations 通吃
-/// DALL·E / GPT-Image / Qwen-Image / FLUX 等端点；本地 ComfyUI 兼容端点亦可。
-/// </summary>
-public interface IImageProvider
-{
-    string Id { get; }
-    Task<ImageResult> GenerateAsync(ImageGenRequest request, CancellationToken ct);
-}
-
 public sealed record ProvidersFileMigrationSource(
     ProvidersFileModel Providers,
     bool IsLossless);
@@ -176,8 +152,8 @@ public sealed class ProvidersFileModel
 {
     public List<ProviderConfig> Models { get; set; } = [];
 
-    /// <summary>Phase 6f：生图连接（空 = 未配置，总结图开关关闭时不生成）。</summary>
-    public ImageGenConfig? Image { get; set; }
+    /// <summary>生图连接（windows-imagegen-design.md §6：连接列表；空 = 未配置）。</summary>
+    public ImageConnectionsConfig? Image { get; set; }
 
     /// <summary>windows-tts-design.md §5.2：TTS 端点连接（空 = 未配置，用本地引擎）。</summary>
     public TtsEndpointConfig? Tts { get; set; }
@@ -189,10 +165,7 @@ public sealed class ProvidersFileModel
                         && !string.IsNullOrWhiteSpace(m.BaseUrl)
                         && !string.IsNullOrWhiteSpace(m.ModelName))
             .ToList();
-        var image = raw.Image is null || string.IsNullOrWhiteSpace(raw.Image.BaseUrl)
-                    || string.IsNullOrWhiteSpace(raw.Image.ModelName)
-            ? null
-            : raw.Image with { BaseUrl = raw.Image.BaseUrl.Trim(), ModelName = raw.Image.ModelName.Trim() };
+        var image = ImageConnectionsConfig.Normalize(raw.Image);
         var tts = raw.Tts is null || string.IsNullOrWhiteSpace(raw.Tts.BaseUrl)
                   || string.IsNullOrWhiteSpace(raw.Tts.ModelName)
             ? null

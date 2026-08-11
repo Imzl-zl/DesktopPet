@@ -1,3 +1,4 @@
+using DesktopPet.Core.ImageGen;
 using DesktopPet.Core.Scheduling;
 using DesktopPet.Core.Storage;
 using DesktopPet.Infra.Providers;
@@ -43,12 +44,15 @@ public sealed class ProviderCredentialMigratorTests
     [Fact]
     public void LegacyImageCredential_MigratesToDedicatedReference()
     {
+        // 旧平铺格式（converter 读入 Legacy* 字段）→ 迁移为 legacy 连接 + 专属凭据引用
         var source = new ProvidersFileModel
         {
-            Image = new ImageGenConfig(
-                "https://example.com/v1",
-                ProviderCredentialRefs.LegacyImage,
-                "image-model"),
+            Image = new ImageConnectionsConfig
+            {
+                LegacyBaseUrl = "https://example.com/v1",
+                LegacyApiKeyRef = ProviderCredentialRefs.LegacyImage,
+                LegacyModelName = "image-model",
+            },
         };
         var credentials = new InMemoryCredentialStore();
         credentials.Set(ProviderCredentialRefs.LegacyImage, "image-secret");
@@ -58,8 +62,8 @@ public sealed class ProviderCredentialMigratorTests
             () => source, value => saved = value, credentials).Migrate();
 
         Assert.True(result.Changed);
-        Assert.Equal(ProviderCredentialRefs.Image, saved!.Image!.ApiKeyRef);
-        Assert.Equal("image-secret", credentials.Get(ProviderCredentialRefs.Image));
+        Assert.Equal(ProviderCredentialRefs.ForImage("legacy"), saved!.Image!.Connections[0].ApiKeyRef);
+        Assert.Equal("image-secret", credentials.Get(ProviderCredentialRefs.ForImage("legacy")));
         Assert.Null(credentials.Get(ProviderCredentialRefs.LegacyImage));
     }
 

@@ -96,7 +96,7 @@ public class OpenAiImageGenAdapterTests
         var b64 = Convert.ToBase64String(FakePng());
         var handler = new RecordingHandler((_, __) => Task.FromResult(
             JsonResponse(new { data = new[] { new { b64_json = b64 } } })));
-        var adapter = new OpenAiImageGenAdapter(Connection(), new StubCredentialStore("k"), Client(handler));
+        var adapter = new OpenAiImageGenAdapter(Connection(), "gpt-image-2", new StubCredentialStore("k"), Client(handler));
 
         var output = await adapter.GenerateAsync(
             new ImageGenSpec("cat", ImageAspectRatio.R1x1, ImageScale.S1K), CancellationToken.None);
@@ -122,7 +122,7 @@ public class OpenAiImageGenAdapterTests
                 });
             return Task.FromResult(JsonResponse(new { data = new[] { new { url = "https://cdn.test/x.png" } } }));
         });
-        var adapter = new OpenAiImageGenAdapter(Connection(), new StubCredentialStore(null), Client(handler));
+        var adapter = new OpenAiImageGenAdapter(Connection(), "gpt-image-2", new StubCredentialStore(null), Client(handler));
 
         var output = await adapter.GenerateAsync(new ImageGenSpec("cat"), CancellationToken.None);
 
@@ -135,7 +135,7 @@ public class OpenAiImageGenAdapterTests
     {
         var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
             new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
-        var adapter = new OpenAiImageGenAdapter(Connection("gpt-image-1.5"), new StubCredentialStore(null), Client(handler));
+        var adapter = new OpenAiImageGenAdapter(Connection("gpt-image-1.5"), "gpt-image-1.5", new StubCredentialStore(null), Client(handler));
 
         await adapter.GenerateAsync(new ImageGenSpec(
             "cat", ImageAspectRatio.R16x9, ImageScale.S2K, ImageQuality.High, Transparent: true),
@@ -154,7 +154,7 @@ public class OpenAiImageGenAdapterTests
         // 适配器不做能力判断（能力过滤在门面层）：Transparent=true 即直传 background
         var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
             new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
-        var adapter = new OpenAiImageGenAdapter(Connection("gpt-image-2"), new StubCredentialStore(null), Client(handler));
+        var adapter = new OpenAiImageGenAdapter(Connection("gpt-image-2"), "gpt-image-2", new StubCredentialStore(null), Client(handler));
 
         await adapter.GenerateAsync(new ImageGenSpec("cat", Transparent: true), CancellationToken.None);
 
@@ -174,7 +174,7 @@ public class OpenAiImageGenAdapterTests
     {
         var handler = new RecordingHandler((_, __) => Task.FromResult(
             new HttpResponseMessage(status) { Content = new StringContent("{}") }));
-        var adapter = new OpenAiImageGenAdapter(Connection(), new StubCredentialStore(null), Client(handler));
+        var adapter = new OpenAiImageGenAdapter(Connection(), "gpt-image-2", new StubCredentialStore(null), Client(handler));
 
         var ex = await Assert.ThrowsAsync<ProviderException>(() =>
             adapter.GenerateAsync(new ImageGenSpec("cat"), CancellationToken.None));
@@ -200,7 +200,7 @@ public class OpenAiImageGenAdapterTests
             return Task.FromResult(JsonResponse(
                 new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } }));
         });
-        var adapter = new OpenAiImageGenAdapter(Connection(), new StubCredentialStore(null), Client(handler));
+        var adapter = new OpenAiImageGenAdapter(Connection(), "gpt-image-2", new StubCredentialStore(null), Client(handler));
 
         var output = await adapter.GenerateAsync(
             new ImageGenSpec("cat", Quality: ImageQuality.High, Transparent: true), CancellationToken.None);
@@ -218,7 +218,7 @@ public class OpenAiImageGenAdapterTests
         var handler = new RecordingHandler((_, __) => Task.FromResult(
             new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("nope") }));
         var adapter = new OpenAiImageGenAdapter(
-            Connection(), new StubCredentialStore(null), Client(handler), strictParams: true);
+            Connection(), "gpt-image-2", new StubCredentialStore(null), Client(handler), strictParams: true);
 
         await Assert.ThrowsAsync<ProviderException>(() =>
             adapter.GenerateAsync(new ImageGenSpec("cat", Quality: ImageQuality.High), CancellationToken.None));
@@ -232,7 +232,7 @@ public class OpenAiImageGenAdapterTests
         // 请求本来就没带高风险参数：400 不该盲目重试
         var handler = new RecordingHandler((_, __) => Task.FromResult(
             new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("bad prompt") }));
-        var adapter = new OpenAiImageGenAdapter(Connection(), new StubCredentialStore(null), Client(handler));
+        var adapter = new OpenAiImageGenAdapter(Connection(), "gpt-image-2", new StubCredentialStore(null), Client(handler));
 
         await Assert.ThrowsAsync<ProviderException>(() =>
             adapter.GenerateAsync(new ImageGenSpec("cat"), CancellationToken.None));
@@ -247,7 +247,7 @@ public class OpenAiImageGenAdapterTests
     {
         var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
             new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
-        var adapter = new OpenAiImageGenAdapter(Connection("Qwen/Qwen-Image-Edit"), new StubCredentialStore(null), Client(handler));
+        var adapter = new OpenAiImageGenAdapter(Connection("Qwen/Qwen-Image-Edit"), "Qwen/Qwen-Image-Edit", new StubCredentialStore(null), Client(handler));
 
         await adapter.EditAsync(new ImageGenSpec("make it red"),
             [new ReferenceImage(FakePng(), "image/png")], CancellationToken.None);
@@ -265,7 +265,7 @@ public class OpenAiImageGenAdapterTests
     {
         var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
             new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
-        var adapter = new OpenAiImageGenAdapter(Connection("grok-imagine-image-quality"), new StubCredentialStore(null), Client(handler));
+        var adapter = new OpenAiImageGenAdapter(Connection("grok-imagine-image-quality"), "grok-imagine-image-quality", new StubCredentialStore(null), Client(handler));
 
         await adapter.EditAsync(new ImageGenSpec("sketch it"),
             [new ReferenceImage(FakePng())], CancellationToken.None);
@@ -285,7 +285,7 @@ public class OpenAiImageGenAdapterTests
     {
         var handler = new SlowHandler();
         var adapter = new OpenAiImageGenAdapter(
-            Connection(), new StubCredentialStore(null), Client(handler),
+            Connection(), "gpt-image-2", new StubCredentialStore(null), Client(handler),
             requestTimeout: TimeSpan.FromMilliseconds(50));
 
         await Assert.ThrowsAsync<ProviderException>(async () =>

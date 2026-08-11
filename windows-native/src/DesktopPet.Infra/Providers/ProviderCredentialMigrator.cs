@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using DesktopPet.Core.ImageGen;
 using DesktopPet.Core.Scheduling;
 using DesktopPet.Infra.Storage;
 using DesktopPet.Core.Storage;
@@ -17,6 +18,10 @@ public static class ProviderCredentialRefs
 
     public static string ForModel(string connectionId)
         => $"provider/model/{connectionId}/api-key";
+
+    /// <summary>生图连接凭据引用（每连接独立，对齐 ForModel；windows-imagegen-design.md §6）。</summary>
+    public static string ForImage(string connectionId)
+        => $"provider/image/{connectionId}/api-key";
 }
 
 public sealed class CredentialMigrationException : IOException
@@ -132,30 +137,37 @@ public sealed class ProviderCredentialMigrator
             migrated.Add(next);
         }
 
-        var image = source.Image;
-        if (image is not null
-            && !string.IsNullOrEmpty(image.ApiKeyRef)
-            && !string.Equals(image.ApiKeyRef, ProviderCredentialRefs.Image, StringComparison.Ordinal))
+        // 先 Normalize：旧平铺格式（Legacy*）转连接列表后再逐连接迁移凭据
+        var image = ImageConnectionsConfig.Normalize(source.Image);
+        if (image is not null)
         {
-            var sourceSecret = _credentials.Get(image.ApiKeyRef)
-                ?? throw new CredentialMigrationException(
-                    "source-missing",
-                    "生图连接引用的旧凭据不存在，未修改配置");
-            var targetSecret = _credentials.Get(ProviderCredentialRefs.Image);
-            if (targetSecret is null)
+            for (var i = 0; i < image.Connections.Count; i++)
             {
-                _credentials.Set(ProviderCredentialRefs.Image, sourceSecret);
-                targetSecret = _credentials.Get(ProviderCredentialRefs.Image);
+                var conn = image.Connections[i];
+                if (string.IsNullOrEmpty(conn.ApiKeyRef)) continue;
+                var targetRef = ProviderCredentialRefs.ForImage(conn.Id);
+                if (string.Equals(conn.ApiKeyRef, targetRef, StringComparison.Ordinal)) continue;
+
+                var sourceSecret = _credentials.Get(conn.ApiKeyRef)
+                    ?? throw new CredentialMigrationException(
+                        "source-missing",
+                        "生图连接引用的旧凭据不存在，未修改配置");
+                var targetSecret = _credentials.Get(targetRef);
+                if (targetSecret is null)
+                {
+                    _credentials.Set(targetRef, sourceSecret);
+                    targetSecret = _credentials.Get(targetRef);
+                }
+                if (!string.Equals(targetSecret, sourceSecret, StringComparison.Ordinal))
+                {
+                    throw new CredentialMigrationException(
+                        "target-conflict",
+                        "生图连接的目标凭据已存在且内容不同，未修改配置");
+                }
+                oldRefs.Add(conn.ApiKeyRef);
+                image.Connections[i] = conn with { ApiKeyRef = targetRef };
+                changed = true;
             }
-            if (!string.Equals(targetSecret, sourceSecret, StringComparison.Ordinal))
-            {
-                throw new CredentialMigrationException(
-                    "target-conflict",
-                    "生图连接的目标凭据已存在且内容不同，未修改配置");
-            }
-            oldRefs.Add(image.ApiKeyRef);
-            image = image with { ApiKeyRef = ProviderCredentialRefs.Image };
-            changed = true;
         }
 
         var committed = new ProvidersFileModel { Models = migrated, Image = image };
@@ -165,8 +177,10 @@ public sealed class ProviderCredentialMigrator
             .Select(model => model.ApiKeyRef)
             .Where(reference => !string.IsNullOrEmpty(reference))
             .ToHashSet(StringComparer.Ordinal);
-        if (!string.IsNullOrEmpty(image?.ApiKeyRef))
-            referenced.Add(image.ApiKeyRef);
+        if (image is not null)
+            foreach (var conn in image.Connections)
+                if (!string.IsNullOrEmpty(conn.ApiKeyRef))
+                    referenced.Add(conn.ApiKeyRef);
         if (!referenced.Contains(ProviderCredentialRefs.LegacyModel))
             oldRefs.Add(ProviderCredentialRefs.LegacyModel);
         if (!referenced.Contains(ProviderCredentialRefs.LegacyImage))

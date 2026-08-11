@@ -25,14 +25,14 @@ public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
 
     public OpenAiImageGenAdapter(
         ImageConnection connection,
+        string modelId,
         ICredentialStore credentials,
         HttpClient httpClient,
         TimeSpan? requestTimeout = null,
         bool strictParams = false)
         : base(connection, credentials, httpClient, requestTimeout, strictParams)
     {
-        _modelId = connection.Models.FirstOrDefault() ?? throw new ArgumentException(
-            "OpenAI 兼容连接至少需要一个模型", nameof(connection));
+        _modelId = modelId ?? throw new ArgumentNullException(nameof(modelId));
     }
 
     public override string Family => OpenAiFamily;

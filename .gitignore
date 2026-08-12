@@ -37,3 +37,7 @@ shuijun-Photoroom.png
 # AI agent runtime artifacts
 .pi-subagents/
 windows-native/.mcp/
+
+# UI 冒烟辅助（UIAutomation 脚本 + 屏幕截图，仅本机验收用）
+windows-native/.ui-shots/
+

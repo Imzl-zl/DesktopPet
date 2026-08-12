@@ -102,7 +102,7 @@ struct ImageGenView: View {
                 .background(Theme.card)
                 .cornerRadius(Theme.radiusMd)
                 .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.cardStroke, lineWidth: 1))
-                .onChange(of: baseURL) { saveConfig() }
+                .onChange(of: baseURL) { _ in saveConfig() }
             SecureField("API Key", text: $apiKey)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, Theme.space3)
@@ -110,7 +110,7 @@ struct ImageGenView: View {
                 .background(Theme.card)
                 .cornerRadius(Theme.radiusMd)
                 .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.cardStroke, lineWidth: 1))
-                .onChange(of: apiKey) { saveConfig() }
+                .onChange(of: apiKey) { _ in saveConfig() }
         }
     }
 
@@ -177,7 +177,7 @@ struct ImageGenView: View {
                     .background(Theme.card)
                     .cornerRadius(Theme.radiusMd)
                     .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.cardStroke, lineWidth: 1))
-                    .onChange(of: customModel) { saveConfig() }
+                    .onChange(of: customModel) { _ in saveConfig() }
             }
             if let modelLoadError {
                 Text(modelLoadError)
@@ -201,7 +201,7 @@ struct ImageGenView: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .frame(maxWidth: 340)
-            .onChange(of: sizeOption) { saveConfig() }
+            .onChange(of: sizeOption) { _ in saveConfig() }
             if sizeOption.size == "__custom__" {
                 TextField("精确尺寸，例如 1024x768", text: $customSize)
                     .textFieldStyle(.plain)
@@ -210,7 +210,7 @@ struct ImageGenView: View {
                     .background(Theme.card)
                     .cornerRadius(Theme.radiusMd)
                     .overlay(RoundedRectangle(cornerRadius: Theme.radiusMd).strokeBorder(Theme.cardStroke, lineWidth: 1))
-                    .onChange(of: customSize) { saveConfig() }
+                    .onChange(of: customSize) { _ in saveConfig() }
             }
         }
     }
@@ -297,7 +297,8 @@ struct ImageGenView: View {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.png, .jpeg, .webp, .gif, .tiff, .bmp]
+        let webpType = UTType(filenameExtension: "webp") ?? .data
+        panel.allowedContentTypes = [.png, .jpeg, webpType, .gif, .tiff, .bmp]
         guard panel.runModal() == .OK else { return }
         for url in panel.urls {
             guard let data = try? Data(contentsOf: url) else { continue }

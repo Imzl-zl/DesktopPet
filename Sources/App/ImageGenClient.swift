@@ -28,7 +28,7 @@ enum ImageGenConfigStore {
 
 /// 尺寸选项：OpenAI 精确尺寸（2.0/2.1 都支持）+ 2.1 档位式（size=2K&ratio=…）。
 /// 与具体模型解耦，模型名完全由 /v1/models 动态提供。
-struct ImageGenSizeOption: Identifiable, Equatable {
+struct ImageGenSizeOption: Identifiable, Hashable {
     let label: String
     let size: String
     let ratio: String?

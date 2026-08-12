@@ -5,9 +5,9 @@
 
 ## 当前基线
 - macOS 主版（SwiftPM）：`swift build` / `swift test` 通过；打包 `./scripts/build-app.sh release`。
-- Windows 版（.NET 8 + WPF）：Core 480 / Infra 161 / Agent 35 / App 53 顺序测试通过（729 total）；`dotnet build windows-native/DesktopPet.sln --no-restore -p:Platform=x64` 编译 0 CS error（桌宠运行中 App 复制阶段报 MSB3021 锁，验证以 dotnet test 为准）。
+- Windows 版（.NET 8 + WPF）：Core 480 / Infra 161 / Agent 35 / App 57（733 total；本次 App 57/57 fresh）；`DesktopPet.App` 由 VS MCP 构建 0 error / 0 warning。
 - Windows 上 Swift core 验证：`./scripts/verify-core-windows.sh`（54 个 core 测试）。
-- 最后更新：2026-08-11
+- 最后更新：2026-08-12
 
 ## 版本锁定（详见 tools.md Environment）
 - macOS：Swift 6.3 / macOS 13+ / Sparkle 2.9.4（锁）。
@@ -18,6 +18,7 @@
 - macOS 桌宠完整功能：养成（XP/五阶段/成就）、精灵导入切片、气泡、休息提醒、4 语言本地化、菜单栏应用 + Sparkle 更新。
 - Windows .NET 8 + WPF 迁移全部完工，Tauri 旧版（`windows/`）已删除。
 - Windows 版：宠物/漫游、气泡、引导、分层会话记忆、可插拔模型/TTS/生图、三优先级（P0/P1/P2）AI 运行时、捕获/渲染/拖拽/弹幕资源生命周期、可配置事务型全局快捷键与连接级凭据迁移。
+- Windows WPF 全局模板与托盘交互已回归：MenuItem Header 正常显示、ComboBox 选中项继承 Padding；托盘菜单禁用 H.NotifyIcon 2.1.4 的 Shell 回调绝对坐标路径，改由右键释放事件按 WPF MousePoint 打开。
 - Windows 重要项 I1-I17 实现子任务 1-4 完成：726-key 四语言同集 catalog 实时刷新；日志滚动脱敏/ZIP 导出；CPU/WorkingSet 诊断；Credential Manager 前缀恢复出厂；多屏/DPI 全屏抑制；I15 原子文件/调用方补偿闭环。
 - **生图模块全部阶段完工（docs/windows-imagegen-design.md）**：阶段 1-4b（契约/目录 13 模型/透明管线/双协议族适配器/门面/连接列表迁移/总结图改道）→ 阶段 4c（设置页多连接列表编辑器 + 总结图模型下拉 + AiSettings.SummaryImageModelRef 持久化与 runtime 签名修复）→ 阶段 5（生图页：连接×模型/提示词/按能力参数面板/生成/取消/错误分类 + 历史画廊落盘 `%APPDATA%/DesktopPet/gallery/`：PNG+index.json 原子写、删除、200 上限修剪、损坏容错）。
 
@@ -48,8 +49,10 @@
 - 单元测试不能替代真实 GraphicsCapture/Win2D、Win32 热键/拖拽、Credential Manager、WPF/tray、多屏 mixed-DPI、CPU/内存和恢复出厂重启验收；生图页/连接编辑器 UI 冒烟同样留 child 5。
 - **GraphicsCapture 帧池死锁（已修复）**：FrameArrived 内节流拒绝时不得直接 return——任何帧滞留 FramePool 都会占满缓冲，后续新帧被丢且 FrameArrived 永不再触发（静默失效）。节流必须取出帧后丢弃（`using var dropped = sender.TryGetNextFrame()`）；bufferCount 用 2。
 - **构建输出目录陷阱**：`dotnet build -p:Platform=x64` 输出 `bin/x64/`，而 `ResolveAgentHostPath` 回退探测 `bin/Debug/`（无 x64）——改 Agent 代码后必须不带 Platform 参数重新构建 AgentHost，否则 App 启动的仍是旧 DLL。
+- **H.NotifyIcon 2.1.4 托盘定位**：库会把 Shell 回调物理点按静态 DPI 因子缩放后交给 WPF `AbsolutePoint`；隐藏图标面板首次打开时该回调点可能与当前鼠标位置不一致。单屏正坐标 + PerMonitorV2 下不要套用负坐标 PR #262；右键即时菜单应关闭 `MenuActivation`，在 `TrayRightMouseUp` 用 WPF `MousePoint` 打开并激活 Popup。
 
 ## 最近活跃窗口
+- 2026-08-12（WPF 菜单/ComboBox + 托盘首次定位）：修复全局 MenuItem 模板缺 `ContentSource="Header"` 导致托盘/悬浮球菜单空白，ComboBox 内部 ToggleButton 传递外层 Padding；Firecrawl + H.NotifyIcon 2.1.4 源码核对排除升级稳定版、issue #30 ItemTemplate、#32 manifest 和 #262 负坐标场景。运行时基线首次/第二次菜单矩形不一致；改为禁用库自动 `AbsolutePoint`，`TrayRightMouseUp` 使用 WPF `MousePoint` 并激活 Popup。真实隐藏面板右击两次均为图标中心 `(2071,1352)`、菜单 `176x171`、进程存活；App 57/57、VS build 0/0。
 - 2026-08-12（生图真机 UI 冒烟 + 修复，提交 2729ed6）：桌宠关闭后重建启动，用 PowerShell UIAutomation + Win32 EnumWindows 做无头 UI 验证（当前模型不支持读图，改用布局树数值核对）。发现并修复：① 连接编辑器打开即崩（status TextBlock 重复添加 → 逻辑父元素冲突，事件日志 1026 定位）；② 生图页参数列紧贴（0 间距）/种子框紧贴；③ 提示词计数初始不显示（空文本不触发 TextChanged）；④ 连接编辑器长标签 NoWrap 溢出被裁剪。另验证：模态窗口在 UIA 树挂在 owner 子树下（非 RootElement.Children）；UIA 坐标=物理像素，DIP=值/1.5（150% 缩放机）；总结图模型下拉选择→app-settings.json 持久化→重置（converter Read/Normalize/Signature 修复链端到端）；生图页/连接编辑器布局数值全部达标。729 测试全绿。
 - 2026-08-11（生图模块阶段 4c/5，提交 0842981）：多连接列表编辑器（列表/新建/编辑/删除/凭据回滚与清理）+ AI 页总结图模型下拉（AiSettings.SummaryImageModelRef）；修复该字段持久化缺口（converter Read + Normalize 双遗漏）与 runtime 签名未含该字段（改设置不重建）；阶段 5 生图页（连接×模型带价格/提示词计数/按能力参数面板：宽高比·档位·质量仅 openai·张数·seed·透明+绿幕提示/生成循环/取消/错误分类）+ 历史画廊落盘（GalleryIndex 契约 Core 7 测试、GalleryStore Infra 原子写/删除/修剪/损坏容错 9 测试）；入口=设置页 AI 页「打开生图页」。729 测试全绿。坑：GalleryStore 放 Infra 而非 App（纯 IO 分层，App.Tests 直接引用可测）；缩略图 BitmapImage 必须 OnLoad+Freeze；真机 UI 冒烟未跑（桌宠锁 bin，MSB3021 但编译成功）。
 - 2026-08-11（生图模块阶段 1-4b，提交 57cb0cc/922f555）：设计定稿 + Core 契约/目录（13 模型 embedded JSON）/透明管线（绿幕 prompt+HSV 键控）+ OpenAI 兼容/Gemini 双协议族适配器 + ImageGenService 门面 + providers.json image 段连接列表迁移 + 总结图改道 + 旧 IImageProvider 退役。711 测试全绿。坑点：适配器按连接缓存但模型构造时固定 → fallback 换模型拿到旧适配器（已修为按(连接,模型)缓存）；`JsonIgnore(WhenWritingDefault)` 对反序列化同样生效（改自定义 converter）；AiSettings 位置参数追加字段三处同步（本次验证）；运行中 PetApp 锁 bin 报 MSB3021 但编译成功。

@@ -23,7 +23,7 @@
 
 ## 进行中 / 未完成
 - **已知 flaky**：SchedulerTests 两个并发时序测试全量并行时偶发失败，单跑恒过（既有问题，非生图模块引入，待排查）。
-- `.tasks/windows-important-hardening` child 5 待执行：真实 Windows 验收（托盘可见性/GraphicsCapture 分辨率变化/弹幕防追尾视觉/GPU/Win32/Credential Manager/日志导出/恢复出厂重启/多屏 mixed-DPI）+ **生图模块 UI 冒烟**（设置页连接编辑器多连接增删改、总结图模型下拉、生图页生成/取消/画廊删除，需真实端点或 mock）。
+- `.tasks/windows-important-hardening` child 5 待执行：真实 Windows 验收剩余项（托盘可见性/GraphicsCapture 分辨率变化/弹幕防追尾视觉/GPU/Win32/Credential Manager/日志导出/恢复出厂重启/多屏 mixed-DPI）+ **生图真实生成验收**（连接编辑器多连接增删改与凭据流转、生图页真实端点生成/取消/画廊删除——需真实端点与费用）。
 - Roadmap 后续项：v0.2 桌面感知深化；Provider 默认范围、自动更新方案等产品决策见 `docs/windows-architecture.md` §10。
 
 ## 关键决策（仍有效）
@@ -50,7 +50,8 @@
 - **构建输出目录陷阱**：`dotnet build -p:Platform=x64` 输出 `bin/x64/`，而 `ResolveAgentHostPath` 回退探测 `bin/Debug/`（无 x64）——改 Agent 代码后必须不带 Platform 参数重新构建 AgentHost，否则 App 启动的仍是旧 DLL。
 
 ## 最近活跃窗口
-- 2026-08-11（生图模块阶段 4c/5，未提交）：多连接列表编辑器（列表/新建/编辑/删除/凭据回滚与清理）+ AI 页总结图模型下拉（AiSettings.SummaryImageModelRef）；修复该字段持久化缺口（converter Read + Normalize 双遗漏）与 runtime 签名未含该字段（改设置不重建）；阶段 5 生图页（连接×模型带价格/提示词计数/按能力参数面板：宽高比·档位·质量仅 openai·张数·seed·透明+绿幕提示/生成循环/取消/错误分类）+ 历史画廊落盘（GalleryIndex 契约 Core 7 测试、GalleryStore Infra 原子写/删除/修剪/损坏容错 9 测试）；入口=设置页 AI 页「打开生图页」。729 测试全绿。坑：GalleryStore 放 Infra 而非 App（纯 IO 分层，App.Tests 直接引用可测）；缩略图 BitmapImage 必须 OnLoad+Freeze；真机 UI 冒烟未跑（桌宠锁 bin，MSB3021 但编译成功）。
+- 2026-08-12（生图真机 UI 冒烟 + 修复，提交 2729ed6）：桌宠关闭后重建启动，用 PowerShell UIAutomation + Win32 EnumWindows 做无头 UI 验证（当前模型不支持读图，改用布局树数值核对）。发现并修复：① 连接编辑器打开即崩（status TextBlock 重复添加 → 逻辑父元素冲突，事件日志 1026 定位）；② 生图页参数列紧贴（0 间距）/种子框紧贴；③ 提示词计数初始不显示（空文本不触发 TextChanged）；④ 连接编辑器长标签 NoWrap 溢出被裁剪。另验证：模态窗口在 UIA 树挂在 owner 子树下（非 RootElement.Children）；UIA 坐标=物理像素，DIP=值/1.5（150% 缩放机）；总结图模型下拉选择→app-settings.json 持久化→重置（converter Read/Normalize/Signature 修复链端到端）；生图页/连接编辑器布局数值全部达标。729 测试全绿。
+- 2026-08-11（生图模块阶段 4c/5，提交 0842981）：多连接列表编辑器（列表/新建/编辑/删除/凭据回滚与清理）+ AI 页总结图模型下拉（AiSettings.SummaryImageModelRef）；修复该字段持久化缺口（converter Read + Normalize 双遗漏）与 runtime 签名未含该字段（改设置不重建）；阶段 5 生图页（连接×模型带价格/提示词计数/按能力参数面板：宽高比·档位·质量仅 openai·张数·seed·透明+绿幕提示/生成循环/取消/错误分类）+ 历史画廊落盘（GalleryIndex 契约 Core 7 测试、GalleryStore Infra 原子写/删除/修剪/损坏容错 9 测试）；入口=设置页 AI 页「打开生图页」。729 测试全绿。坑：GalleryStore 放 Infra 而非 App（纯 IO 分层，App.Tests 直接引用可测）；缩略图 BitmapImage 必须 OnLoad+Freeze；真机 UI 冒烟未跑（桌宠锁 bin，MSB3021 但编译成功）。
 - 2026-08-11（生图模块阶段 1-4b，提交 57cb0cc/922f555）：设计定稿 + Core 契约/目录（13 模型 embedded JSON）/透明管线（绿幕 prompt+HSV 键控）+ OpenAI 兼容/Gemini 双协议族适配器 + ImageGenService 门面 + providers.json image 段连接列表迁移 + 总结图改道 + 旧 IImageProvider 退役。711 测试全绿。坑点：适配器按连接缓存但模型构造时固定 → fallback 换模型拿到旧适配器（已修为按(连接,模型)缓存）；`JsonIgnore(WhenWritingDefault)` 对反序列化同样生效（改自定义 converter）；AiSettings 位置参数追加字段三处同步（本次验证）；运行中 PetApp 锁 bin 报 MSB3021 但编译成功。
 - 2026-08-11（屏幕事件 journal + 行为会话化）：diary/screen-YYYY-MM-DD.jsonl 一行一事件 + ActivitySessionBuilder 归并 + ActivitySummaryFormatter 注入（40 段预算）；启动清理 30 天前 journal；ScreenEventKind 新增 Music；文案中性化（4 语言同集 749 keys）；生图超时 120s→300s + SummaryImageRetryPolicy。626+ 测试全绿。坑：sln x64 平台映射 AnyCPU，验证运行版本认 `bin/Debug/.../win-x64/` 时间戳，`bin/x64/` 是旧残留。
 - 2026-08-09（TTS 实施）：P0-P3 全部完成——契约下沉 Core、SAPI/OneCore/OpenAI 兼容三级栈、设置页引擎/音色/试听/语速/连接编辑器；603 tests 全绿 + build 0 warn/error + 真机验证；独立 code review 发现 I-1~I-4/M-1~M-5 全部修复并补回归测试。

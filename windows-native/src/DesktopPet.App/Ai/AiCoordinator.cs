@@ -865,7 +865,6 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             pipeline = new ChatPipeline(scheduler, personas.ResolveSelected, _eventLog);
         }
 
-        IImageGenProvider? imageProvider = null;
         ImageGenService? imageGen = null;
         SummaryImageTarget? summaryImageTarget = null;
         if (providers.Image is not null)

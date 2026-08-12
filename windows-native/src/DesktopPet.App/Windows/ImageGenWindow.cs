@@ -115,6 +115,7 @@ public sealed class ImageGenWindow : Window
             Padding = new Thickness(8, 6, 8, 6),
         };
         _promptBox.TextChanged += (_, _) => _promptCount.Text = $"{_promptBox.Text.Length}/2000";
+        _promptCount.Text = "0/2000"; // 初始空文本不触发 TextChanged，显式初始化计数显示
 
         // ---- 参数面板 ----
         var paramsCard = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
@@ -395,6 +396,11 @@ public sealed class ImageGenWindow : Window
         void Add(UIElement element, int column)
         {
             Grid.SetColumn(element, column);
+            if (element is FrameworkElement fe and not TextBlock)
+            {
+                // 非标签控件统一右间距 16（标签自带 6DIP 右边距）——防列间紧贴
+                fe.Margin = new Thickness(0, 0, 16, 0);
+            }
             grid.Children.Add(element);
         }
         Add(Label("宽高比"), 0);
@@ -406,7 +412,8 @@ public sealed class ImageGenWindow : Window
         Add(_transparentToggle, 6);
 
         // seed 单独一行（能力支持时才可勾选；输入框随勾选启用）
-        var seedRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var seedRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        _seedBox.Margin = new Thickness(8, 0, 0, 0);
         seedRow.Children.Add(_seedToggle);
         seedRow.Children.Add(_seedBox);
         panel.Children.Add(grid);
@@ -457,7 +464,7 @@ public sealed class ImageGenWindow : Window
             : ImageScale.S1K;
         var quality = _qualityCombo == _qualityPlaceholder
             ? ImageQuality.Auto
-            : (_qualityCombo.SelectedItem as ComboBoxItem)?.Tag as string switch
+            : ((_qualityCombo.SelectedItem as ComboBoxItem)?.Tag as string) switch
             {
                 "low" => ImageQuality.Low,
                 "medium" => ImageQuality.Medium,

@@ -3543,9 +3543,24 @@ public sealed class SettingsWindow : Window
         form.Children.Add(nameBox);
         form.Children.Add(FormLabel("协议族（决定请求格式与能力；模型 id 须与端点实际支持的模型一致）", new Thickness(0, 12, 0, 5)));
         form.Children.Add(familyCombo);
-        form.Children.Add(FormLabel("接口地址（如 https://api.openai.com/v1；Gemini 官方端点 https://generativelanguage.googleapis.com/v1beta）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(new TextBlock
+        {
+            // 长标签必须 wrap：NoWrap + Stretch 会让文本溢出表单宽被裁剪
+            Text = "接口地址（OpenAI 兼容如 https://api.openai.com/v1；Gemini 官方端点 https://generativelanguage.googleapis.com/v1beta）",
+            FontSize = 12,
+            Foreground = Brush("TextSecondaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 12, 0, 5),
+        });
         form.Children.Add(baseBox);
-        form.Children.Add(FormLabel("模型白名单（每行一个模型 id，如 gpt-image-1.5；留空 = 该协议族全部内置模型）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(new TextBlock
+        {
+            Text = "模型白名单（每行一个模型 id，如 gpt-image-1.5；留空 = 该协议族全部内置模型）",
+            FontSize = 12,
+            Foreground = Brush("TextSecondaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 12, 0, 5),
+        });
         form.Children.Add(modelsBox);
         form.Children.Add(FormLabel("API Key（存 Windows 凭据管理器，不落明文 JSON；本地端点可留空）", new Thickness(0, 12, 0, 5)));
         form.Children.Add(keyBox);
@@ -3599,7 +3614,6 @@ public sealed class SettingsWindow : Window
         DockPanel.SetDock(footer, Dock.Bottom);
         DockPanel.SetDock(form, Dock.Top);
         rightPanel.Children.Add(footer);
-        rightPanel.Children.Add(status);
         rightPanel.Children.Add(form);
         Grid.SetColumn(rightPanel, 1);
         root.Children.Add(rightPanel);

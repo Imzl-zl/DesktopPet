@@ -18,6 +18,15 @@ internal static partial class NativeMethods
     public static void MoveWindow(nint hwnd, int x, int y)
         => SetWindowPos(hwnd, 0, x, y, 0, 0, SwpNoSize | SwpNoZOrder | SwpNoActivate);
 
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(nint hWnd);
+
+    public static void ActivateWindow(nint hwnd)
+    {
+        if (hwnd != 0) SetForegroundWindow(hwnd);
+    }
+
     /// <summary>窗口消息的时间戳（系统 ms），用于拖拽延迟采样。</summary>
     [LibraryImport("user32.dll")]
     private static partial int GetMessageTime();

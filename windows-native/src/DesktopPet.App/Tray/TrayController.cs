@@ -17,6 +17,7 @@ public sealed class TrayController : IDisposable
     private readonly TaskbarIcon _icon;
     private readonly MenuItem _toggleItem;
     private readonly ContextMenu _menu;
+    private readonly TrayContextMenuPresenter _menuPresenter;
 
     public TrayController(PetWindowManager manager, I18nService? i18n = null)
     {
@@ -42,7 +43,10 @@ public sealed class TrayController : IDisposable
         menu.Items.Add(new Separator());
         menu.Items.Add(quitItem);
         _menu = menu;
+        // ContextMenu 属性仅作库侧资源引用（MenuActivation=None 后库不再自动打开）；
+        // 菜单的实际打开由 TrayContextMenuPresenter 在 TrayRightMouseUp 时按 MousePoint 负责。
         _icon.ContextMenu = menu;
+        _menuPresenter = new TrayContextMenuPresenter(_icon, menu, NativeMethods.ActivateWindow);
         // H.NotifyIcon 2.1.4：代码方式创建（非 XAML 视觉树）不会自动创建托盘图标——
         // Shell_NotifyIcon 只由 ForceCreate 触发（Loaded 事件只在加入视觉树后发生）。
         // 缺失时托盘入口（设置/显示隐藏/退出）整体失效。
@@ -66,6 +70,7 @@ public sealed class TrayController : IDisposable
 
     public void Dispose()
     {
+        _menuPresenter.Dispose();
         _icon.Dispose();
     }
 }

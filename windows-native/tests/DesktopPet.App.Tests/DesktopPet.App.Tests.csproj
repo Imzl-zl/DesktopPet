@@ -13,6 +13,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageReference Include="H.NotifyIcon.WPF" Version="2.1.4" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,6 +38,8 @@
              Link="Ai\ModelConnectionTestController.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Tts\OneCoreTtsProvider.cs"
              Link="Tts\OneCoreTtsProvider.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Tray\TrayContextMenuPresenter.cs"
+             Link="Tray\TrayContextMenuPresenter.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Rendering\SpriteLoader.cs"
              Link="Rendering\SpriteLoader.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Rendering\SpriteSheetCache.cs"
@@ -49,6 +52,9 @@
              Link="Rendering\SpriteFrameBitmapSourceCache.cs" />
     <Content Include="..\DesktopPet.Core.Tests\Fixtures\single-row.png"
              Link="Fixtures\single-row.png"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\DesktopPet.App\App.xaml"
+             Link="Fixtures\App.xaml"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

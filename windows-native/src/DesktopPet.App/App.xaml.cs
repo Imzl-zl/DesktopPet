@@ -31,6 +31,8 @@ namespace DesktopPet.App;
 public partial class App : Application
 {
     private const string InstanceMutexName = @"Global\DesktopPet.Native.SingleInstance";
+    /// <summary>退出时 AI 释放（Agent 停止/runtime 代际释放）的总等待窗口，超时后放弃等待继续退出。</summary>
+    private const int AiDisposeExitTimeoutSeconds = 10;
     private Mutex? _instanceMutex;
     private bool _ownsMutex;
     private PetWindowManager? _manager;
@@ -542,7 +544,22 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         if (_ai is not null)
-            _ai.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        {
+            // 修复：dispose 链（Agent 停止/runtime 代际释放/provider 网络取消）曾无总超时，
+            // 任一层卡死都会让 OnExit 永久阻塞——进程不退出、托盘图标残留。
+            // 现在限制总等待窗口，超时后放弃等待直接清理（残留后台任务随进程退出回收）。
+            try
+            {
+                if (!_ai.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(AiDisposeExitTimeoutSeconds)))
+                {
+                    _logger?.Info("App", "AI dispose timed out during exit; continuing shutdown");
+                }
+            }
+            catch (Exception ex) when (ex is AggregateException or ObjectDisposedException)
+            {
+                _logger?.Info("App", "AI dispose failed during exit: " + ex.Message);
+            }
+        }
         _fullscreenMonitor?.Dispose();
         _fullscreenMonitor = null;
         _modeService?.Shutdown();

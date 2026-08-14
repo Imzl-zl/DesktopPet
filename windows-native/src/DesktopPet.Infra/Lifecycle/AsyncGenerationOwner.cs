@@ -64,8 +64,13 @@ public sealed class AsyncGenerationOwner<T> : IAsyncDisposable where T : class, 
     public async ValueTask DisposeAsync() => await DisposeAsync(DefaultDisposeTimeout);
 
     /// <summary>
-    /// 带超时的释放：租约泄漏（调用方未释放）时强制回收底层资源，防退出/恢复出厂挂死。
-    /// 修复：原实现无限等待全部租约释放，任何泄漏路径都会让 DisposeAsync 永久挂起。
+    /// 带超时的释放：租约泄漏（调用方未释放）或底层释放卡死（如 provider 网络调用不响应
+    /// 取消）时强制回收，防退出/恢复出厂挂死。
+    /// 修复一：原实现无限等待全部租约释放，任何泄漏路径都会让 DisposeAsync 永久挂起。
+    /// 修复二：原实现超时后仍 `await Task.WhenAll(pending.Concat(...))`——pending 含超时前
+    /// 已卡住的 entry（DisposeStarted=true），强制路径不会重试它，WhenAll 永久挂起，
+    /// 超时兜底形同虚设。现改为超时后不再等待未完成的 entry，只对未启动的 entry 强制释放，
+    /// 并再等待一个短窗口；仍不完成则放弃，交由进程退出回收。
     /// </summary>
     public async ValueTask DisposeAsync(TimeSpan timeout)
     {
@@ -100,8 +105,8 @@ public sealed class AsyncGenerationOwner<T> : IAsyncDisposable where T : class, 
             return;
         }
 
-        // 租约泄漏：不再等待调用方，强制释放底层资源（泄漏租约后续 Release 幂等无害——
-        // DisposeStarted 已置位，不会二次 Dispose）。
+        // 超时：不再等待超时前已启动的 entry（可能卡死且强制无法解救），只对未启动的
+        // entry 强制释放；泄漏租约后续 Release 幂等无害（DisposeStarted 已置位，不会二次 Dispose）。
         List<Entry> forced = [];
         lock (_sync)
         {
@@ -115,9 +120,15 @@ public sealed class AsyncGenerationOwner<T> : IAsyncDisposable where T : class, 
             }
         }
         foreach (var entry in forced) _ = DisposeEntryAsync(entry);
-        await Task.WhenAll(
-            pending.Concat(forced.Select(entry => entry.Disposed.Task))).ConfigureAwait(false);
+        if (forced.Count == 0) return;
+
+        // 只等新启动的强制释放（刚启动的 entry 正常应快速完成），再给短窗口兜底后放弃。
+        var forcedAll = Task.WhenAll(forced.Select(entry => entry.Disposed.Task));
+        await Task.WhenAny(forcedAll, Task.Delay(ForcedDisposeTimeout)).ConfigureAwait(false);
     }
+
+    /// <summary>强制释放后的额外等待窗口：超过即放弃（进程退出即回收，不能阻塞退出）。</summary>
+    private static readonly TimeSpan ForcedDisposeTimeout = TimeSpan.FromSeconds(5);
 
     private static readonly TimeSpan DefaultDisposeTimeout = TimeSpan.FromSeconds(30);
 

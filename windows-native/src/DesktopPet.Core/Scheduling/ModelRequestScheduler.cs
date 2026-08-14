@@ -325,12 +325,20 @@ public sealed class ModelRequestScheduler : IAsyncDisposable
         foreach (var job in queued) job.Completion.TrySetCanceled(_loopCts.Token);
         if (loop is not null)
         {
-            try { await loop.ConfigureAwait(false); }
+            try
+            {
+                // 修复：worker 可能卡在 provider 调用（网络不响应取消）而永不退出；
+                // 原实现无限 await loop，Scheduler 释放卡死会连锁挂起整个退出流程。
+                await Task.WhenAny(loop, Task.Delay(DisposeWorkerTimeout)).ConfigureAwait(false);
+            }
             catch (OperationCanceledException) { }
         }
         _wake.Dispose();
         _loopCts.Dispose();
     }
+
+    /// <summary>释放时等待 worker 循环退出的上限：超过即放弃（进程退出即回收，不能阻塞退出）。</summary>
+    private static readonly TimeSpan DisposeWorkerTimeout = TimeSpan.FromSeconds(5);
 
     private sealed record Job(RequestPriority Priority, ChatRequest Request, CancellationToken Ct)
     {

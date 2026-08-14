@@ -124,4 +124,69 @@ public class ImageConnectionsConfigTests
         Assert.DoesNotContain("legacyApiKeyRef", json);
         Assert.DoesNotContain("legacyModelName", json);
     }
+
+    // ── v2：自定义模型能力声明（modelCapabilities，windows-imagegen-v2-design.md §3.3）──
+
+    [Fact]
+    public void Normalize_ModelCapabilities_FiltersToWhitelist()
+    {
+        // 能力声明只保留白名单内模型的条目；白名单外（删了模型/残留）失效
+        var cfg = new ImageConnectionsConfig
+        {
+            Connections = [new ImageConnection("c1", "c1", "openai", "https://x.test/v1", "cred:1", ["m1", "m2"])],
+            ModelCapabilities = new Dictionary<string, CustomImageCapabilities>
+            {
+                ["m1"] = new(Editing: false),
+                ["stale-model"] = new(Editing: true), // 不在白名单 → 剔除
+            },
+        };
+
+        var normalized = ImageConnectionsConfig.Normalize(cfg);
+
+        Assert.NotNull(normalized!.ModelCapabilities);
+        Assert.Single(normalized.ModelCapabilities);
+        Assert.True(normalized.ModelCapabilities!.ContainsKey("m1"));
+        Assert.False(normalized.ModelCapabilities.ContainsKey("stale-model"));
+    }
+
+    [Fact]
+    public void Serialize_ModelCapabilities_RoundTrips()
+    {
+        var cfg = new ImageConnectionsConfig
+        {
+            Connections = [Conn("c1", "my-relay-model")],
+            ModelCapabilities = new Dictionary<string, CustomImageCapabilities>
+            {
+                ["my-relay-model"] = new(
+                    Editing: true, MaxReferenceImages: 2, Quality: false,
+                    FixedSizes: ["2048x2048", "1024x1024"], EditStyle: "imageArray"),
+            },
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new ProvidersFileModel { Image = ImageConnectionsConfig.Normalize(cfg) },
+            DesktopPet.Core.Storage.JsonOptions.CamelCase);
+        Assert.Contains("\"modelCapabilities\":{\"my-relay-model\":", json);
+
+        var back = ProvidersFileModel.Deserialize(json);
+        var caps = back.Image!.ModelCapabilities!["my-relay-model"];
+        Assert.True(caps.Editing);
+        Assert.Equal(2, caps.MaxReferenceImages);
+        Assert.False(caps.Quality);
+        Assert.Equal(2, caps.FixedSizes!.Count);
+    }
+
+    [Fact]
+    public void Deserialize_WithoutModelCapabilities_Null()
+    {
+        // v1 时代文件（无 modelCapabilities 字段）→ null，不报错
+        var cfg = new ImageConnectionsConfig { Connections = [Conn("c1", "m1")] };
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new ProvidersFileModel { Image = ImageConnectionsConfig.Normalize(cfg) },
+            DesktopPet.Core.Storage.JsonOptions.CamelCase);
+
+        var back = ProvidersFileModel.Deserialize(json);
+
+        Assert.Null(back.Image!.ModelCapabilities);
+    }
 }

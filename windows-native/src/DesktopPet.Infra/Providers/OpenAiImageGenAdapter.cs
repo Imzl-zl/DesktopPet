@@ -6,10 +6,11 @@ using DesktopPet.Core.Scheduling;
 namespace DesktopPet.Infra.Providers;
 
 /// <summary>
-/// OpenAI 兼容族生图适配器（windows-imagegen-design.md §5.2）：
+/// OpenAI 兼容族生图适配器（windows-imagegen-design.md §5.2 + v2 设计 §3）：
 /// POST {baseUrl}/images/generations（+ /images/edits），通吃 gpt-image 全系 /
-/// Grok Imagine / Qwen-Image / FLUX / Kolors 及用户自配 OpenAI 兼容中转端点。
-/// 尺寸统一「宽高比 + 档位」，在此换算像素（短边=档位、按 ratio、对齐 16 倍数、长边 ≤3840）。
+/// Grok Imagine / Qwen-Image / FLUX / Kolors / SenseNova 及用户自配 OpenAI 兼容中转端点。
+/// v2：尺寸三形态（PixelCalc 换算 / FixedTable 查表 / Grok aspect_ratio+resolution）与
+/// 编辑三形态（image 数组 / images 数组 / 单对象）均由注入的能力驱动，零模型特判。
 /// </summary>
 public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
 {
@@ -22,6 +23,7 @@ public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
     private const int LongSideS4K = 3840;
 
     private readonly string _modelId;
+    private readonly ImageGenCapabilities _capabilities;
 
     public OpenAiImageGenAdapter(
         ImageConnection connection,
@@ -29,13 +31,23 @@ public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
         ICredentialStore credentials,
         HttpClient httpClient,
         TimeSpan? requestTimeout = null,
-        bool strictParams = false)
+        bool strictParams = false,
+        ImageGenCapabilities? capabilities = null)
         : base(connection, credentials, httpClient, requestTimeout, strictParams)
     {
         _modelId = modelId ?? throw new ArgumentNullException(nameof(modelId));
+        _capabilities = capabilities ?? DefaultCapabilities();
     }
 
     public override string Family => OpenAiFamily;
+
+    /// <summary>缺省能力（适配器直接构造/测试用；等价目录未命中的 family 推断）。</summary>
+    private static ImageGenCapabilities DefaultCapabilities() => new(
+        NativeTransparency: false,
+        [ImageAspectRatio.R1x1, ImageAspectRatio.R3x2, ImageAspectRatio.R2x3,
+         ImageAspectRatio.R4x3, ImageAspectRatio.R3x4, ImageAspectRatio.R16x9, ImageAspectRatio.R9x16],
+        [ImageScale.S1K, ImageScale.S2K],
+        Editing: true, MaxReferenceImages: 1, Seed: false);
 
     protected override bool HasReducibleParameters(ImageGenSpec spec)
         => spec.Quality != ImageQuality.Auto || spec.Transparent || spec.Seed is not null;
@@ -46,14 +58,29 @@ public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
         {
             ["model"] = _modelId,
             ["prompt"] = spec.Prompt,
-            ["size"] = ResolveSize(spec.AspectRatio, spec.Scale),
             ["n"] = 1,
             // 不发送 response_format：部分端点直接拒绝顶层该参数（需放 extra_body），
             // 本适配器对 b64_json/url 两种响应均已兼容（见 ParseResponseAsync），不发送最稳。
         };
 
-        // quality：OpenAI 系支持 low/medium/high；中转不认识时由基类降级重试去掉
-        if (!reduced && spec.Quality != ImageQuality.Auto)
+        // v2 尺寸三形态（能力驱动，windows-imagegen-v2-design.md §3）
+        switch (_capabilities.SizeStyle)
+        {
+            case ImageSizeStyle.FixedTable:
+                body["size"] = ResolveFixedSize(spec.AspectRatio);
+                break;
+            case ImageSizeStyle.AspectRatioResolution:
+                // Grok 官方形态：aspect_ratio + resolution 枚举（不发 size）
+                body["aspect_ratio"] = ImageAspectRatioParser.ToDisplay(spec.AspectRatio);
+                body["resolution"] = ResolutionName(spec.Scale);
+                break;
+            default:
+                body["size"] = ResolveSize(spec.AspectRatio, spec.Scale);
+                break;
+        }
+
+        // quality：OpenAI 系支持 low/medium/high；能力关闭（SenseNova 等）或降级重试时不发
+        if (!reduced && _capabilities.QualityLevels && spec.Quality != ImageQuality.Auto)
             body["quality"] = QualityName(spec.Quality);
 
         // 透明：仅模型能力允许时直传（gpt-image-1 系列）；gpt-image-2 等由门面走绿幕策略
@@ -70,6 +97,18 @@ public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
         return body;
     }
 
+    /// <summary>固定尺寸表查表（比例归类匹配；未命中取表第一项兜底）。</summary>
+    private string ResolveFixedSize(ImageAspectRatio ratio)
+        => ImageSizeTable.FindSize(_capabilities.FixedSizes, ratio)
+           ?? ResolveSize(ratio, ImageScale.S1K); // 空表防御（正常由门面/目录保证非空）
+
+    private static string ResolutionName(ImageScale scale) => scale switch
+    {
+        ImageScale.S2K => "2k",
+        ImageScale.S4K => "4k",
+        _ => "1k",
+    };
+
     protected override async Task<byte[]> ParseResponseAsync(JsonDocument response, CancellationToken ct)
     {
         var root = response.RootElement;
@@ -83,15 +122,49 @@ public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
         throw new ProviderException("invalid-response", "生图响应缺少 b64_json/url");
     }
 
-    /// <summary>编辑 body：Grok 用单对象（官方 JSON 形态），其余用通用数组（中转主流）。</summary>
+    /// <summary>multipart 编辑（newapi 类中转 gpt-image-2）：图片走文件字段，body 只含生成参数。</summary>
+    protected override bool UsesMultipartEdit => EffectiveEditStyle() == ImageEditStyle.MultipartFormData;
+
+    /// <summary>编辑 body：形态由能力驱动（gpt-image-2 新 images 数组 / Grok 单对象 / 其余 image 数组）。</summary>
     protected override JsonNode? BuildEditImages(IReadOnlyList<ReferenceImage> references)
     {
         if (references.Count == 0)
             throw new ProviderException("invalid-request", "编辑至少需要一张参考图");
-        return _modelId.StartsWith("grok-", StringComparison.OrdinalIgnoreCase)
-            ? BuildEditImagesObject(references)
-            : BuildEditImagesArray(references);
+        return EffectiveEditStyle() switch
+        {
+            ImageEditStyle.SingleObject => BuildEditImagesObject(references),
+            ImageEditStyle.ImagesArray => BuildEditImagesImagesArray(references),
+            _ => BuildEditImagesArray(references),
+        };
     }
+
+    /// <summary>编辑 body 整体构建：ImagesArray 形态的键名是 images（其余 image）；multipart 形态不含图（走文件字段）。</summary>
+    protected override JsonObject BuildEditBody(ImageGenSpec spec, IReadOnlyList<ReferenceImage> references)
+    {
+        var body = BuildGenerateBody(spec, reduced: false);
+        if (EffectiveEditStyle() == ImageEditStyle.MultipartFormData)
+            return body; // 图片由 BuildMultipartEditContent 以文件字段发送
+        body[EffectiveEditStyle() == ImageEditStyle.ImagesArray ? "images" : "image"] = BuildEditImages(references);
+        return body;
+    }
+
+    /// <summary>gpt-image-2 官方新形态：images: [{image_url}]（无 type，2026 文档核实）。</summary>
+    private static JsonNode BuildEditImagesImagesArray(IReadOnlyList<ReferenceImage> references)
+    {
+        var arr = new JsonArray();
+        foreach (var r in references)
+        {
+            arr.Add(new JsonObject { ["image_url"] = ToDataUri(r) });
+        }
+        return arr;
+    }
+
+    /// <summary>Auto 按模型 id 推断：grok-* → 单对象；gpt-image-2* → images 数组；其余 image 数组。</summary>
+    private ImageEditStyle EffectiveEditStyle()
+        => _capabilities.EditStyle != ImageEditStyle.Auto ? _capabilities.EditStyle
+         : _modelId.StartsWith("grok-", StringComparison.OrdinalIgnoreCase) ? ImageEditStyle.SingleObject
+         : _modelId.StartsWith("gpt-image-2", StringComparison.OrdinalIgnoreCase) ? ImageEditStyle.ImagesArray
+         : ImageEditStyle.ImageArray;
 
     /// <summary>宽高比 + 档位 → 像素尺寸（gpt-image-2 约束：16 倍数、长边 ≤3840、总像素 ≤8.29M）。</summary>
     public static string ResolveSize(ImageAspectRatio ratio, ImageScale scale)

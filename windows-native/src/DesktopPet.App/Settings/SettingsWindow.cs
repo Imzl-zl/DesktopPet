@@ -3511,6 +3511,12 @@ public sealed class SettingsWindow : Window
 
         // ---- 右侧：编辑表单 ----
         var nameBox = new TextBox { FontSize = 12, Height = 30 };
+        var channelTemplates = ImageChannelCatalog.LoadBuiltIn().All;
+        var channelCombo = new ComboBox { FontSize = 12, Height = 30 };
+        foreach (var t in channelTemplates)
+        {
+            channelCombo.Items.Add(new ComboBoxItem { Content = t.Name, Tag = t.Id });
+        }
         var familyCombo = new ComboBox { FontSize = 12, Height = 30 };
         familyCombo.Items.Add(new ComboBoxItem { Content = "OpenAI 兼容（gpt-image / Grok / Qwen / FLUX 等）", Tag = ImageModelCatalog.FamilyOpenAi });
         familyCombo.Items.Add(new ComboBoxItem { Content = "Google Gemini（Nano Banana 系列）", Tag = ImageModelCatalog.FamilyGoogle });
@@ -3523,6 +3529,16 @@ public sealed class SettingsWindow : Window
             TextWrapping = TextWrapping.Wrap,
             Height = 68,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+        var capsBox = new TextBox
+        {
+            FontSize = 11,
+            AcceptsReturn = true,
+            VerticalContentAlignment = VerticalAlignment.Top,
+            TextWrapping = TextWrapping.NoWrap,
+            Height = 80,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            FontFamily = new FontFamily("Consolas"),
         };
         var keyBox = new PasswordBox { FontSize = 12, Height = 30 };
         var keyHint = new TextBlock
@@ -3541,6 +3557,8 @@ public sealed class SettingsWindow : Window
         };
         form.Children.Add(FormLabel("连接名称"));
         form.Children.Add(nameBox);
+        form.Children.Add(FormLabel("渠道模板（决定协议行为：编辑形态/尺寸形态；模型级能力声明可覆盖；选模板自动填协议族与地址）", new Thickness(0, 12, 0, 5)));
+        form.Children.Add(channelCombo);
         form.Children.Add(FormLabel("协议族（决定请求格式与能力；模型 id 须与端点实际支持的模型一致）", new Thickness(0, 12, 0, 5)));
         form.Children.Add(familyCombo);
         form.Children.Add(new TextBlock
@@ -3562,6 +3580,15 @@ public sealed class SettingsWindow : Window
             Margin = new Thickness(0, 12, 0, 5),
         });
         form.Children.Add(modelsBox);
+        form.Children.Add(new TextBlock
+        {
+            Text = "模型能力声明（可选，JSON：模型 id → 能力覆盖，仅覆盖声明维度，未声明自动推断；如 {\"my-model\":{\"fixedSizes\":[\"2048x2048\",\"1024x1024\"],\"editing\":true,\"maxReferenceImages\":2}}；字段：nativeTransparency/editing/maxReferenceImages/seed/quality/fixedSizes/sizeStyle/editStyle）",
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 10, 0, 5),
+        });
+        form.Children.Add(capsBox);
         form.Children.Add(FormLabel("API Key（存 Windows 凭据管理器，不落明文 JSON；本地端点可留空）", new Thickness(0, 12, 0, 5)));
         form.Children.Add(keyBox);
         form.Children.Add(keyHint);
@@ -3621,16 +3648,38 @@ public sealed class SettingsWindow : Window
 
         // 当前编辑目标；null = 新建模式（保存时生成新连接 id）
         ImageConnection? editing = null;
+        int ChannelIndex(string? id)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return -1;
+            for (var i = 0; i < channelTemplates.Count; i++)
+            {
+                if (string.Equals(channelTemplates[i].Id, id, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+            return -1;
+        }
+        int CustomChannelIndex() => ChannelIndex(ImageChannelCatalog.CustomChannel);
         void LoadForm(ImageConnection? connection)
         {
             editing = connection;
             nameBox.Text = connection?.Name ?? "";
+            var channelIndex = connection is null ? CustomChannelIndex() : ChannelIndex(connection.Channel);
+            channelCombo.SelectedIndex = channelIndex < 0 ? CustomChannelIndex() : channelIndex;
             familyCombo.SelectedIndex = connection is null
                 || string.Equals(connection.Family, ImageModelCatalog.FamilyOpenAi, StringComparison.OrdinalIgnoreCase)
                     ? 0
                     : 1;
             baseBox.Text = connection?.BaseUrl ?? "";
             modelsBox.Text = connection is null ? "" : string.Join("\n", connection.Models);
+            capsBox.Text = connection is not null
+                && _ai!.Providers.Image?.ModelCapabilities is { Count: > 0 } caps
+                ? System.Text.Json.JsonSerializer.Serialize(caps,
+                    new System.Text.Json.JsonSerializerOptions
+                    {
+                        WriteIndented = true,
+                        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                    })
+                : "";
             keyBox.Password = "";
             keyHint.Text = string.IsNullOrEmpty(connection?.ApiKeyRef)
                 ? ""
@@ -3646,11 +3695,46 @@ public sealed class SettingsWindow : Window
             RebuildList(id);
         }
 
+        // v2：全局能力声明合并（键=模型 id，跨连接共享）→ 白名单过滤失效键
+        static IReadOnlyDictionary<string, CustomImageCapabilities>? MergeCapabilities(
+            IReadOnlyDictionary<string, CustomImageCapabilities>? existing,
+            IReadOnlyDictionary<string, CustomImageCapabilities>? declared,
+            IEnumerable<ImageConnection> connections)
+        {
+            var merged = new Dictionary<string, CustomImageCapabilities>(StringComparer.OrdinalIgnoreCase);
+            if (existing is not null)
+                foreach (var kv in existing) merged[kv.Key] = kv.Value;
+            if (declared is not null)
+                foreach (var kv in declared) merged[kv.Key] = kv.Value;
+            return FilterCapabilities(merged, connections.SelectMany(c => c.Models));
+        }
+
+        static IReadOnlyDictionary<string, CustomImageCapabilities>? FilterCapabilities(
+            IReadOnlyDictionary<string, CustomImageCapabilities>? caps,
+            IEnumerable<string> validModels)
+        {
+            if (caps is null) return null;
+            var valid = validModels.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var kept = caps.Where(kv => valid.Contains(kv.Key))
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+            return kept.Count == 0 ? null : kept;
+        }
+
         newButton.Click += (_, _) =>
         {
             listBox.SelectedItem = null;
             listBox.UnselectAll();
             LoadForm(null);
+        };
+        // 选渠道模板 → 自动填协议族与官方地址（用户可再改；模板行为仍按渠道生效）
+        channelCombo.SelectionChanged += (_, _) =>
+        {
+            if (channelCombo.SelectedItem is ComboBoxItem { Tag: string channelId }
+                && channelTemplates.FirstOrDefault(t => t.Id == channelId) is { } tpl)
+            {
+                familyCombo.SelectedIndex = string.Equals(tpl.Family, ImageModelCatalog.FamilyGoogle, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+                if (!string.IsNullOrEmpty(tpl.BaseUrl)) baseBox.Text = tpl.BaseUrl;
+            }
         };
         listBox.SelectionChanged += (_, _) =>
         {
@@ -3665,12 +3749,34 @@ public sealed class SettingsWindow : Window
             var baseUrl = baseBox.Text.Trim();
             var family = (familyCombo.SelectedItem as ComboBoxItem)?.Tag as string
                          ?? ImageModelCatalog.FamilyOpenAi;
+            var channel = (channelCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
             var models = modelsBox.Text
                 .Split(new[] { '\n', '\r', ',', '，' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(m => m.Trim())
                 .Where(m => m.Length > 0)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            // v2：模型能力声明（JSON 字典，可选）；解析失败阻止保存并提示
+            Dictionary<string, CustomImageCapabilities>? declaredCaps = null;
+            var capsText = capsBox.Text.Trim();
+            if (capsText.Length > 0)
+            {
+                try
+                {
+                    var parsed = System.Text.Json.JsonSerializer.Deserialize<
+                        Dictionary<string, CustomImageCapabilities>>(capsText);
+                    if (parsed is null || parsed.Count == 0)
+                        throw new FormatException("空字典");
+                    declaredCaps = parsed;
+                }
+                catch (Exception ex) when (ex is System.Text.Json.JsonException or FormatException)
+                {
+                    status.Text = "模型能力声明 JSON 无效：" + ex.Message;
+                    status.Foreground = Brush("DangerBrush");
+                    return;
+                }
+            }
             if (name.Length == 0 || baseUrl.Length == 0)
             {
                 status.Text = _i18n.T("连接名称和接口地址不能为空");
@@ -3700,7 +3806,7 @@ public sealed class SettingsWindow : Window
                 if (credentialChanged) creds.Set(keyRef, secret!);
 
                 var connections = (providers.Image?.Connections ?? []).ToList();
-                var updated = new ImageConnection(connectionId, name, family, baseUrl, keyRef, models);
+                var updated = new ImageConnection(connectionId, name, family, baseUrl, keyRef, models, channel);
                 var index = connections.FindIndex(c => c.Id == connectionId);
                 if (index >= 0) connections[index] = updated;
                 else connections.Add(updated);
@@ -3711,6 +3817,9 @@ public sealed class SettingsWindow : Window
                     {
                         Connections = connections,
                         SummaryModelRef = providers.Image?.SummaryModelRef ?? "",
+                        // 全局声明合并（键=模型 id，跨连接共享）+ 白名单过滤（Normalize 再兜底）
+                        ModelCapabilities = MergeCapabilities(
+                            providers.Image?.ModelCapabilities, declaredCaps, connections),
                     },
                 };
                 try
@@ -3792,6 +3901,9 @@ public sealed class SettingsWindow : Window
                 {
                     Connections = connections,
                     SummaryModelRef = providers.Image?.SummaryModelRef ?? "",
+                    // 删除连接：其余连接的白名单过滤能力声明（失效键剔除）
+                    ModelCapabilities = FilterCapabilities(
+                        providers.Image?.ModelCapabilities, connections.SelectMany(c => c.Models)),
                 },
             };
             try

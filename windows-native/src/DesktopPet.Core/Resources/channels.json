@@ -1,0 +1,55 @@
+{
+  "channels": [
+    {
+      "id": "openai-official",
+      "name": "OpenAI 官方",
+      "family": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "note": "gpt-image 全系；编辑形态以目录声明为准（gpt-image-2=images 数组）"
+    },
+    {
+      "id": "google-official",
+      "name": "Google Gemini 官方",
+      "family": "google",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "note": "Nano Banana 全系；generateContent 协议"
+    },
+    {
+      "id": "sensenova-official",
+      "name": "SenseNova 官方（商汤）",
+      "family": "openai",
+      "baseUrl": "https://token.sensenova.cn/v1",
+      "note": "sensenova-u1-fast：11 种固定 2K 尺寸（目录已声明），公开 API 无图生图"
+    },
+    {
+      "id": "xai-official",
+      "name": "xAI 官方（Grok Imagine）",
+      "family": "openai",
+      "baseUrl": "https://api.x.ai/v1",
+      "capabilities": { "editStyle": "singleObject", "sizeStyle": "aspectRatioResolution" },
+      "note": "编辑=单对象 JSON；尺寸=aspect_ratio+resolution"
+    },
+    {
+      "id": "siliconflow",
+      "name": "硅基流动",
+      "family": "openai",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "note": "Qwen-Image / FLUX / Kolors 等"
+    },
+    {
+      "id": "newapi-relay",
+      "name": "OpenAI 兼容中转（newapi / One API）",
+      "family": "openai",
+      "baseUrl": "",
+      "capabilities": { "editStyle": "multipartFormData" },
+      "note": "编辑默认 multipart（实测 gpt-image-2 必须）；gemini 模型编辑请按模型覆盖 editStyle=imageArray"
+    },
+    {
+      "id": "custom",
+      "name": "自定义端点",
+      "family": "openai",
+      "baseUrl": "",
+      "note": "行为按协议族默认 + 模型 id 推断兜底；不确定时用模型能力声明显式指定"
+    }
+  ]
+}

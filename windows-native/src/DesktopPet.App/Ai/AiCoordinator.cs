@@ -393,12 +393,30 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
         var runtime = runtimeLease?.Value;
         if (runtime?.ImageGen is null)
             throw new ProviderException("invalid-request", "生图未配置（无可用生图连接）");
-        var connection = _providers.Image?.Connections.FirstOrDefault(c =>
-            string.Equals(c.Id, connectionId, StringComparison.OrdinalIgnoreCase));
+        var connection = FindImageConnection(connectionId);
         if (connection is null)
             throw new ProviderException("invalid-request", $"生图连接不存在: {connectionId}");
         return await runtime.ImageGen.GenerateAsync(connection, modelId, spec, ct);
     }
+
+    /// <summary>图生图/编辑入口（v2 阶段 D）：参考图 + 提示词，透明请求同样由门面分流。</summary>
+    public async Task<ImageGenOutput> EditImageAsync(
+        string connectionId, string modelId, ImageGenSpec spec,
+        IReadOnlyList<ReferenceImage> references, CancellationToken ct)
+    {
+        using var runtimeLease = _runtime.Acquire();
+        var runtime = runtimeLease?.Value;
+        if (runtime?.ImageGen is null)
+            throw new ProviderException("invalid-request", "生图未配置（无可用生图连接）");
+        var connection = FindImageConnection(connectionId);
+        if (connection is null)
+            throw new ProviderException("invalid-request", $"生图连接不存在: {connectionId}");
+        return await runtime.ImageGen.EditAsync(connection, modelId, spec, references, ct);
+    }
+
+    private ImageConnection? FindImageConnection(string connectionId)
+        => _providers.Image?.Connections.FirstOrDefault(c =>
+            string.Equals(c.Id, connectionId, StringComparison.OrdinalIgnoreCase));
 
     private void QueueRuntimeReconcile(long revision)
         => ObserveTask(ReconcileRuntimeAsync(revision), "runtime reconcile");
@@ -428,13 +446,15 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
                 // 签名相同 = 关键输入未变（改气泡外观/TTS 音色等无关设置）→ 跳过重建。
                 // 修复：原实现无条件 ReplaceAsync，每次保存设置都重建 provider/scheduler/worker 池，
                 // 旧代际 drain 会让退出偶发阻塞（对话租约最长 30s）。
+                // 注意：签名短路只跳过 runtime 重建；Agent 启停/配置推送必须继续执行——
+                // 冷启动时构造函数已发布同签名 runtime，若在此 return 则 StartAgent 永不执行
+                // （看门狗两条路径也不会启动新 Agent：退出重启需进程先存在，活性看门狗有 !running 闸）。
                 var current = _runtime.Current;
                 var nextSignature = AiRuntimeGeneration.SignatureOf(settings, providers, personas);
-                if (current is not null && current.Signature == nextSignature)
+                if (current is null || current.Signature != nextSignature)
                 {
-                    return;
+                    retirement = _runtime.ReplaceAsync(BuildRuntime(settings, providers, personas));
                 }
-                retirement = _runtime.ReplaceAsync(BuildRuntime(settings, providers, personas));
             }
             ObserveTask(retirement, "retired runtime disposal");
 
@@ -830,10 +850,19 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             var timestamp = DateTime.TryParse(payload.GetProperty("timestamp").GetString(), out var t)
                 ? t : DateTime.Now;
             var hash = payload.TryGetProperty("frameHash", out var h) ? h.GetUInt64() : 0ul;
-            var evt = new ScreenEvent(timestamp, kind, summary, hash);
+            var stale = payload.TryGetProperty("isStale", out var staleElement)
+                && staleElement.GetBoolean();
+            var evt = new ScreenEvent(timestamp, kind, summary, hash, stale);
             _lastScreenEventTick = Environment.TickCount64; // 活性看门狗信号
             _eventLog.Add(evt); // 对话屏幕上下文用（最近 N 条）
             AppendScreenEvent(evt); // journal 落盘（按天，重启不丢，总结/回顾用）
+            if (stale)
+            {
+                // 分析期间屏幕已又变化：内容描述的是过去的屏幕，弹幕会滞后于当前画面。
+                // 事件已记录 journal；跳过主动输出（下次分析新帧后再弹）。
+                DebugLog($"[p6] stale screen event kind={kind} revision={configRevision}; journal only");
+                return;
+            }
             // 无模型/分析失败时事件降级（summary 空）→ 默认台词（UI 有反馈，不静默）
             var text = string.IsNullOrWhiteSpace(summary)
                 ? _i18n.T("（看到你的屏幕有变化~）")
@@ -874,7 +903,8 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
             // 再慢由 SummaryImageRetryPolicy 当天补试兜底。
             imageGen = new ImageGenService(
                 ImageModelCatalog.LoadBuiltIn(), _credentials, _providerHttp,
-                requestTimeout: TimeSpan.FromSeconds(300));
+                requestTimeout: TimeSpan.FromSeconds(300),
+                modelCapabilities: providers.Image.ModelCapabilities);
             summaryImageTarget = SummaryImageTargetResolver.Resolve(
                 providers.Image.Connections, settings.Ai.SummaryImageModelRef);
         }

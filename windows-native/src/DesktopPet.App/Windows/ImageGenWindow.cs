@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -24,6 +25,7 @@ public sealed class ImageGenWindow : Window
     private readonly GalleryStore _gallery;
     private readonly I18nService _i18n;
     private readonly ImageModelCatalog _catalog;
+    private static readonly Lazy<ImageChannelCatalog> ChannelCatalog = new(ImageChannelCatalog.LoadBuiltIn);
 
     // 生成状态
     private CancellationTokenSource? _generationCts;
@@ -50,6 +52,15 @@ public sealed class ImageGenWindow : Window
     private readonly Button _cancelButton;
     private readonly TextBlock _status;
     private readonly ComboBox _qualityPlaceholder;
+
+    // v2：图生图参考图（文件/URL）+ 固定尺寸表模式
+    private readonly List<ReferenceImage> _imageRefs = [];
+    private WrapPanel _refPanel = null!;
+    private TextBox _refUrlBox = null!;
+    private TextBlock _refCount = null!;
+    private Button _pickRefButton = null!;
+    private Button _addRefButton = null!;
+    private ComboBox _sizeTableCombo = null!;
 
     // 画廊
     private readonly WrapPanel _thumbPanel;
@@ -290,7 +301,7 @@ public sealed class ImageGenWindow : Window
                 : _catalog.ForFamily(connection.Family).Select(m => m.Id).ToList();
             foreach (var modelId in modelIds)
             {
-                var descriptor = _catalog.Resolve(modelId, connection.Family);
+                var descriptor = ResolveModel(connection, modelId);
                 var price = string.IsNullOrEmpty(descriptor.PriceHint) ? "" : $" · {descriptor.PriceHint}";
                 _modelCombo.Items.Add(new ComboBoxItem
                 {
@@ -319,13 +330,13 @@ public sealed class ImageGenWindow : Window
         RebuildParams();
     }
 
-    /// <summary>按当前模型能力重建参数面板（宽高比/档位/质量/seed/透明）。</summary>
+    /// <summary>按当前模型能力重建参数面板（尺寸表/宽高比+档位、质量、seed、透明、参考图）。</summary>
     private void RebuildParams()
     {
         var panel = new StackPanel();
         var capabilities = _selectedConnection is null
             ? null
-            : _catalog.Resolve(_selectedModelId, _selectedConnection.Family).Capabilities;
+            : CapabilitiesFor(_selectedConnection, _selectedModelId);
 
         if (capabilities is null)
         {
@@ -333,24 +344,45 @@ public sealed class ImageGenWindow : Window
             return;
         }
 
-        _ratioCombo = new ComboBox { FontSize = 12, Width = 110, HorizontalAlignment = HorizontalAlignment.Left };
-        foreach (var ratio in capabilities.AspectRatios)
-        {
-            _ratioCombo.Items.Add(ImageAspectRatioParser.ToDisplay(ratio));
-        }
-        _ratioCombo.SelectedIndex = 0;
-        _scaleCombo = new ComboBox { FontSize = 12, Width = 110, HorizontalAlignment = HorizontalAlignment.Left };
-        foreach (var scale in capabilities.Scales)
-        {
-            _scaleCombo.Items.Add(ImageScaleParser.ToDisplay(scale));
-        }
-        _scaleCombo.SelectedIndex = 0;
+        var hasFixedSizes = capabilities.FixedSizes is { Count: > 0 };
 
-        // 质量：OpenAI 族显示（Google 族忽略 quality 参数）
+        // 尺寸控件：固定尺寸表 → 单个「尺寸」下拉（比例由表推导）；否则 宽高比 + 分辨率双下拉
+        if (hasFixedSizes)
+        {
+            _sizeTableCombo = new ComboBox { FontSize = 12, Width = 170, HorizontalAlignment = HorizontalAlignment.Left };
+            foreach (var size in capabilities.FixedSizes)
+            {
+                var label = size;
+                if (ImageSizeTable.TryParse(size, out var w, out var h)
+                    && ImageAspectRatioParser.TryFromPixels(w, h, out var ratio))
+                {
+                    label = $"{w}×{h}（{ImageAspectRatioParser.ToDisplay(ratio)}）";
+                }
+                _sizeTableCombo.Items.Add(new ComboBoxItem { Content = label, Tag = size });
+            }
+            _sizeTableCombo.SelectedIndex = 0;
+        }
+        else
+        {
+            _ratioCombo = new ComboBox { FontSize = 12, Width = 110, HorizontalAlignment = HorizontalAlignment.Left };
+            foreach (var ratio in capabilities.AspectRatios)
+            {
+                _ratioCombo.Items.Add(ImageAspectRatioParser.ToDisplay(ratio));
+            }
+            _ratioCombo.SelectedIndex = 0;
+            _scaleCombo = new ComboBox { FontSize = 12, Width = 110, HorizontalAlignment = HorizontalAlignment.Left };
+            foreach (var scale in capabilities.Scales)
+            {
+                _scaleCombo.Items.Add(ImageScaleParser.ToDisplay(scale));
+            }
+            _scaleCombo.SelectedIndex = 0;
+        }
+
+        // 质量：能力关闭（SenseNova 等）时隐藏；Google 族忽略 quality 参数
         _qualityCombo = _qualityPlaceholder;
         var openaiFamily = _selectedConnection is not null
             && string.Equals(_selectedConnection.Family, ImageModelCatalog.FamilyOpenAi, StringComparison.OrdinalIgnoreCase);
-        if (openaiFamily)
+        if (openaiFamily && capabilities.QualityLevels)
         {
             _qualityCombo = new ComboBox { FontSize = 12, Width = 110, HorizontalAlignment = HorizontalAlignment.Left };
             foreach (var (value, label) in new[]
@@ -389,7 +421,8 @@ public sealed class ImageGenWindow : Window
         _seedToggle.Click += (_, _) => _seedBox.IsEnabled = _seedToggle.IsChecked == true;
 
         var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
-        for (var i = 0; i < 7; i++)
+        var columnCount = hasFixedSizes ? 5 : 7;
+        for (var i = 0; i < columnCount; i++)
         {
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         }
@@ -403,13 +436,24 @@ public sealed class ImageGenWindow : Window
             }
             grid.Children.Add(element);
         }
-        Add(Label("宽高比"), 0);
-        Add(_ratioCombo, 1);
-        Add(Label("分辨率"), 2);
-        Add(_scaleCombo, 3);
-        Add(Label("质量"), 4);
-        Add(_qualityCombo, 5);
-        Add(_transparentToggle, 6);
+        if (hasFixedSizes)
+        {
+            Add(Label("尺寸"), 0);
+            Add(_sizeTableCombo, 1);
+            Add(Label("质量"), 2);
+            Add(_qualityCombo, 3);
+            Add(_transparentToggle, 4);
+        }
+        else
+        {
+            Add(Label("宽高比"), 0);
+            Add(_ratioCombo, 1);
+            Add(Label("分辨率"), 2);
+            Add(_scaleCombo, 3);
+            Add(Label("质量"), 4);
+            Add(_qualityCombo, 5);
+            Add(_transparentToggle, 6);
+        }
 
         // seed 单独一行（能力支持时才可勾选；输入框随勾选启用）
         var seedRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
@@ -418,6 +462,13 @@ public sealed class ImageGenWindow : Window
         seedRow.Children.Add(_seedBox);
         panel.Children.Add(grid);
         panel.Children.Add(seedRow);
+
+        // v2：参考图区（能力声明图生图时显示；上限 = MaxReferenceImages）
+        if (capabilities.Editing && capabilities.MaxReferenceImages > 0)
+        {
+            panel.Children.Add(BuildRefsSection(capabilities.MaxReferenceImages));
+        }
+
         _paramsHost.Content = panel;
 
         // 透明提示（绿幕模型）
@@ -432,6 +483,200 @@ public sealed class ImageGenWindow : Window
             });
         }
     }
+
+    // ── v2：参考图（图生图/编辑）──
+
+    private UIElement BuildRefsSection(int maxRefs)
+    {
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 4) };
+        header.Children.Add(new TextBlock
+        {
+            Text = "参考图（图生图/编辑）",
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        _refCount = new TextBlock
+        {
+            FontSize = 11,
+            Foreground = Brush("TextTertiaryBrush"),
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        header.Children.Add(_refCount);
+        if (_imageRefs.Count > 0)
+        {
+            var clear = new Button
+            {
+                Content = "清空",
+                Style = AppStyle("ButtonDefaultStyle"),
+                Height = 22,
+                FontSize = 11,
+                Padding = new Thickness(8, 1, 8, 1),
+                Margin = new Thickness(8, 0, 0, 0),
+            };
+            clear.Click += (_, _) => { _imageRefs.Clear(); RenderRefs(maxRefs); };
+            header.Children.Add(clear);
+        }
+
+        _pickRefButton = new Button
+        {
+            Content = "选择文件…",
+            Style = AppStyle("ButtonDefaultStyle"),
+            Height = 26,
+            FontSize = 11,
+            Padding = new Thickness(10, 1, 10, 1),
+        };
+        _pickRefButton.Click += async (_, _) => await PickRefFilesAsync(maxRefs);
+        _refUrlBox = new TextBox
+        {
+            FontSize = 12,
+            Height = 26,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(6, 0, 6, 0),
+            Margin = new Thickness(8, 0, 0, 0),
+        };
+        _addRefButton = new Button
+        {
+            Content = "添加 URL",
+            Style = AppStyle("ButtonDefaultStyle"),
+            Height = 26,
+            FontSize = 11,
+            Padding = new Thickness(10, 1, 10, 1),
+            Margin = new Thickness(8, 0, 0, 0),
+        };
+        _addRefButton.Click += async (_, _) => await AddUrlRefAsync(maxRefs);
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(_pickRefButton);
+        row.Children.Add(_refUrlBox);
+        row.Children.Add(_addRefButton);
+
+        _refPanel = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+        RenderRefs(maxRefs);
+
+        var section = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
+        section.Children.Add(header);
+        section.Children.Add(row);
+        section.Children.Add(_refPanel);
+        return section;
+    }
+
+    private void RenderRefs(int maxRefs)
+    {
+        _refPanel.Children.Clear();
+        foreach (var r in _imageRefs)
+        {
+            var removeButton = new Button
+            {
+                Content = "✕",
+                FontSize = 10,
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(4, 0, 0, 0),
+                Margin = new Thickness(6, 0, 0, 0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+            };
+            var refToRemove = r;
+            removeButton.Click += (_, _) => { _imageRefs.Remove(refToRemove); RenderRefs(maxRefs); };
+            var chip = new Border
+            {
+                Background = Brush("CardBgBrush"),
+                CornerRadius = new CornerRadius(6),
+                Margin = new Thickness(0, 0, 8, 6),
+                Padding = new Thickness(8, 3, 8, 3),
+                Child = new StackPanel { Orientation = Orientation.Horizontal, Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "🖼 " + (r.Name ?? "图片"),
+                        FontSize = 11,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        MaxWidth = 220,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    },
+                    removeButton,
+                } },
+            };
+            _refPanel.Children.Add(chip);
+        }
+        _refCount.Text = $"{_imageRefs.Count}/{maxRefs}";
+        _addRefButton.IsEnabled = _imageRefs.Count < maxRefs;
+        _pickRefButton.IsEnabled = _imageRefs.Count < maxRefs;
+    }
+
+    private async Task PickRefFilesAsync(int maxRefs)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择参考图片",
+            Multiselect = true,
+            Filter = "图片文件|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp|所有文件|*.*",
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        foreach (var file in dialog.FileNames)
+        {
+            if (_imageRefs.Count >= maxRefs) break;
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(file);
+                _imageRefs.Add(new ReferenceImage(bytes, RefMimeFor(file), Path.GetFileName(file)));
+            }
+            catch (IOException) { /* 单个文件失败跳过 */ }
+        }
+        RenderRefs(maxRefs);
+    }
+
+    private async Task AddUrlRefAsync(int maxRefs)
+    {
+        if (_imageRefs.Count >= maxRefs) return;
+        var url = _refUrlBox.Text.Trim();
+        if (url.Length == 0) return;
+        if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            url = "https://" + url;
+        }
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            var bytes = await http.GetByteArrayAsync(url);
+            _imageRefs.Add(new ReferenceImage(bytes, RefMimeFor(url), url));
+            _refUrlBox.Text = "";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _status.Text = "参考图下载失败：" + ex.Message;
+            _status.Foreground = Brush("DangerBrush");
+        }
+        RenderRefs(maxRefs);
+    }
+
+    private static string RefMimeFor(string name)
+    {
+        var ext = Path.GetExtension(name).ToLowerInvariant();
+        return ext switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            _ => "image/png",
+        };
+    }
+
+    /// <summary>v2 修订：模型能力解析四级优先级——模型级声明(providers.json modelCapabilities) > 渠道模板(connection.Channel) > 目录/推断。</summary>
+    private ImageModelDescriptor ResolveModel(ImageConnection connection, string modelId)
+    {
+        CustomImageCapabilities? declared = null;
+        if (_ai.Providers.Image?.ModelCapabilities is { } caps && caps.TryGetValue(modelId, out var d))
+            declared = d;
+        return _catalog.Resolve(modelId, connection.Family,
+            ChannelCatalog.Value.CapabilitiesFor(connection.Channel), declared);
+    }
+
+    private ImageGenCapabilities CapabilitiesFor(ImageConnection connection, string modelId)
+        => ResolveModel(connection, modelId).Capabilities;
 
     private static TextBlock Label(string text) => new()
     {
@@ -455,13 +700,27 @@ public sealed class ImageGenWindow : Window
             return;
         }
 
-        var capabilities = _catalog.Resolve(_selectedModelId, _selectedConnection.Family).Capabilities;
-        var ratio = _ratioCombo.SelectedIndex >= 0
-            ? capabilities.AspectRatios[Math.Clamp(_ratioCombo.SelectedIndex, 0, capabilities.AspectRatios.Count - 1)]
-            : ImageAspectRatio.R1x1;
-        var scale = _scaleCombo.SelectedIndex >= 0
-            ? capabilities.Scales[Math.Clamp(_scaleCombo.SelectedIndex, 0, capabilities.Scales.Count - 1)]
-            : ImageScale.S1K;
+        var capabilities = CapabilitiesFor(_selectedConnection, _selectedModelId);
+        ImageAspectRatio ratio;
+        ImageScale scale;
+        if (capabilities.FixedSizes is { Count: > 0 }
+            && _sizeTableCombo.SelectedItem is ComboBoxItem { Tag: string fixedSize }
+            && ImageSizeTable.TryParse(fixedSize, out var fw, out var fh)
+            && ImageAspectRatioParser.TryFromPixels(fw, fh, out var fixedRatio))
+        {
+            // 固定尺寸表模式：比例由选中尺寸推导，档位取表内档位
+            ratio = fixedRatio;
+            scale = capabilities.Scales.Count > 0 ? capabilities.Scales[0] : ImageScale.S1K;
+        }
+        else
+        {
+            ratio = _ratioCombo.SelectedIndex >= 0
+                ? capabilities.AspectRatios[Math.Clamp(_ratioCombo.SelectedIndex, 0, capabilities.AspectRatios.Count - 1)]
+                : ImageAspectRatio.R1x1;
+            scale = _scaleCombo.SelectedIndex >= 0
+                ? capabilities.Scales[Math.Clamp(_scaleCombo.SelectedIndex, 0, capabilities.Scales.Count - 1)]
+                : ImageScale.S1K;
+        }
         var quality = _qualityCombo == _qualityPlaceholder
             ? ImageQuality.Auto
             : ((_qualityCombo.SelectedItem as ComboBoxItem)?.Tag as string) switch
@@ -497,8 +756,19 @@ public sealed class ImageGenWindow : Window
                         Quality: quality,
                         Transparent: transparent,
                         Seed: seed);
-                    var output = await _ai.GenerateImageAsync(
-                        _selectedConnection.Id, _selectedModelId, spec, _generationCts.Token);
+                    ImageGenOutput output;
+                    if (_imageRefs.Count > 0)
+                    {
+                        // v2：有参考图 → 图生图/编辑链路（透明同样由门面分流）
+                        output = await _ai.EditImageAsync(
+                            _selectedConnection.Id, _selectedModelId, spec,
+                            _imageRefs.ToList(), _generationCts.Token);
+                    }
+                    else
+                    {
+                        output = await _ai.GenerateImageAsync(
+                            _selectedConnection.Id, _selectedModelId, spec, _generationCts.Token);
+                    }
                     await SaveToGalleryAsync(output, spec);
                     completed++;
                 }

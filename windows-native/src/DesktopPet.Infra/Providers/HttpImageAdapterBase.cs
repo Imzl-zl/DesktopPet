@@ -90,6 +90,9 @@ public abstract class HttpImageAdapterBase : IImageGenProvider
     protected virtual string EndpointPath(bool references)
         => references ? "images/edits" : "images/generations";
 
+    /// <summary>编辑请求是否走 multipart/form-data（newapi 类中转按 OpenAI SDK 行为实现，gpt-image-2 编辑必须）。</summary>
+    protected virtual bool UsesMultipartEdit => false;
+
     /// <summary>编辑请求 body 整体构建（Gemini 族覆写：参考图嵌 contents parts）。默认 = 生成 body + image 字段。</summary>
     protected virtual JsonObject BuildEditBody(ImageGenSpec spec, IReadOnlyList<ReferenceImage> references)
     {
@@ -107,12 +110,17 @@ public abstract class HttpImageAdapterBase : IImageGenProvider
             ? BuildGenerateBody(spec, reduced: false)
             : BuildEditBody(spec, references);
 
+        // multipart 编辑：body 参数 + 参考图文件字段（避免巨型 data URI）
+        var content = references is not null && UsesMultipartEdit
+            ? BuildMultipartEditContent(body, references)
+            : JsonContent.Create(body);
+
         using var deadline = CreateDeadline(ct);
         var requestCt = deadline?.Token ?? ct;
 
         try
         {
-            var response = await PostAsync(body, requestCt);
+            var response = await PostAsync(content, hasReferences: references is not null, requestCt);
             using (response)
             {
                 if (IsRejected(response) && !_strictParams && references is null
@@ -120,7 +128,7 @@ public abstract class HttpImageAdapterBase : IImageGenProvider
                 {
                     // 参数降级：中转端点不认识 background/quality/seed 等参数时，去掉重试一次
                     var reduced = BuildGenerateBody(spec, reduced: true);
-                    var retry = await PostAsync(reduced, requestCt);
+                    var retry = await PostAsync(JsonContent.Create(reduced), hasReferences: false, requestCt);
                     using (retry)
                     {
                         ThrowForStatus(retry, requestCt);
@@ -153,20 +161,38 @@ public abstract class HttpImageAdapterBase : IImageGenProvider
         => response.StatusCode is System.Net.HttpStatusCode.BadRequest
             or System.Net.HttpStatusCode.UnprocessableEntity;
 
-    private async Task<HttpResponseMessage> PostAsync(JsonObject body, CancellationToken ct)
+    private async Task<HttpResponseMessage> PostAsync(HttpContent content, bool hasReferences, CancellationToken ct)
     {
         var apiKey = _credentials.Get(Connection.ApiKeyRef); // 空 = 无鉴权（本地端点）
         using var httpRequest = new HttpRequestMessage(
             HttpMethod.Post,
             ProviderEndpointPolicy.BuildRequestUri(
                 Connection.BaseUrl,
-                EndpointPath(references: body.ContainsKey("image")),
+                EndpointPath(references: hasReferences),
                 !string.IsNullOrEmpty(apiKey)));
         ApplyAuth(httpRequest, apiKey);
         if (httpRequest.Headers.UserAgent.Count == 0)
             httpRequest.Headers.UserAgent.ParseAdd("DesktopPet/1.0"); // 部分网关要求 UA
-        httpRequest.Content = JsonContent.Create(body);
+        httpRequest.Content = content;
         return await _http.SendAsync(httpRequest, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>multipart 编辑内容：body 顶层参数（除 image 键）转文本字段 + 每张参考图一个 image 文件字段。</summary>
+    private HttpContent BuildMultipartEditContent(JsonObject body, IReadOnlyList<ReferenceImage> references)
+    {
+        var form = new MultipartFormDataContent();
+        foreach (var (key, value) in body)
+        {
+            if (value is null) continue;
+            form.Add(new StringContent(value.ToJsonString()), key);
+        }
+        foreach (var r in references)
+        {
+            var file = new ByteArrayContent(r.Bytes);
+            file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(r.MimeType);
+            form.Add(file, "image"); // 多图同名（官方 multipart 语义 image[]=）
+        }
+        return form;
     }
 
     private static void ThrowForStatus(HttpResponseMessage response, CancellationToken ct)

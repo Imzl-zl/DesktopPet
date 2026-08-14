@@ -278,6 +278,157 @@ public class OpenAiImageGenAdapterTests
         Assert.Equal("image_url", images.GetProperty("type").GetString());
     }
 
+    // ── v2：能力驱动尺寸形态 / 编辑形态 / 质量开关（windows-imagegen-v2-design.md §3）──
+
+    private static readonly string[] SenseNovaSizes =
+    [
+        "2752x1536", "1536x2752", "2048x2048", "2496x1664", "1664x2496",
+        "2368x1760", "1760x2368", "2272x1824", "1824x2272", "3072x1376", "1344x3136",
+    ];
+
+    private static ImageGenCapabilities SenseNovaCapabilities() => new(
+        NativeTransparency: false,
+        [ImageAspectRatio.R1x1, ImageAspectRatio.R3x2, ImageAspectRatio.R2x3, ImageAspectRatio.R4x3,
+         ImageAspectRatio.R3x4, ImageAspectRatio.R5x4, ImageAspectRatio.R4x5, ImageAspectRatio.R16x9,
+         ImageAspectRatio.R9x16, ImageAspectRatio.R21x9, ImageAspectRatio.R9x21],
+        [ImageScale.S2K],
+        Editing: false, MaxReferenceImages: 0, Seed: false,
+        QualityLevels: false,
+        FixedSizes: SenseNovaSizes,
+        SizeStyle: ImageSizeStyle.FixedTable);
+
+    [Fact]
+    public async Task Generate_FixedTableStyle_SizeFromTableByRatio()
+    {
+        var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
+            new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
+        var adapter = new OpenAiImageGenAdapter(
+            Connection("sensenova-u1-fast"), "sensenova-u1-fast",
+            new StubCredentialStore(null), Client(handler), capabilities: SenseNovaCapabilities());
+
+        await adapter.GenerateAsync(new ImageGenSpec(
+            "info", ImageAspectRatio.R16x9, ImageScale.S2K, ImageQuality.High), CancellationToken.None);
+
+        var body = JsonSerializer.Deserialize<JsonElement>(handler.RequestBodies[0]);
+        Assert.Equal("2752x1536", body.GetProperty("size").GetString()); // 16:9 → 表内尺寸
+        Assert.False(body.TryGetProperty("quality", out _));              // QualityLevels=false 不发
+    }
+
+    [Fact]
+    public async Task Generate_FixedTableStyle_OtherRatiosMapToTable()
+    {
+        var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
+            new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
+        var adapter = new OpenAiImageGenAdapter(
+            Connection("sensenova-u1-fast"), "sensenova-u1-fast",
+            new StubCredentialStore(null), Client(handler), capabilities: SenseNovaCapabilities());
+
+        await adapter.GenerateAsync(new ImageGenSpec("i", ImageAspectRatio.R1x1), CancellationToken.None);
+        await adapter.GenerateAsync(new ImageGenSpec("i", ImageAspectRatio.R5x4), CancellationToken.None);
+        await adapter.GenerateAsync(new ImageGenSpec("i", ImageAspectRatio.R9x21), CancellationToken.None);
+
+        var bodies = handler.RequestBodies.Select(b => JsonSerializer.Deserialize<JsonElement>(b)).ToList();
+        Assert.Equal("2048x2048", bodies[0].GetProperty("size").GetString()); // 1:1
+        Assert.Equal("2272x1824", bodies[1].GetProperty("size").GetString()); // 5:4
+        Assert.Equal("1344x3136", bodies[2].GetProperty("size").GetString()); // 9:21
+    }
+
+    [Fact]
+    public async Task Generate_AspectRatioResolutionStyle_SendsRatioAndResolution()
+    {
+        var caps = new ImageGenCapabilities(
+            NativeTransparency: false,
+            [ImageAspectRatio.R1x1, ImageAspectRatio.R16x9], [ImageScale.S1K, ImageScale.S2K],
+            Editing: true, MaxReferenceImages: 3, Seed: false,
+            SizeStyle: ImageSizeStyle.AspectRatioResolution, EditStyle: ImageEditStyle.SingleObject);
+        var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
+            new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
+        var adapter = new OpenAiImageGenAdapter(
+            Connection("grok-imagine-image-quality"), "grok-imagine-image-quality",
+            new StubCredentialStore(null), Client(handler), capabilities: caps);
+
+        await adapter.GenerateAsync(new ImageGenSpec("x", ImageAspectRatio.R16x9, ImageScale.S2K), CancellationToken.None);
+
+        var body = JsonSerializer.Deserialize<JsonElement>(handler.RequestBodies[0]);
+        Assert.Equal("16:9", body.GetProperty("aspect_ratio").GetString());
+        Assert.Equal("2k", body.GetProperty("resolution").GetString());
+        Assert.False(body.TryGetProperty("size", out _)); // Grok 形态不发 size
+    }
+
+    [Fact]
+    public async Task Edit_GptImage2_NewImagesArrayShape()
+    {
+        var caps = new ImageGenCapabilities(
+            NativeTransparency: false,
+            [ImageAspectRatio.R1x1], [ImageScale.S1K, ImageScale.S2K],
+            Editing: true, MaxReferenceImages: 2, Seed: false,
+            EditStyle: ImageEditStyle.ImagesArray);
+        var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
+            new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
+        var adapter = new OpenAiImageGenAdapter(
+            Connection("gpt-image-2"), "gpt-image-2",
+            new StubCredentialStore(null), Client(handler), capabilities: caps);
+
+        await adapter.EditAsync(new ImageGenSpec("compose"),
+            [new ReferenceImage(FakePng(), "image/png"), new ReferenceImage(FakePng())], CancellationToken.None);
+
+        Assert.EndsWith("/images/edits", handler.Requests[0].RequestUri!.AbsolutePath); // 端点判定不再依赖 body 键名
+        var body = JsonSerializer.Deserialize<JsonElement>(handler.RequestBodies[0]);
+        var images = body.GetProperty("images");
+        Assert.Equal(JsonValueKind.Array, images.ValueKind);
+        Assert.Equal(2, images.GetArrayLength());
+        Assert.StartsWith("data:image/png;base64,", images[0].GetProperty("image_url").GetString());
+        Assert.False(images[0].TryGetProperty("type", out _)); // 官方新形态无 type 字段
+    }
+
+    [Fact]
+    public async Task Edit_MultipartFormDataStyle_SendsMultipartWithFileFields()
+    {
+        // newapi 类中转：gpt-image-2 编辑必须 multipart/form-data（JSON 会被拒 500）
+        var caps = new ImageGenCapabilities(
+            NativeTransparency: false,
+            [ImageAspectRatio.R1x1], [ImageScale.S1K],
+            Editing: true, MaxReferenceImages: 1, Seed: false,
+            EditStyle: ImageEditStyle.MultipartFormData);
+        var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
+            new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
+        var adapter = new OpenAiImageGenAdapter(
+            Connection("gpt-image-2"), "gpt-image-2",
+            new StubCredentialStore(null), Client(handler), capabilities: caps);
+
+        await adapter.EditAsync(new ImageGenSpec("make it blue"),
+            [new ReferenceImage(FakePng(), "image/png")], CancellationToken.None);
+
+        var req = handler.Requests[0];
+        Assert.EndsWith("/images/edits", req.RequestUri!.AbsolutePath);
+        Assert.Equal("multipart/form-data", req.Content!.Headers.ContentType!.MediaType);
+        var text = handler.RequestBodies[0]; // RecordingHandler 已序列化 multipart 文本
+        Assert.Contains("name=model", text);
+        Assert.Contains("gpt-image-2", text);
+        Assert.Contains("name=image", text);
+        Assert.DoesNotContain("data:image/png;base64,", text); // 图片走文件字段，无巨型 data URI
+    }
+
+    [Fact]
+    public async Task Generate_QualityLevelsFalse_OmitsQualityEvenWhenRequested()
+    {
+        var caps = new ImageGenCapabilities(
+            NativeTransparency: false, [ImageAspectRatio.R1x1], [ImageScale.S1K],
+            Editing: false, MaxReferenceImages: 0, Seed: true,
+            QualityLevels: false);
+        var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
+            new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
+        var adapter = new OpenAiImageGenAdapter(
+            Connection("no-quality-model"), "no-quality-model",
+            new StubCredentialStore(null), Client(handler), capabilities: caps);
+
+        await adapter.GenerateAsync(new ImageGenSpec("x", Quality: ImageQuality.High, Seed: 42), CancellationToken.None);
+
+        var body = JsonSerializer.Deserialize<JsonElement>(handler.RequestBodies[0]);
+        Assert.False(body.TryGetProperty("quality", out _));
+        Assert.Equal(42, body.GetProperty("seed").GetInt64()); // 其余参数不受影响
+    }
+
     // ── 超时 ──
 
     [Fact]

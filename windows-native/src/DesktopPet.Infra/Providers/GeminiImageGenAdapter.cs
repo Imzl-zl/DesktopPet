@@ -126,6 +126,8 @@ public sealed class GeminiImageGenAdapter : HttpImageAdapterBase
         ImageAspectRatio.R2x3 => "2:3",
         ImageAspectRatio.R4x3 => "4:3",
         ImageAspectRatio.R3x4 => "3:4",
+        ImageAspectRatio.R5x4 => "5:4",
+        ImageAspectRatio.R4x5 => "4:5",
         ImageAspectRatio.R16x9 => "16:9",
         ImageAspectRatio.R9x16 => "9:16",
         ImageAspectRatio.R21x9 => "21:9",

@@ -11,6 +11,8 @@ namespace DesktopPet.Infra.Providers;
 public sealed class ImageGenService
 {
     private readonly ImageModelCatalog _catalog;
+    private readonly ImageChannelCatalog _channels;
+    private readonly IReadOnlyDictionary<string, CustomImageCapabilities>? _modelCapabilities;
     private readonly ICredentialStore _credentials;
     private readonly HttpClient _http;
     private readonly TimeSpan _requestTimeout;
@@ -22,24 +24,28 @@ public sealed class ImageGenService
         ICredentialStore credentials,
         HttpClient httpClient,
         TimeSpan? requestTimeout = null,
-        bool strictParams = false)
+        bool strictParams = false,
+        ImageChannelCatalog? channels = null,
+        IReadOnlyDictionary<string, CustomImageCapabilities>? modelCapabilities = null)
     {
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
         _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(300);
         _strictParams = strictParams;
+        _channels = channels ?? ImageChannelCatalog.LoadBuiltIn();
+        _modelCapabilities = modelCapabilities;
     }
 
-    /// <summary>连接可用模型的能力（UI 参数面板渲染用）。</summary>
+    /// <summary>连接可用模型的能力（UI 参数面板渲染用；v2：含连接内自定义能力声明覆盖）。</summary>
     public ImageGenCapabilities CapabilitiesFor(ImageConnection connection, string modelId)
-        => _catalog.Resolve(modelId, connection.Family).Capabilities;
+        => ResolveModel(connection, modelId).Capabilities;
 
     /// <summary>文生图（透明请求按模型能力自动分流：原生直传 / 绿幕两段式）。</summary>
     public async Task<ImageGenOutput> GenerateAsync(
         ImageConnection connection, string modelId, ImageGenSpec spec, CancellationToken ct)
     {
-        var descriptor = _catalog.Resolve(modelId, connection.Family);
+        var descriptor = ResolveModel(connection, modelId);
         var provider = GetAdapter(connection, modelId);
         var transparent = spec.Transparent;
 
@@ -65,7 +71,7 @@ public sealed class ImageGenService
         if (references is null || references.Count == 0)
             throw new ProviderException("invalid-request", "编辑至少需要一张参考图");
 
-        var descriptor = _catalog.Resolve(modelId, connection.Family);
+        var descriptor = ResolveModel(connection, modelId);
         var provider = GetAdapter(connection, modelId);
 
         if (!spec.Transparent || descriptor.Capabilities.NativeTransparency)
@@ -119,6 +125,21 @@ public sealed class ImageGenService
     private static bool IsFallbackable(string code)
         => code is "network" or "server" or "timeout" or "invalid-response";
 
+    /// <summary>模型解析（v2 修订四级优先级：模型级声明 > 渠道模板 > 目录/推断）。</summary>
+    private ImageModelDescriptor ResolveModel(ImageConnection connection, string modelId)
+    {
+        CustomImageCapabilities? declared = null;
+        if (_modelCapabilities is { } caps
+            && caps.TryGetValue(modelId, out var d))
+        {
+            declared = d;
+        }
+        return _catalog.Resolve(
+            modelId, connection.Family,
+            _channels.CapabilitiesFor(connection.Channel),
+            declared);
+    }
+
     private IImageGenProvider GetAdapter(ImageConnection connection, string modelId)
     {
         // 适配器按 (连接, 模型) 缓存：模型 id 在适配器构造时固定，换模型必须换适配器实例
@@ -132,8 +153,11 @@ public sealed class ImageGenService
 
     private IImageGenProvider CreateAdapter(ImageConnection connection, string modelId)
     {
+        var capabilities = ResolveModel(connection, modelId).Capabilities;
+
         if (string.Equals(connection.Family, ImageModelCatalog.FamilyOpenAi, StringComparison.OrdinalIgnoreCase))
-            return new OpenAiImageGenAdapter(connection, modelId, _credentials, _http, _requestTimeout, _strictParams);
+            return new OpenAiImageGenAdapter(connection, modelId, _credentials, _http,
+                _requestTimeout, _strictParams, capabilities);
 
         // Gemini 族（Nano Banana 全系）
         if (string.Equals(connection.Family, ImageModelCatalog.FamilyGoogle, StringComparison.OrdinalIgnoreCase))

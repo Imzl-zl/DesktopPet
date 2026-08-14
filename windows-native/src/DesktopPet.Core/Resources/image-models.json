@@ -9,10 +9,11 @@
         "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
         "scales": ["1K", "2K", "4K"],
         "editing": true,
-        "maxReferenceImages": 1
+        "maxReferenceImages": 16,
+        "editStyle": "imagesArray"
       },
       "priceHint": "$0.025~0.211",
-      "note": "画质最强；无原生透明，透明走绿幕后处理管线"
+      "note": "画质最强；无原生透明，透明走绿幕后处理管线；编辑=images 数组（官方新形态）"
     },
     {
       "id": "gpt-image-1.5",
@@ -23,7 +24,8 @@
         "aspectRatios": ["1:1", "3:2", "2:3"],
         "scales": ["1K"],
         "editing": true,
-        "maxReferenceImages": 1
+        "maxReferenceImages": 1,
+        "editStyle": "imageArray"
       },
       "priceHint": "$0.009~0.2",
       "note": "唯一原生透明的前排模型；透明精灵图首选"
@@ -37,7 +39,8 @@
         "aspectRatios": ["1:1", "3:2", "2:3"],
         "scales": ["1K"],
         "editing": true,
-        "maxReferenceImages": 1
+        "maxReferenceImages": 1,
+        "editStyle": "imageArray"
       },
       "priceHint": "$0.005",
       "note": "预算档，快速迭代"
@@ -51,7 +54,9 @@
         "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
         "scales": ["1K"],
         "editing": true,
-        "maxReferenceImages": 3
+        "maxReferenceImages": 3,
+        "sizeStyle": "aspectRatioResolution",
+        "editStyle": "singleObject"
       },
       "priceHint": "$0.02",
       "note": "最快（约 4s），迭代神器"
@@ -65,7 +70,9 @@
         "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
         "scales": ["1K", "2K"],
         "editing": true,
-        "maxReferenceImages": 3
+        "maxReferenceImages": 3,
+        "sizeStyle": "aspectRatioResolution",
+        "editStyle": "singleObject"
       },
       "priceHint": "$0.05",
       "note": "2K 档"
@@ -94,7 +101,8 @@
         "scales": ["1K"],
         "editing": true,
         "maxReferenceImages": 3,
-        "seed": true
+        "seed": true,
+        "editStyle": "imageArray"
       },
       "priceHint": "$0.04",
       "note": "编辑专用（最多 3 参考图）"
@@ -140,6 +148,22 @@
       },
       "priceHint": "$0.02",
       "note": ""
+    },
+    {
+      "id": "sensenova-u1-fast",
+      "family": "openai",
+      "name": "SenseNova U1 Fast（商汤）",
+      "capabilities": {
+        "nativeTransparency": false,
+        "fixedSizes": ["2752x1536","1536x2752","2048x2048","2496x1664","1664x2496",
+                       "2368x1760","1760x2368","2272x1824","1824x2272","3072x1376","1344x3136"],
+        "editing": false,
+        "maxReferenceImages": 0,
+        "seed": false,
+        "quality": false
+      },
+      "priceHint": "2K 固定档",
+      "note": "信息图/海报专精；仅 11 种固定 2K 尺寸；公开 API 无图生图"
     },
     {
       "id": "gemini-2.5-flash-image",

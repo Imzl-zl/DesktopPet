@@ -15,6 +15,7 @@
     <!-- WithCulture=false：文件名含语言段（zh/vi）会被误判为卫星资源 -->
     <EmbeddedResource Include="Resources/i18n.*.json" WithCulture="false" />
     <EmbeddedResource Include="Resources/image-models.json" WithCulture="false" />
+    <EmbeddedResource Include="Resources/channels.json" WithCulture="false" />
   </ItemGroup>
 
   <ItemGroup>

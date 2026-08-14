@@ -14,11 +14,12 @@ public static class FullscreenBoundsEvaluator
     public static bool CoversMonitor(
         ScreenRect window,
         ScreenRect monitor,
-        bool maximized,
         int tolerance = 2)
     {
         if (window.Width <= 0 || window.Height <= 0) return false;
-        if (maximized) return true;
+        // 注意：最大化 ≠ 全屏。最大化窗口仍显示标题栏/任务栏，不应抑制弹幕/气泡
+        // （曾把任意最大化窗口当全屏 → 用户切换/打开最大化窗口时弹幕层被关闭）。
+        // 真正全屏（游戏/视频/F11）的窗口矩形精确覆盖 monitor，几何判定已覆盖。
         return Math.Abs(window.Left - monitor.Left) <= tolerance
             && Math.Abs(window.Top - monitor.Top) <= tolerance
             && Math.Abs(window.Right - monitor.Right) <= tolerance
@@ -66,7 +67,7 @@ public sealed class FullscreenWindowDetector
             info.Monitor.Top,
             info.Monitor.Right,
             info.Monitor.Bottom);
-        return FullscreenBoundsEvaluator.CoversMonitor(window, bounds, IsZoomed(foreground), tolerance);
+        return FullscreenBoundsEvaluator.CoversMonitor(window, bounds, tolerance);
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -95,9 +96,6 @@ public sealed class FullscreenWindowDetector
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    private static extern bool IsZoomed(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);

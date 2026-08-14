@@ -101,14 +101,14 @@ public class AppSettingsTests
     }
 
     [Fact]
-    public void Defaults_HotkeysUseLegacyPresets()
+    public void Defaults_HotkeysUseWinCtrlPresets()
     {
         var hotkeys = AppSettings.Defaults(AppLang.En).Hotkeys;
 
-        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, 'H'), hotkeys.TogglePets);
-        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, 'M'), hotkeys.ToggleMode);
-        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, 'S'), hotkeys.OpenSettings);
-        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, 'Q'), hotkeys.Quit);
+        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Windows | HotkeyModifiers.Control, 'H'), hotkeys.TogglePets);
+        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Windows | HotkeyModifiers.Control, 'T'), hotkeys.ToggleMode);
+        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Windows | HotkeyModifiers.Control, 'U'), hotkeys.OpenSettings);
+        Assert.Equal(new HotkeyGesture(HotkeyModifiers.Windows | HotkeyModifiers.Control, 'X'), hotkeys.Quit);
     }
 
     [Fact]

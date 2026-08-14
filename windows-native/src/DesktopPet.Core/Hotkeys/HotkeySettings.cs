@@ -35,11 +35,15 @@ public sealed record HotkeySettings(
     private const HotkeyModifiers AllowedModifiers =
         HotkeyModifiers.Alt | HotkeyModifiers.Control | HotkeyModifiers.Shift | HotkeyModifiers.Windows;
 
+    // 默认用 Win+Ctrl 而非 Ctrl+Alt：Ctrl+Alt 系列被腾讯会议（Ctrl+Alt+M/S/V）、
+    // QQ 截图（Ctrl+Alt+A）等常用软件大范围占用；而 Win+Ctrl 系列里 M/S 也常被
+    // 其他软件占用、Q 是 Win11「快速助手」系统保留（任何程序注册都失败），
+    // 实测 H/T/U/X 空闲（2026-08-14）。字母语义：H=隐藏宠物、T=切换模式、U=设置、X=退出。
     public static HotkeySettings Defaults => new(
-        new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, 'H'),
-        new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, 'M'),
-        new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, 'S'),
-        new HotkeyGesture(HotkeyModifiers.Control | HotkeyModifiers.Alt, 'Q'));
+        new HotkeyGesture(HotkeyModifiers.Windows | HotkeyModifiers.Control, 'H'),
+        new HotkeyGesture(HotkeyModifiers.Windows | HotkeyModifiers.Control, 'T'),
+        new HotkeyGesture(HotkeyModifiers.Windows | HotkeyModifiers.Control, 'U'),
+        new HotkeyGesture(HotkeyModifiers.Windows | HotkeyModifiers.Control, 'X'));
 
     public IEnumerable<(HotkeyAction Action, HotkeyGesture? Gesture)> Enumerate()
     {

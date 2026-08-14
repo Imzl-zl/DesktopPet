@@ -18,8 +18,8 @@ function Find-ByName([System.Windows.Automation.AutomationElement]$rootEl, [stri
 $app = Start-Process -FilePath $exe -PassThru
 Start-Sleep -Seconds 6
 
-# Ctrl+Alt+S 打开设置
-[System.Windows.Forms.SendKeys]::SendWait("^%s")
+# Win+Ctrl+U 打开设置
+[System.Windows.Forms.SendKeys]::SendWait("^#u")
 Start-Sleep -Seconds 2
 
 $desktop = [System.Windows.Automation.AutomationElement]::RootElement

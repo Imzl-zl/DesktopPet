@@ -43,33 +43,33 @@ $titles = [WinSmoke]::VisibleTitles($app.Id)
 Write-Host "初始窗口数: $($titles.Count) | $($titles -join ' | ')"
 $petWindowsBefore = $titles.Count
 
-# 1) Ctrl+Alt+H 隐藏/恢复
-Send-Hotkey "^%h"
+# 1) Win+Ctrl+H 隐藏/恢复
+Send-Hotkey "^#h"
 $hidden = [WinSmoke]::VisibleTitles($app.Id)
 Write-Host "按 H 隐藏后窗口数: $($hidden.Count) | $($hidden -join ' | ')"
-Send-Hotkey "^%h"
+Send-Hotkey "^#h"
 $restored = [WinSmoke]::VisibleTitles($app.Id)
 Write-Host "再按 H 恢复后窗口数: $($restored.Count) | $($restored -join ' | ')"
 $petHidden = $hidden.Count -lt $petWindowsBefore
 $petRestored = $restored.Count -ge $petWindowsBefore
 
-# 2) Ctrl+Alt+S 设置
-Send-Hotkey "^%s"
+# 2) Win+Ctrl+U 设置
+Send-Hotkey "^#u"
 Start-Sleep -Milliseconds 1200
 $withSettings = [WinSmoke]::VisibleTitles($app.Id)
-Write-Host "按 Ctrl+Alt+S 后: $($withSettings -join ' | ')"
+Write-Host "按 Win+Ctrl+U 后: $($withSettings -join ' | ')"
 $settingsShown = $withSettings | Where-Object { $_ -match 'DesktopPet' }
 
-# 3) Ctrl+Alt+M 模式循环（不崩溃）
-Send-Hotkey "^%m"
-Send-Hotkey "^%m"
-Write-Host "Ctrl+Alt+M x2 后 alive=$(-not $app.HasExited)"
+# 3) Win+Ctrl+T 模式循环（不崩溃）
+Send-Hotkey "^#t"
+Send-Hotkey "^#t"
+Write-Host "Win+Ctrl+T x2 后 alive=$(-not $app.HasExited)"
 
-# 4) Ctrl+Alt+Q 退出
-Send-Hotkey "^%q"
+# 4) Win+Ctrl+X 退出
+Send-Hotkey "^#x"
 Start-Sleep -Seconds 3
 $alive = -not $app.HasExited
-Write-Host "按 Ctrl+Alt+Q 后 alive=$alive"
+Write-Host "按 Win+Ctrl+X 后 alive=$alive"
 if ($alive) { Stop-Process -Id $app.Id -Force }
 
 # 5) Agent 进程检查（AI 默认关 → 无 AgentHost）

@@ -17,8 +17,8 @@ for ($i = 0; $i -lt 12; $i++) {
     if ($i -eq 5) {
         # 第 30s：手动发一条对话（如果对话窗在）
         Add-Type -AssemblyName System.Windows.Forms
-        [System.Windows.Forms.SendKeys]::SendWait("^%m")
-        Write-Host "  (Ctrl+Alt+M 已按)"
+        [System.Windows.Forms.SendKeys]::SendWait("^#t")
+        Write-Host "  (Win+Ctrl+T 已按)"
     }
 }
 Stop-Process -Id $app.Id -Force

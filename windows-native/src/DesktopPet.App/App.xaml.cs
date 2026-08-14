@@ -751,7 +751,7 @@ public partial class App : Application
         return IntPtr.Zero;
     }
 
-    /// <summary>Ctrl+Alt+M：弹幕 → 对话 → 静默 → 气泡 循环切换（立即生效 + 持久化）。
+    /// <summary>Win+Ctrl+T：弹幕 → 对话 → 静默 → 气泡 循环切换（立即生效 + 持久化）。
     /// 修复：原循环不含 bubble（默认模式），热键永远回不到默认输出模式。</summary>
     private void CycleOutputMode()
     {

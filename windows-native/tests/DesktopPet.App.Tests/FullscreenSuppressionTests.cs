@@ -10,17 +10,28 @@ public sealed class FullscreenSuppressionTests
         var monitor = new ScreenRect(-1920, 0, 0, 1080);
         var window = new ScreenRect(-1920, 0, 0, 1080);
 
-        Assert.True(FullscreenBoundsEvaluator.CoversMonitor(window, monitor, maximized: false));
+        Assert.True(FullscreenBoundsEvaluator.CoversMonitor(window, monitor));
     }
 
     [Fact]
-    public void PartialWindow_IsNotFullscreen_ButMaximizedWindowIsSuppressed()
+    public void PartialWindow_IsNotFullscreen_EvenWhenMaximized()
     {
         var monitor = new ScreenRect(0, 0, 2560, 1440);
         var workArea = new ScreenRect(0, 0, 2560, 1400);
 
-        Assert.False(FullscreenBoundsEvaluator.CoversMonitor(workArea, monitor, maximized: false));
-        Assert.True(FullscreenBoundsEvaluator.CoversMonitor(workArea, monitor, maximized: true));
+        // 最大化窗口仍占 work area（含标题栏/任务栏），不是全屏——
+        // 误判会把用户一切换/最大化窗口时的弹幕层关掉。
+        Assert.False(FullscreenBoundsEvaluator.CoversMonitor(workArea, monitor));
+    }
+
+    [Fact]
+    public void FullscreenBorderlessGameWindow_IsSuppressed()
+    {
+        // 无边框全屏（游戏/视频）窗口矩形精确覆盖 monitor → 仍按全屏抑制
+        var monitor = new ScreenRect(0, 0, 2560, 1440);
+        var window = new ScreenRect(0, 0, 2560, 1440);
+
+        Assert.True(FullscreenBoundsEvaluator.CoversMonitor(window, monitor));
     }
 
     [Fact]
@@ -29,8 +40,8 @@ public sealed class FullscreenSuppressionTests
         var monitor = new ScreenRect(2560, 0, 4480, 1440);
         var window = new ScreenRect(2561, 0, 4479, 1440);
 
-        Assert.True(FullscreenBoundsEvaluator.CoversMonitor(window, monitor, maximized: false, tolerance: 2));
-        Assert.False(FullscreenBoundsEvaluator.CoversMonitor(window, monitor, maximized: false, tolerance: 0));
+        Assert.True(FullscreenBoundsEvaluator.CoversMonitor(window, monitor, tolerance: 2));
+        Assert.False(FullscreenBoundsEvaluator.CoversMonitor(window, monitor, tolerance: 0));
     }
 
     [Theory]

@@ -32,6 +32,7 @@
 - 双进程架构：PetApp.exe + PetAgent.exe（截屏/分析/总结），Agent 崩溃看门狗自动重启。
 - 模型/TTS/生图统一 OpenAI 兼容协议，Provider 可插拔；API Key 存 Windows Credential Manager，不落明文。
 - 生图模块：目录驱动（模型是数据）+ 两协议族适配器（模板方法基类）+ 透明=后处理策略（原生直传/绿幕 HSV 键控）+ 门面统一入口 + 多模型容错（auth/rate-limit 不换模型）。
+- **生图 v2（定稿未实施，docs/windows-imagegen-v2-design.md）**：能力自描述（固定尺寸表/尺寸形态/编辑形态/质量开关，UI 零模型特判）+ 图生图 UI + 自定义模型能力声明；SenseNova = openai 族 + 尺寸表数据，不新增适配器；实施状态跟踪在 v2 §6 阶段表。
 - TTS 三级 Provider 栈（`docs/windows-tts-design.md`）：SAPI 兜底 + OneCore + OpenAI 兼容；`ITtsProvider` 契约下沉 Core；Edge TTS 直连不做。
 - 领域层（Core）零 UI 零 IO、可单测；宠物窗口自绘渲染器豁免 MVVM，设置/对话走 MVVM。
 - AI 总开关：关闭即纯桌宠模式，无截屏/网络/后台进程。
@@ -40,6 +41,7 @@
 - 全屏只在输出交付边界抑制主动聊天/气泡/弹幕，不停止截图与分析。
 
 ## 仍需注意的坑点
+- **默认热键选键坑（2026-08-14）**：Win+Ctrl+M/S/Q 在本机全部注册失败（M/S 被其他软件占用、Q 是 Win11「快速助手」系统保留组合，任何程序 RegisterHotKey 都返回 1409）→ 默认值改为 Win+Ctrl+H/T/U/X（实测空闲）；改默认键必须同步：Core 默认值 + app-settings.json 用户存量配置 + AppSettingsTests 断言 + phase6-*.ps1 验收脚本 SendKeys 键串（Win 键在 SendKeys 里是 `#`）。用户存量配置不受 Defaults 变更影响，必须单独迁移。
 - Windows 上 `swift test` 崩溃（SwiftPM llbuild bug #6605），core 测试必须走 `verify-core-windows.sh`。
 - `windows-native/测试.txt` 含密钥，勿读取/提交。
 - 模型请求限流：固定 worker 池 + P0/P1/P2 优先级、分场景 deadline；Provider transport 只分类错误，调度层拥有超时/重试。
@@ -52,6 +54,9 @@
 - **H.NotifyIcon 2.1.4 托盘定位**：库会把 Shell 回调物理点按静态 DPI 因子缩放后交给 WPF `AbsolutePoint`；隐藏图标面板首次打开时该回调点可能与当前鼠标位置不一致。单屏正坐标 + PerMonitorV2 下不要套用负坐标 PR #262；右键即时菜单应关闭 `MenuActivation`，在 `TrayRightMouseUp` 用 WPF `MousePoint` 打开并激活 Popup。
 
 ## 最近活跃窗口
+- 2026-08-13（v2 修订：渠道模板 + 真机验收）：架构修订——能力解析四级优先级（模型级声明 > 渠道模板 > 目录/推断），新增 `channels.json` 内置 7 渠道模板（openai/google/sensenova/xai/siliconflow/newapi-relay/custom），连接编辑器加渠道模板下拉；Auto 推断降级为未知模型兜底（实测教训：newapi 上 gpt-image-2 编辑必须 multipart、gemini 模型要 JSON 数组——同 id 跨渠道行为不同，推断必然猜错）；目录 JSON 补全 editStyle 显式声明；修复 E 阶段结构 bug（ModelCapabilities 顶层字典误挂 ImageConnection，改门面构造注入）。真机验收：sensenova-u1-fast/gpt-image-2/gemini-3.1-flash-image/agnes-image-2.1-flash 文生图全 ✓，gemini 编辑 ✓，gpt-image-2 编辑补 MultipartFormData 形态实测 ✓，agnes 编辑渠道后端不稳；764 测试全绿。
+- 2026-08-12（生图 v2 阶段 A-E 全部实施，754 测试全绿）：能力自描述落地——枚举 R5x4/R4x5/R9x21、`FixedSizes`/`SizeStyle`/`EditStyle`/`QualityLevels` 四能力维度（目录 JSON + 尺寸表推导最近邻匹配）、适配器尺寸三形态（PixelCalc/FixedTable/AspectRatioResolution）+ 编辑三形态（image/images/单对象，gpt-image-2 新形态无 type 且键名 images，EndpointPath 判定改显式标志）、sensenova-u1-fast 目录条目（11 固定 2K）+ grok sizeStyle 修正、生图页参考图区（文件/URL/chip/上限）+ 尺寸表模式下拉 + AiCoordinator.EditImageAsync、连接编辑器能力声明 JSON 框 + providers.json modelCapabilities（实施偏差：models 保持 string[]，声明独立顶层字典）。阶段 F（真机验收）待跑。
+- 2026-08-12（生图 v2 设计定稿，未实施）：能力自描述 + 图生图 + SenseNova 支持定稿（`docs/windows-imagegen-v2-design.md`）。官方文档核实：gpt-image-2 edits 新形态 `images:[{image_url}]`（≤16 张，无 type）、SenseNova 仅 11 固定 2K 尺寸且无图生图接口、Gemini 官方推 Interactions 但 generateContent 仍是官方+中转主流形态（保持）、Grok 用 aspect_ratio+resolution（v1 适配器发 size 与官方不符待修）。维护约定：模型数据真值=image-models.json，v2 只存设计决策不追实现，阶段表每完成一阶段打勾；v1 §9 阶段表已标注过期。
 - 2026-08-12（WPF 菜单/ComboBox + 托盘首次定位）：修复全局 MenuItem 模板缺 `ContentSource="Header"` 导致托盘/悬浮球菜单空白，ComboBox 内部 ToggleButton 传递外层 Padding；Firecrawl + H.NotifyIcon 2.1.4 源码核对排除升级稳定版、issue #30 ItemTemplate、#32 manifest 和 #262 负坐标场景。运行时基线首次/第二次菜单矩形不一致；改为禁用库自动 `AbsolutePoint`，`TrayRightMouseUp` 使用 WPF `MousePoint` 并激活 Popup。真实隐藏面板右击两次均为图标中心 `(2071,1352)`、菜单 `176x171`、进程存活；App 57/57、VS build 0/0。
 - 2026-08-12（生图真机 UI 冒烟 + 修复，提交 2729ed6）：桌宠关闭后重建启动，用 PowerShell UIAutomation + Win32 EnumWindows 做无头 UI 验证（当前模型不支持读图，改用布局树数值核对）。发现并修复：① 连接编辑器打开即崩（status TextBlock 重复添加 → 逻辑父元素冲突，事件日志 1026 定位）；② 生图页参数列紧贴（0 间距）/种子框紧贴；③ 提示词计数初始不显示（空文本不触发 TextChanged）；④ 连接编辑器长标签 NoWrap 溢出被裁剪。另验证：模态窗口在 UIA 树挂在 owner 子树下（非 RootElement.Children）；UIA 坐标=物理像素，DIP=值/1.5（150% 缩放机）；总结图模型下拉选择→app-settings.json 持久化→重置（converter Read/Normalize/Signature 修复链端到端）；生图页/连接编辑器布局数值全部达标。729 测试全绿。
 - 2026-08-11（生图模块阶段 4c/5，提交 0842981）：多连接列表编辑器（列表/新建/编辑/删除/凭据回滚与清理）+ AI 页总结图模型下拉（AiSettings.SummaryImageModelRef）；修复该字段持久化缺口（converter Read + Normalize 双遗漏）与 runtime 签名未含该字段（改设置不重建）；阶段 5 生图页（连接×模型带价格/提示词计数/按能力参数面板：宽高比·档位·质量仅 openai·张数·seed·透明+绿幕提示/生成循环/取消/错误分类）+ 历史画廊落盘（GalleryIndex 契约 Core 7 测试、GalleryStore Infra 原子写/删除/修剪/损坏容错 9 测试）；入口=设置页 AI 页「打开生图页」。729 测试全绿。坑：GalleryStore 放 Infra 而非 App（纯 IO 分层，App.Tests 直接引用可测）；缩略图 BitmapImage 必须 OnLoad+Freeze；真机 UI 冒烟未跑（桌宠锁 bin，MSB3021 但编译成功）。

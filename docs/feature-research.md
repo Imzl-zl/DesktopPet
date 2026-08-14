@@ -59,7 +59,7 @@
 - 工作量：中（CareEngine 扩展 + 人格模板按亲密度分档）
 
 **④ 全局快捷键** — 借鉴 bongo-cat-next
-- `Ctrl+Alt+H` 显隐宠物 / `Ctrl+Alt+M` 切换输出模式 / `Ctrl+Alt+S` 设置 / `Ctrl+Alt+Q` 退出
+- `Win+Ctrl+H` 显隐宠物 / `Win+Ctrl+T` 切换输出模式 / `Win+Ctrl+U` 设置 / `Win+Ctrl+X` 退出（避开腾讯会议/QQ 等 Ctrl+Alt 占用）
 - 工作量：低（`RegisterHotKey` P/Invoke）
 
 **⑤ 对话增强** — 借鉴 C.AI

@@ -11,6 +11,8 @@
 - `docs/windows-ui-design.md` — Lumen 视觉与 UI 验收清单
 - `docs/ai-personas.md` — 人格设计
 - README.md — macOS 版功能与构建说明
+- `docs/windows-imagegen-design.md`（v1 已实施总纲）+ `docs/windows-imagegen-v2-design.md`（增量设计：能力自描述/图生图/SenseNova；含维护约定）— 生图模块两卷，改前先看卷首职责表
+- `docs/windows-tts-design.md` — TTS 专项（Provider 模式同构）
 
 ## Environment（版本锁定，改动前必读）
 - macOS：Swift 6.3（swift-tools-version 6.0，CI macos-15 + Xcode 16）+ macOS 13+（SwiftUI）；Sparkle 声明 from 2.6.0、Package.resolved 锁定 2.9.4。

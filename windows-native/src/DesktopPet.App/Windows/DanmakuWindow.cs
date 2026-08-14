@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -6,6 +7,7 @@ using DesktopPet.App.Localization;
 using DesktopPet.Core.Danmaku;
 using DesktopPet.Core.I18n;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 
@@ -144,8 +146,7 @@ public sealed class DanmakuWindow : Window
             var ds = args.DrawingSession;
             foreach (var item in _engine.Active)
             {
-                ds.DrawText(item.Text, (float)item.X, (float)(item.Track * _trackHeight),
-                    global::Microsoft.UI.Colors.White, _textFormat);
+                DrawOutlinedText(ds, item.Text, (float)item.X, (float)(item.Track * _trackHeight));
             }
             Interlocked.Increment(ref _frameCount);
         };
@@ -160,6 +161,28 @@ public sealed class DanmakuWindow : Window
         {
             _canvas.Paused = false;
         }
+    }
+
+    /// <summary>
+    /// 白字 + 黑阴影（Win2D 官方 TextShadows 模式）：浅色/白色背景（如论坛页面）下仍可读。
+    /// 文本只 shaping 一次进 CommandList（与无描边时成本相同），阴影由 GPU 效果合成——
+    /// 每帧 9 次 DrawText 的 8 向描边方案会让文本 shaping 变成 9 倍，逼近 16ms 帧预算。
+    /// </summary>
+    private void DrawOutlinedText(CanvasDrawingSession ds, string text, float x, float y)
+    {
+        using var layer = new CanvasCommandList(_canvas!);
+        using (var layerDs = layer.CreateDrawingSession())
+        {
+            layerDs.DrawText(text, 0, 0, global::Microsoft.UI.Colors.White, _textFormat);
+        }
+        var shadow = new ShadowEffect
+        {
+            Source = layer,
+            BlurAmount = 3f,
+            ShadowColor = global::Microsoft.UI.Colors.Black,
+        };
+        ds.DrawImage(shadow, new Vector2(x, y));
+        ds.DrawImage(layer, new Vector2(x, y));
     }
 
     private void OnFpsTimerTick(object? sender, EventArgs e)

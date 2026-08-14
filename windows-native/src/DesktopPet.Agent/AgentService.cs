@@ -300,7 +300,7 @@ public sealed class AgentService : IAsyncDisposable
         }
 
         var engine = new AnalysisEngine(_capture, model, CurrentConfig, _captureIntervalOverride);
-        engine.CaptureFaulted += ex => _logger.Info("Agent", $"capture fault: {ex.GetType().Name}: {ex.Message}");
+        engine.CaptureFaulted += ex => _logger.Info("Agent", $"capture fault: {FlattenForLog(ex)}");
         engine.EventRaised += e =>
         {
             if (!_eventQueue.Writer.TryWrite(new QueuedScreenEvent(generation, config.Revision, e)))
@@ -354,9 +354,21 @@ public sealed class AgentService : IAsyncDisposable
                 screenEvent.Kind.ToString(),
                 screenEvent.Summary,
                 screenEvent.FrameHash,
-                queued.ConfigRevision), ConfigJsonOptions);
+                queued.ConfigRevision,
+                screenEvent.IsStale), ConfigJsonOptions);
             await _server.SendAsync(new RpcMessage(RpcType.ScreenEvent, payload), ct).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>异常链展开（外层包装类型+message 不携带根因，脱敏规则会吃掉全限定类型名）。</summary>
+    private static string FlattenForLog(Exception ex)
+    {
+        var parts = new List<string>();
+        for (var e = ex; e is not null && parts.Count < 4; e = e.InnerException)
+        {
+            parts.Add($"{e.GetType().Name}: {e.Message}");
+        }
+        return string.Join(" <-- ", parts);
     }
 
     private static async Task ObserveSessionLoopEndAsync(Task task)
@@ -436,6 +448,7 @@ public sealed record ScreenEventPayload(
     string Kind,
     string Summary,
     ulong FrameHash,
-    long ConfigRevision);
+    long ConfigRevision,
+    bool IsStale = false);
 
 internal sealed record QueuedScreenEvent(long Generation, long ConfigRevision, ScreenEvent Event);

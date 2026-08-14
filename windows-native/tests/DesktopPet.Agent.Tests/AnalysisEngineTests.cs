@@ -51,6 +51,22 @@ public class AnalysisEngineTests
             ProviderReasoningEffort: null,
             MinAnalysisIntervalSeconds: 5));
 
+    /// <summary>首帧正常，之后捕获抛异常（模拟复核阶段捕获源故障）。</summary>
+    private sealed class FailingAfterFirstCaptureFrameSource : IScreenCaptureSource
+    {
+        private readonly IReadOnlyList<CapturedFrame> _frames;
+        private int _index;
+
+        public FailingAfterFirstCaptureFrameSource(IReadOnlyList<CapturedFrame> frames)
+            => _frames = frames;
+
+        public Task<CapturedFrame?> CaptureAsync(CancellationToken ct)
+        {
+            if (_index++ < _frames.Count) return Task.FromResult<CapturedFrame?>(_frames[_index - 1]);
+            throw new CaptureSourceUnavailableException("capture faulted during stale check");
+        }
+    }
+
     private static readonly DateTime T0 = new(2026, 8, 5, 10, 0, 0);
 
     [Fact]
@@ -233,6 +249,53 @@ public class AnalysisEngineTests
 
         Assert.Equal(2, events.Count); // 两次真实变化
         Assert.All(events, e => Assert.Equal(ScreenEventKind.Coding, e.Kind));
+    }
+
+    [Fact]
+    public async Task Tick_ScreenChangedDuringAnalysis_EventMarkedStale()
+    {
+        // 分析帧后还有一帧不同内容（模拟分析耗时期间用户切了屏）→ 事件标记过期
+        var model = new FakeModel { Response = "在写代码" };
+        var source = new OfflineFrameSource([Frame(100), GradientFrame(), Frame(0)]);
+        var engine = MakeEngine(source, model);
+
+        Assert.Null(await engine.TickAsync(T0, CancellationToken.None)); // 基准
+        var evt = await engine.TickAsync(T0.AddSeconds(1), CancellationToken.None);
+
+        Assert.NotNull(evt);
+        Assert.True(evt!.IsStale);
+        Assert.Equal("在写代码", evt.Summary); // 内容保留（journal 用），只是不作为弹幕呈现
+        Assert.Equal(1, model.CallCount);
+    }
+
+    [Fact]
+    public async Task Tick_ScreenUnchangedDuringAnalysis_EventFresh()
+    {
+        // 分析期间屏幕未再变化 → 事件新鲜，可正常弹幕
+        var model = new FakeModel { Response = "在写代码" };
+        var source = new OfflineFrameSource([Frame(100), GradientFrame(), GradientFrame()]);
+        var engine = MakeEngine(source, model);
+
+        Assert.Null(await engine.TickAsync(T0, CancellationToken.None));
+        var evt = await engine.TickAsync(T0.AddSeconds(1), CancellationToken.None);
+
+        Assert.NotNull(evt);
+        Assert.False(evt!.IsStale);
+    }
+
+    [Fact]
+    public async Task Tick_StaleCheckCaptureFails_EventStaysFresh()
+    {
+        // 复核截帧失败（捕获源不可用）→ 保守不标记过期，不误伤事件
+        var model = new FakeModel { Response = "变化" };
+        var source = new FailingAfterFirstCaptureFrameSource([Frame(100), GradientFrame()]);
+        var engine = MakeEngine(source, model);
+
+        Assert.Null(await engine.TickAsync(T0, CancellationToken.None));
+        var evt = await engine.TickAsync(T0.AddSeconds(1), CancellationToken.None);
+
+        Assert.NotNull(evt);
+        Assert.False(evt!.IsStale);
     }
 
     // ---- 分类关键词 ----

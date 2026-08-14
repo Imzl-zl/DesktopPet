@@ -67,7 +67,15 @@ public sealed class AnalysisEngine
         SyncThrottle(cfg);
         if (!_throttle.TryTake(now)) return null;
 
-        return await AnalyzeAsync(frame, hash, cfg, ct).ConfigureAwait(false);
+        var evt = await AnalyzeAsync(frame, hash, cfg, ct).ConfigureAwait(false);
+        // 分析耗时（模型调用可达 10-30s）期间屏幕可能又已变化：
+        // 此时事件内容描述的是过去的屏幕，弹幕会滞后于当前画面。
+        // 复核最新帧：已变 → 标记 stale（App 端 journal 照记但不弹幕）。
+        if (evt is not null && await IsSupersededAsync(hash, ct).ConfigureAwait(false))
+        {
+            evt = evt with { IsStale = true };
+        }
+        return evt;
     }
 
     /// <summary>循环宿主：Tick + 捕获间隔；ct 取消退出。</summary>
@@ -100,6 +108,23 @@ public sealed class AnalysisEngine
             {
                 break;
             }
+        }
+    }
+
+    /// <summary>复核分析帧是否已被更新的屏幕取代（分析期间截屏不暂停，最新帧可直接取到）。</summary>
+    private async Task<bool> IsSupersededAsync(ulong analyzedHash, CancellationToken ct)
+    {
+        try
+        {
+            var fresh = await _capture.CaptureAsync(ct).ConfigureAwait(false);
+            return fresh is not null
+                && _detector.HasChanged(
+                    analyzedHash,
+                    FrameHasher.HashGrayscale(fresh.Gray, fresh.Width, fresh.Height));
+        }
+        catch (Exception)
+        {
+            return false; // 复核失败不误伤事件（保守：视为新鲜）
         }
     }
 

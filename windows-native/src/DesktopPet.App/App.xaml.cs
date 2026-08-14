@@ -774,12 +774,17 @@ public partial class App : Application
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            var probe = Path.Combine(dir.FullName, "src", "DesktopPet.AgentHost", "bin",
-                "Debug", "net8.0-windows10.0.19041.0", "win-x64", exeName);
-            if (File.Exists(probe)) return probe;
-            probe = Path.Combine(dir.FullName, "src", "DesktopPet.AgentHost", "bin",
-                "Debug", "net8.0-windows10.0.19041.0", exeName);
-            if (File.Exists(probe)) return probe;
+            // 优先新版 SDK 投影输出（net8.0-windows10.0.26100.0，WGC 在 25H2 上需新投影）；
+            // 再回退旧 19041 路径。
+            foreach (var tfm in new[] { "net8.0-windows10.0.26100.0", "net8.0-windows10.0.19041.0" })
+            {
+                var probe = Path.Combine(dir.FullName, "src", "DesktopPet.AgentHost", "bin",
+                    "Debug", tfm, "win-x64", exeName);
+                if (File.Exists(probe)) return probe;
+                probe = Path.Combine(dir.FullName, "src", "DesktopPet.AgentHost", "bin",
+                    "Debug", tfm, exeName);
+                if (File.Exists(probe)) return probe;
+            }
             dir = dir.Parent;
         }
         return besideApp;

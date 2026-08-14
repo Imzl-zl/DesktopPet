@@ -3,6 +3,7 @@ using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
 using Windows.Graphics.Imaging;
+using Windows.Security.Authorization.AppCapabilityAccess;
 
 namespace DesktopPet.Agent.Capture;
 
@@ -46,6 +47,7 @@ public sealed class GraphicsCaptureSource :
     private SoftwareBitmap? _latest;
     private Windows.Graphics.SizeInt32 _lastSize; // 上次帧池尺寸（分辨率变化检测）
     private GraphicsCaptureState _state;
+    private AppCapabilityAccessStatus _captureAccess; // Programmatic 捕获权限（24H2+ 前置请求）
     private bool _hasFrame;
     private int _consecutiveFailures;
 
@@ -63,17 +65,56 @@ public sealed class GraphicsCaptureSource :
             if (!IsSupported())
                 throw new NotSupportedException("当前设备不支持 Windows.Graphics.Capture");
 
+            // 24H2/25H2+：程序化捕获（无 UI 的 CreateForMonitor/TryCreateFromDisplayId）
+            // 必须先 RequestAccessAsync(Programmatic)（官方文档 TryCreateFrom* 前置要求；
+            // 截图工具是打包应用自带 capability，unpackaged 应用需显式请求，
+            // 权限状态记录在「设置 > 隐私和安全性 > 截图和屏幕录制」开关）。
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                _captureAccess = GraphicsCaptureAccess.RequestAccessAsync(
+                        GraphicsCaptureAccessKind.Programmatic)
+                    .AsTask(cts.Token).GetAwaiter().GetResult();
+            }
+            catch (Exception accessEx)
+            {
+                throw new InvalidOperationException(
+                    $"GraphicsCaptureAccess.RequestAccessAsync failed: {accessEx.GetType().Name}: {accessEx.Message}",
+                    accessEx);
+            }
+
             _device = CreateD3DDevice();
             // 主屏（MONITOR_DEFAULTTOPRIMARY）：桌宠分析以用户主工作屏为准。
             // 原注释误标 TONEAREST(2)；行为一直是主屏，此处显式命名。
-            _item = CreateCaptureItemForMonitor(MonitorFromPoint(0, 0, MonitorDefaultToPrimary));
+            try
+            {
+                _item = CreateCaptureItemForMonitor(MonitorFromPoint(0, 0, MonitorDefaultToPrimary), _captureAccess);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("GraphicsCapture init failed at CreateForMonitor", ex);
+            }
             _item.Closed += OnItemClosed;
-            _framePool = Direct3D11CaptureFramePool.Create(
-                _device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, _item.Size);
+            try
+            {
+                _framePool = Direct3D11CaptureFramePool.Create(
+                    _device, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, _item.Size);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("GraphicsCapture init failed at CreateFramePool", ex);
+            }
             _lastSize = _item.Size; // 分辨率变化基准（FrameArrived 内比较）
             _framePool.FrameArrived += OnFrameArrived;
-            _session = _framePool.CreateCaptureSession(_item);
-            _session.StartCapture();
+            try
+            {
+                _session = _framePool.CreateCaptureSession(_item);
+                _session.StartCapture();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("GraphicsCapture init failed at StartCapture", ex);
+            }
             lock (_gate) _state = GraphicsCaptureState.Running;
         }
         catch
@@ -252,8 +293,28 @@ public sealed class GraphicsCaptureSource :
 
     private static readonly Guid IID_GraphicsCaptureItem = new("79C3F95B-31F7-4EC2-A464-632EF5D30760");
 
-    private static GraphicsCaptureItem CreateCaptureItemForMonitor(IntPtr hmon)
+    private static GraphicsCaptureItem CreateCaptureItemForMonitor(IntPtr hmon, AppCapabilityAccessStatus captureAccess)
     {
+        // 首选官方推荐路径：TryCreateFromDisplayId（微软 Q&A 26100.7623+ 推荐替代 CreateForMonitor；
+        // 官方文档：调用前必须先 RequestAccessAsync(Programmatic)，此处 captureAccess 已请求）。
+        try
+        {
+            var mi = Microsoft.UI.Win32Interop.GetDisplayIdFromMonitor(hmon);
+            // Microsoft.UI.DisplayId 与 Windows.Graphics.DisplayId 二进制兼容（均为 uint64 opaque token）
+            var wd = new Windows.Graphics.DisplayId { Value = mi.Value };
+            var viaDisplayId = GraphicsCaptureItem.TryCreateFromDisplayId(wd);
+            if (viaDisplayId is not null)
+            {
+                return viaDisplayId;
+            }
+            // 返回 null：继续回退 interop 路径
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"TryCreateFromDisplayId unavailable hmon=0x{hmon.ToInt64():X} captureAccess={captureAccess}", ex);
+        }
+
         var factory = GetActivationFactory(typeof(GraphicsCaptureItem));
         try
         {
@@ -261,7 +322,18 @@ public sealed class GraphicsCaptureSource :
             var iid = IID_GraphicsCaptureItem; // 固定 IID（typeof().GUID 随投影版本漂移）
             var itemAbi = IntPtr.Zero;
             var hr = interop.CreateForMonitor(hmon, ref iid, out itemAbi);
-            if (hr < 0) throw Marshal.GetExceptionForHR(hr)!;
+            if (hr < 0)
+            {
+                // GetExceptionForHR 对未知 HRESULT 可能返回 null（throw null → NRE 丢真实原因），
+                // 先把 HRESULT 原文打进异常链。
+                var ex = Marshal.GetExceptionForHR(hr);
+                throw new InvalidOperationException($"CreateForMonitor failed hr=0x{hr:X8} hmon=0x{hmon.ToInt64():X}", ex);
+            }
+            if (itemAbi == IntPtr.Zero)
+            {
+                throw new InvalidOperationException(
+                    $"CreateForMonitor returned S_OK but empty item hmon=0x{hmon.ToInt64():X} captureAccess={captureAccess}");
+            }
             try
             {
                 return GraphicsCaptureItem.FromAbi(itemAbi);

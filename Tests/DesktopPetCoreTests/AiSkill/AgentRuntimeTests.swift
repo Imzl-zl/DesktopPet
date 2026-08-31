@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import DesktopPetCore
 
@@ -83,17 +84,38 @@ private struct BoomTool: AgentTool {
 
 // MARK: - Async bridge (Windows XCTest runner is sync-only)
 
-private func awaitResult<T>(timeout: TimeInterval = 10,
-                            _ body: @escaping @Sendable () async throws -> T) throws -> T {
+/// Sendable box used to hand the async result back to the sync caller.
+/// Lock + semaphore make the cross-task handoff well-defined; the class is
+/// @unchecked Sendable because that discipline is enforced here, not by the
+/// compiler (required by Swift 6.2's strongly-transferred Task {} init).
+private final class ResultBox<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Result<T, Error>?
+
+    func store(_ result: Result<T, Error>) {
+        lock.lock()
+        stored = result
+        lock.unlock()
+    }
+
+    func take() -> Result<T, Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+}
+
+private func awaitResult<T: Sendable>(timeout: TimeInterval = 10,
+                                      _ body: @escaping @Sendable () async throws -> T) throws -> T {
     let sem = DispatchSemaphore(value: 0)
-    nonisolated(unsafe) var result: Result<T, Error>?
+    let box = ResultBox<T>()
     Task {
-        do { result = .success(try await body()) }
-        catch { result = .failure(error) }
+        do { box.store(.success(try await body())) }
+        catch { box.store(.failure(error)) }
         sem.signal()
     }
     _ = sem.wait(timeout: .now() + timeout)
-    guard let value = result else {
+    guard let value = box.take() else {
         throw MockError()
     }
     return try value.get()

@@ -2261,6 +2261,17 @@ public sealed class SettingsWindow : Window
         };
         imageGenButton.Click += (_, _) => OpenImageGenPage();
         extraRow.Children.Add(imageGenButton);
+        var spriteSkillButton = new Button
+        {
+            Content = "动作精灵图",
+            Style = AppStyle("ButtonDefaultStyle"),
+            Height = 28,
+            FontSize = 12,
+            Margin = new Thickness(0, 0, 8, 0),
+            Padding = new Thickness(12, 3, 12, 3),
+        };
+        spriteSkillButton.Click += (_, _) => OpenSpriteSkillPage();
+        extraRow.Children.Add(spriteSkillButton);
         providerPanel.Children.Add(extraRow);
         stack.Children.Add(SectionCard("模型连接（OpenAI 兼容：云端 / 本地 Ollama 通吃）", providerPanel));
 
@@ -3342,6 +3353,14 @@ public sealed class SettingsWindow : Window
     {
         if (_ai is null) return;
         var window = new Windows.ImageGenWindow(_ai, _gallery, _i18n) { Owner = this };
+        window.ShowDialog();
+    }
+
+    /// <summary>打开动作精灵图技能页：LLM 编排自定义动作精灵图生成。</summary>
+    private void OpenSpriteSkillPage()
+    {
+        if (_ai is null) return;
+        var window = new Windows.SpriteSkillWindow(_ai, _spriteLoader, _i18n) { Owner = this };
         window.ShowDialog();
     }
 

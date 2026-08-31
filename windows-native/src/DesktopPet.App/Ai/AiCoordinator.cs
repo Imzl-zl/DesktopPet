@@ -14,13 +14,14 @@ using DesktopPet.Core.Personas;
 using DesktopPet.Core.Pets;
 using DesktopPet.Core.Scheduling;
 using DesktopPet.Core.Storage;
+using DesktopPet.Core.SpriteSkill;
 using DesktopPet.Core.Summary;
 using DesktopPet.Core.Tts;
 using DesktopPet.Infra.Diagnostics;
 using DesktopPet.Infra.Lifecycle;
+using DesktopPet.Infra.Providers;
 using DesktopPet.Infra.PipeRpc;
 using DesktopPet.Infra.Storage;
-using DesktopPet.Infra.Providers;
 using DesktopPet.Infra.Tts;
 
 namespace DesktopPet.App.Ai;
@@ -417,6 +418,39 @@ public sealed class AiCoordinator : IDisposable, IAsyncDisposable, IModelConnect
     private ImageConnection? FindImageConnection(string connectionId)
         => _providers.Image?.Connections.FirstOrDefault(c =>
             string.Equals(c.Id, connectionId, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// 创建动作精灵图技能会话：复用当前对话 Provider（Ai.ProviderId）+ 生图连接/模型。
+    /// 生图连接解析优先级：显式参数 &gt; SummaryImageModelRef &gt; 首个连接；
+    /// 模型同理。未配置对话模型或生图连接时返回 null（调用方提示配置）。
+    /// </summary>
+    public SpriteSkillSession? CreateSpriteSkillSession(
+        string? connectionId = null, string? imageModelId = null,
+        SpriteSkillOptions? options = null)
+    {
+        var modelConfig = _providers.Models.FirstOrDefault(m => m.Id == _settings.Ai.ProviderId);
+        if (modelConfig is null) return null;
+        var connections = _providers.Image?.Connections;
+        if (connections is null || connections.Count == 0) return null;
+
+        var (refConnId, refModelId) = ParseSummaryImageRef(_settings.Ai.SummaryImageModelRef);
+        var connection = connections.FirstOrDefault(c =>
+                             string.Equals(c.Id, connectionId ?? refConnId, StringComparison.OrdinalIgnoreCase))
+                         ?? connections[0];
+        var modelId = imageModelId ?? refModelId ?? connection.Models.FirstOrDefault() ?? "";
+        if (modelId.Length == 0) return null;
+
+        var model = new OpenAiCompatibleModelProvider(modelConfig, _credentials, _providerHttp);
+        return new SpriteSkillSession(this, model, connection.Id, modelId,
+            SpriteSkillCatalog.SpritePet, new CellSpec(192, 208), options);
+    }
+
+    private static (string? ConnectionId, string? ModelId) ParseSummaryImageRef(string reference)
+    {
+        if (string.IsNullOrEmpty(reference)) return (null, null);
+        var parts = reference.Split('/');
+        return parts.Length >= 2 ? (parts[0], parts[1]) : (null, null);
+    }
 
     private void QueueRuntimeReconcile(long revision)
         => ObserveTask(ReconcileRuntimeAsync(revision), "runtime reconcile");

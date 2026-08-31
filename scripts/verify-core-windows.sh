@@ -56,14 +56,14 @@ trap 'rm -rf "$WORK"' EXIT
 
 echo "== 1/4 编译 DesktopPetCore =="
 cd "$WORK"
-swiftc -c "$REPO"/Sources/DesktopPetCore/*.swift \
+swiftc -c $(find "$REPO"/Sources/DesktopPetCore -name '*.swift') \
   -module-name DesktopPetCore -parse-as-library -enable-testing \
   -emit-module -emit-module-path "$WORK/DesktopPetCore.swiftmodule" \
   -sdk "$SDKROOT" -I "$WORK" -I "$XCTEST_LIB" -I "$XCTEST_LIB/x86_64" \
   -Xcc -D_MT -Xcc -D_DLL
 
 echo "== 2/4 编译测试 =="
-swiftc -c "$REPO"/Tests/DesktopPetCoreTests/*.swift \
+swiftc -c $(find "$REPO"/Tests/DesktopPetCoreTests -name '*.swift') \
   -module-name DesktopPetCoreTests -parse-as-library -enable-testing \
   -emit-module -emit-module-path "$WORK/DesktopPetCoreTests.swiftmodule" \
   -sdk "$SDKROOT" -I "$WORK" -I "$XCTEST_LIB" -I "$XCTEST_LIB/x86_64"
@@ -73,7 +73,7 @@ python3 - "$REPO" "$WORK" <<'PYEOF'
 import re, glob, sys
 repo, work = sys.argv[1], sys.argv[2]
 classes = {}
-for f in glob.glob(repo + '/Tests/DesktopPetCoreTests/*.swift'):
+for f in glob.glob(repo + '/Tests/DesktopPetCoreTests/**/*.swift', recursive=True):
     s = open(f, encoding='utf-8').read()
     for m in re.finditer(r'final class (\w+): XCTestCase', s):
         cls = m.group(1)

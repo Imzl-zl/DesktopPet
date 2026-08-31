@@ -5,7 +5,7 @@
 
 ## 当前基线
 - macOS 主版（SwiftPM）：`swift build` / `swift test` 通过；打包 `./scripts/build-app.sh release`。
-- Windows 版（.NET 8 + WPF）：Core 480 / Infra 161 / Agent 35 / App 57（733 total；本次 App 57/57 fresh）；`DesktopPet.App` 由 VS MCP 构建 0 error / 0 warning。
+- Windows 版（.NET 8 + WPF）：Core 521 / Infra 173 / Agent 38 / App 60（792 total 全绿）；UI 优化轮（2026-08-31）后 `dotnet build DesktopPet.sln -p:Platform=x64` 0 error。
 - Windows 上 Swift core 验证：`./scripts/verify-core-windows.sh`（54 个 core 测试）。
 - 最后更新：2026-08-12
 
@@ -41,6 +41,7 @@
 - 全屏只在输出交付边界抑制主动聊天/气泡/弹幕，不停止截图与分析。
 
 ## 仍需注意的坑点
+- **Win2D CanvasAnimatedControl.Paused 在 WinUI 3 下不可用于暂停/恢复（2026-08-14）**：Win2D 1.3.0 暂停后无法恢复（微软 Win2D#973「once paused could no longer be unpaused」，官方标注 CanvasAnimatedControl 在 WinUI3 不受支持；microsoft-ui-reactor 实测切换 Paused 会永久停驻游戏线程，极端情况恢复尝试崩进程）。弹幕层禁止写 Paused：渲染循环常跑（Update 空转成本≈0），CPU 归零由「空闲 15s 无弹幕窗口自关 + 下次输出按需重建」实现；单帧 delta clamp 0.1s 防弹幕瞬移。
 - **默认热键选键坑（2026-08-14）**：Win+Ctrl+M/S/Q 在本机全部注册失败（M/S 被其他软件占用、Q 是 Win11「快速助手」系统保留组合，任何程序 RegisterHotKey 都返回 1409）→ 默认值改为 Win+Ctrl+H/T/U/X（实测空闲）；改默认键必须同步：Core 默认值 + app-settings.json 用户存量配置 + AppSettingsTests 断言 + phase6-*.ps1 验收脚本 SendKeys 键串（Win 键在 SendKeys 里是 `#`）。用户存量配置不受 Defaults 变更影响，必须单独迁移。
 - Windows 上 `swift test` 崩溃（SwiftPM llbuild bug #6605），core 测试必须走 `verify-core-windows.sh`。
 - `windows-native/测试.txt` 含密钥，勿读取/提交。
@@ -54,6 +55,8 @@
 - **H.NotifyIcon 2.1.4 托盘定位**：库会把 Shell 回调物理点按静态 DPI 因子缩放后交给 WPF `AbsolutePoint`；隐藏图标面板首次打开时该回调点可能与当前鼠标位置不一致。单屏正坐标 + PerMonitorV2 下不要套用负坐标 PR #262；右键即时菜单应关闭 `MenuActivation`，在 `TrayRightMouseUp` 用 WPF `MousePoint` 打开并激活 Popup。
 
 ## 最近活跃窗口
+- 2026-08-31（UI 优化轮官方文档核对 + 加固，792 测试全绿）：本机 GetProcAddress 实测确认 x64 user32 只导出 `GetWindowLongPtrW/A`（无后缀名不存在，SDK 头文件宏而已）→ NativeMethods 入口点显式 W 后缀，新增 NativeMethodsRuntimeTests（真实 HWND + STA 线程）验证 LibraryImport/Span<char> marshalling 与入口点解析；DPI 改**双信号**：`Window.DpiChanged` 事件（官方 .NET 4.6.2+/3.0+ 托管信号）+ WM_DPICHANGED hook 兜底（幂等，hook 分支不设 handled 以便 WPF 自行调整窗口尺寸）；Win2D 设备丢失加固：订阅 CanvasAnimatedControl.CreateResources 清空文本缓存（官方 Handling-device-lost 要求 NewDevice 时重建全部资源）；浮球 DPI 重建不重置 renderer（只换位图缓冲，动画连续）；App.Tests 链接 NativeMethods.cs 并开 AllowUnsafeBlocks。
+- 2026-08-31（UI 样式/性能优化轮，790 测试全绿）：**P1** 弹幕文本绘制按文本缓存 CommandList+ShadowEffect（原实现注释/代码相悖，每帧每条弹幕各做一次 shaping，修正为首次出屏 shaping + 渲染线程 LRU 128）；**P2** PetWindow/FloatingBallWindow 挂 WM_DPICHANGED(0x02E0)（按需重建 WriteableBitmap/帧缓冲/帧源缓存并更新漫游环境源，之前构造期取一次 DPI，多屏跨屏移动会模糊+命中错位）、弹幕窗口 Left/Top 改用 VirtualScreenLeft/Top（副屏在主屏左侧/上方时弹幕覆盖缺失）、字体回退链改为 Segoe UI Variable Text → Segoe UI → YaHei UI（Win10 不再以西文走 YaHei 字形造成两版观感不一致）；小项：设置窗日记 PNG 补 OnLoad+DecodePixelWidth=640+Freeze（文件句柄与全尺寸解码问题）、ChatWindow 消息加 MaxMessages=400 上限（防布局 O(n) 劣化）、NativeMethods 统一 LibraryImport（GetWindowTextW 改 Span<char>）。未跑真机 smoke：跨屏拖拽验证、弹幕多屏覆盖验证、Win10 真机观感验证（本机 Win11）。
 - 2026-08-13（v2 修订：渠道模板 + 真机验收）：架构修订——能力解析四级优先级（模型级声明 > 渠道模板 > 目录/推断），新增 `channels.json` 内置 7 渠道模板（openai/google/sensenova/xai/siliconflow/newapi-relay/custom），连接编辑器加渠道模板下拉；Auto 推断降级为未知模型兜底（实测教训：newapi 上 gpt-image-2 编辑必须 multipart、gemini 模型要 JSON 数组——同 id 跨渠道行为不同，推断必然猜错）；目录 JSON 补全 editStyle 显式声明；修复 E 阶段结构 bug（ModelCapabilities 顶层字典误挂 ImageConnection，改门面构造注入）。真机验收：sensenova-u1-fast/gpt-image-2/gemini-3.1-flash-image/agnes-image-2.1-flash 文生图全 ✓，gemini 编辑 ✓，gpt-image-2 编辑补 MultipartFormData 形态实测 ✓，agnes 编辑渠道后端不稳；764 测试全绿。
 - 2026-08-12（生图 v2 阶段 A-E 全部实施，754 测试全绿）：能力自描述落地——枚举 R5x4/R4x5/R9x21、`FixedSizes`/`SizeStyle`/`EditStyle`/`QualityLevels` 四能力维度（目录 JSON + 尺寸表推导最近邻匹配）、适配器尺寸三形态（PixelCalc/FixedTable/AspectRatioResolution）+ 编辑三形态（image/images/单对象，gpt-image-2 新形态无 type 且键名 images，EndpointPath 判定改显式标志）、sensenova-u1-fast 目录条目（11 固定 2K）+ grok sizeStyle 修正、生图页参考图区（文件/URL/chip/上限）+ 尺寸表模式下拉 + AiCoordinator.EditImageAsync、连接编辑器能力声明 JSON 框 + providers.json modelCapabilities（实施偏差：models 保持 string[]，声明独立顶层字典）。阶段 F（真机验收）待跑。
 - 2026-08-12（生图 v2 设计定稿，未实施）：能力自描述 + 图生图 + SenseNova 支持定稿（`docs/windows-imagegen-v2-design.md`）。官方文档核实：gpt-image-2 edits 新形态 `images:[{image_url}]`（≤16 张，无 type）、SenseNova 仅 11 固定 2K 尺寸且无图生图接口、Gemini 官方推 Interactions 但 generateContent 仍是官方+中转主流形态（保持）、Grok 用 aspect_ratio+resolution（v1 适配器发 size 与官方不符待修）。维护约定：模型数据真值=image-models.json，v2 只存设计决策不追实现，阶段表每完成一阶段打勾；v1 §9 阶段表已标注过期。

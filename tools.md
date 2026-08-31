@@ -38,6 +38,13 @@
 - Windows 本地化：Core embedded JSON 为唯一 catalog，四语言 key/placeholder 必须完全同集；`LanguageCoordinator` 先保存再发布；WPF 静态槽位走 `WpfLocalizer`，用户/模型/日记/自定义人格内容必须用 dynamic exclusion。
 - Windows 诊断：App/Agent 统一写 `AppDataPaths.Logs`；logger 写盘前脱敏并硬限制单文件，ZIP 导出再脱敏；恢复出厂前必须依次停 Agent/请求、关闭 UI/日志资源，再操作数据目录和 Credential Manager。
 
+## Patterns
+- 弹幕文本绘制（DanmakuWindow）：TextShadows 模式的正确打开方式是**按文本缓存 (CanvasCommandList + ShadowEffect)**——文本只 shaping 一次，Draw 纯 DrawImage 合成；缓存仅渲染线程访问（无锁），LRU 128 上限，窗口 OnClosed 在 `RemoveFromVisualTree()` 之后统一 Dispose。禁止在 Draw 回调里每帧 new CanvasCommandList + DrawText（等同每帧每文本 shaping，线性逼近 16ms 帧预算）。
+- **Win2D 设备丢失**：GPU 重置/驱动升级会重建 CanvasDevice 并触发 `CreateResources(Reason=NewDevice)`（官方 Handling-device-lost 文档），旧 device 上的缓存资源全部失效——CanvasAnimatedControl 必须订阅 CreateResources 清空自建缓存（首次 Reason=FirstTime 触发时缓存为空，no-op 无害）。
+- PerMonitorV2 下的 DPI 资源：manifest 已声明 PerMonitorV2 ⇒ 任何缓存了「DPI 缩放/物理像素缓冲」的窗口（PetWindow、FloatingBallWindow）必须响应 DPI 变化重建。**双信号模式**：`Window.DpiChanged` 事件（.NET Framework 4.6.2+/Windows Desktop 3.0+，官方托管信号，框架已完成内部 DPI 变换后触发）+ `WM_DPICHANGED` hook 兜底（wParam 低 16 位=X DPI，官方文档语义）；两条路都进幂等方法（同缩放值直接 return），重复触发无副作用。hook 分支**不得设 handled=true**（WPF 自身也要处理该消息调整窗口尺寸）。
+- 全屏覆盖窗要覆盖多屏：Left/Top 必须取 `SystemParameters.VirtualScreenLeft/Top`(0,0 起锚会让主屏左/上侧的副屏完全没有覆盖)。
+- **P/Invoke 入口点命名（x64）**：user32 的 GetWindowLongPtr/SetWindowLongPtr 在 x64 上只导出 `GetWindowLongPtrW/A`、`SetWindowLongPtrW/A`（本机 GetProcAddress 实测无后缀名返回 0）——无后缀名只是 SDK 头文件宏，运行时解析会 EntryPointNotFoundException。入口点必须显式写 `W` 后缀（或依赖 DllImport 的 CharSet 自动后缀机制，LibraryImport 无此机制必须显式写）。`LibraryImport` + `Span<char>` + `StringMarshalling.Utf16` 的 GetWindowTextW 源生成 marshalling 已用真实 HWND 运行时测试验证（NativeMethodsRuntimeTests）。
+
 ## Pitfalls
 - **气泡定位**：气泡底锚定「实际可见头顶」（`SpriteRect.Y + ContentTopInset`，Bottom 对齐 + 向上平移 SnugToHeadTop）；不要改回帧矩形/固定 headroom 偏移（不同宠物帧内透明边不同，会压头/悬空）。
 - Windows 上 `swift test` 会崩溃（SwiftPM llbuild job bug，见 swiftlang/swift-package-manager#6605），必须用 `./scripts/verify-core-windows.sh` 跑 54 个 core 测试。

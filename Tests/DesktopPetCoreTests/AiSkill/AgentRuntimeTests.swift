@@ -84,7 +84,7 @@ private struct BoomTool: AgentTool {
 // MARK: - Async bridge (Windows XCTest runner is sync-only)
 
 private func awaitResult<T>(timeout: TimeInterval = 10,
-                            _ body: @escaping () async throws -> T) throws -> T {
+                            _ body: @escaping @Sendable () async throws -> T) throws -> T {
     let sem = DispatchSemaphore(value: 0)
     nonisolated(unsafe) var result: Result<T, Error>?
     Task {

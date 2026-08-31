@@ -46,7 +46,11 @@
         <SolidColorBrush x:Key="AiBubbleBrush" Color="#FFFFFF" />
 
         <!-- ===== 字体 ===== -->
-        <FontFamily x:Key="AppFontFamily">Segoe UI Variable, Microsoft YaHei UI, Segoe UI</FontFamily>
+        <!-- 回退链严格倒序：Win11 → Segoe UI Variable Text；系统中没有它（Windows 10）时落
+             Segoe UI（保证拉丁/越南字形与字号基线统一，不能让西文落到 Microsoft YaHei UI——
+             其拉丁字形的灰度/字距与 Segoe 差异明显，会造成 Win10/Win11 西文观感不一致）。
+             中文字符在前两项都不覆盖时最终落 YaHei UI，两版系统行为一致。 -->
+        <FontFamily x:Key="AppFontFamily">Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI</FontFamily>
         <sys:Double x:Key="FontSizePageTitle" xmlns:sys="clr-namespace:System;assembly=mscorlib">20</sys:Double>
         <sys:Double x:Key="FontSizeCardTitle" xmlns:sys="clr-namespace:System;assembly=mscorlib">14</sys:Double>
         <sys:Double x:Key="FontSizeBody" xmlns:sys="clr-namespace:System;assembly=mscorlib">13</sys:Double>

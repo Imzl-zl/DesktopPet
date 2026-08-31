@@ -89,8 +89,18 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll")]
     private static partial uint GetWindowThreadProcessId(nint hWnd, out uint processId);
 
-    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowTextW", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private static extern int GetWindowText(nint hWnd, System.Text.StringBuilder buffer, int maxCount);
+    // 窗口样式读写：x64 专用导出（Ptr 后缀版本无 32 位导出；项目锁定 win-x64）。
+    // 若未来支持 x86，这两处必须改回 GetWindowLongW/SetWindowLongW 宏路径。
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    public static partial nint GetWindowLongPtr(nint hWnd, int index);
+
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    public static partial nint SetWindowLongPtr(nint hWnd, int index, nint newLong);
+
+    // LibraryImport 源生成（.NET 7+）：Span<char> 直接当定长缓冲，零运行时 pinvoke stub，
+    // 比 DllImport + StringBuilder 少一次 StringBuilderCache/TLS 交互和一次挂起堆对象。
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int GetWindowText(nint hWnd, Span<char> buffer, int maxCount);
 
     /// <summary>枚举可见顶层窗口（非空标题、尺寸 >40x40、排除自身进程），物理坐标。</summary>
     public static List<(string Title, int X, int Y, int Width, int Height)> EnumerateVisibleWindows(uint excludeProcessId)
@@ -108,11 +118,11 @@ internal static partial class NativeMethods
             GetWindowThreadProcessId(hWnd, out var pid);
             if (pid == excludeProcessId) return true; // 排除自己的窗口（不爬自己）
 
-            var title = new System.Text.StringBuilder(512);
-            var len = GetWindowText(hWnd, title, title.Capacity);
+            Span<char> title = stackalloc char[512];
+            var len = GetWindowText(hWnd, title, title.Length);
             if (len <= 0) return true; // 仅保留非空标题（过滤工具提示/IME 栏）
 
-            result.Add((title.ToString(), rect.Left, rect.Top, w, h));
+            result.Add((new string(title[..len]), rect.Left, rect.Top, w, h));
             return true;
         }, 0);
         return result;

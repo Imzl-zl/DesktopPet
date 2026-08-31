@@ -81,7 +81,8 @@ public sealed class BubbleView : Border
             // 圆体 = 微软正黑/游黑（字形圆润，与系统默认 Segoe UI Variable 拉开视觉差异）
             "rounded" => new FontFamily("Microsoft JhengHei UI, Yu Gothic UI, Microsoft YaHei UI"),
             "mono" => new FontFamily("Cascadia Mono, Consolas"),
-            _ => new FontFamily("Segoe UI Variable, Microsoft YaHei UI, Segoe UI"),
+            // 与 App.xaml AppFontFamily 同链（Win11→Variable Text，Win10→Segoe UI，中文→YaHei UI）
+            _ => new FontFamily("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"),
         };
     }
 

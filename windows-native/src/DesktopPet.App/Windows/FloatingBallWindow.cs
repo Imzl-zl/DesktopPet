@@ -110,6 +110,10 @@ public sealed class FloatingBallWindow : Window
         _petTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000.0 / 3) };
         _petTimer.Tick += (_, _) => AdvanceBallPet();
 
+        // 官方托管 DPI 信号：窗口所在屏 DPI 变化后重建球体精灵位图（renderer 保留，动画不重置）。
+        // WndProcHook 里的 WM_DPICHANGED 是兜底信号；RebuildBallPetBitmap 幂等，双路触发无副作用。
+        DpiChanged += (_, e) => RebuildBallPetBitmap(e.NewDpi.DpiScaleX);
+
         Loaded += (_, _) =>
         {
             _hwnd = new WindowInteropHelper(this).Handle;
@@ -145,6 +149,9 @@ public sealed class FloatingBallWindow : Window
 
     // ---- 球内活体宠物 ----
 
+    // 球体直径（DIP）。WriteableBitmap 缓冲 = 直径 × 当前 DPI 缩放。
+    private const double BallPetSizeDip = 56;
+
     private void LoadBallPet()
     {
         var sheet = _selectedSprite();
@@ -152,7 +159,30 @@ public sealed class FloatingBallWindow : Window
         _petRenderer = new PetRenderer(sheet);
         _petRenderer.SetState("idle");
         var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        _petBitmap = new WriteableBitmap((int)(56 * dpi), (int)(56 * dpi), 96 * dpi, 96 * dpi, PixelFormats.Bgra32, null);
+        if (_petBitmap is null || Math.Abs(dpi - _ballDpiScale) > 0.001)
+        {
+            RebuildBallPetBitmap(dpi); // 首次或 DPI 变化：重建缓冲
+        }
+        else
+        {
+            DrawBallPet(); // renderer 已换，用现有缓冲重绘（幂等路径不能吞掉重绘）
+        }
+    }
+
+    /// <summary>当前球体精灵位图对应的 DPI 缩放（幂等性判断基准）。</summary>
+    private double _ballDpiScale;
+
+    /// <summary>按给定 DPI 缩放重建球体精灵位图缓冲（不重建 renderer，动画状态保持连续）。</summary>
+    private void RebuildBallPetBitmap(double dpiScale)
+    {
+        if (_petRenderer is null) return; // 精灵未就绪（LoadBallPet 尚未成功）
+        if (dpiScale <= 0) return;
+        // 幂等：DpiChanged 事件与 WM_DPICHANGED 兜底可能双路触发；同缩放值不重复重建。
+        if (Math.Abs(dpiScale - _ballDpiScale) < 0.001 && _petBitmap is not null) return;
+        _ballDpiScale = dpiScale;
+        _petBitmap = new WriteableBitmap(
+            Math.Max(1, (int)(BallPetSizeDip * dpiScale)), Math.Max(1, (int)(BallPetSizeDip * dpiScale)),
+            96 * dpiScale, 96 * dpiScale, PixelFormats.Bgra32, null);
         _petBuffer = new ReusablePixelBuffer(_petBitmap.PixelWidth * _petBitmap.PixelHeight * 4);
         _petImage.Source = _petBitmap;
         DrawBallPet();
@@ -189,8 +219,17 @@ public sealed class FloatingBallWindow : Window
         const int wmLeftUp = 0x0202;
         const int wmRightDown = 0x0204;
         const int wmNcHitTest = 0x0084;
+        const int wmDpiChanged = 0x02E0;
         const nint htClient = 1;
         const nint mkLeftButton = 0x0001;
+        if (msg == wmDpiChanged)
+        {
+            // WM_DPICHANGED 兜底（官方文档：wParam 低 16 位 = 新 X DPI）。
+            // 与 DpiChanged 事件互为冗余；RebuildBallPetBitmap 幂等。
+            var newDpi = (int)(wParam & 0xFFFF);
+            if (newDpi > 0) RebuildBallPetBitmap(newDpi / 96.0);
+            return 0;
+        }
         if (msg == wmNcHitTest)
         {
             // WPF 透明窗口默认对透明像素返回 HTTRANSPARENT → 点击穿透 → 左键菜单/拖拽失效。

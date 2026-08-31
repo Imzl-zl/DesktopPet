@@ -30,6 +30,9 @@ namespace DesktopPet.App.Windows;
 public sealed class PetWindow : Window
 {
     private const double DragThresholdPx = 4;
+    /// <summary>窗口逻辑尺寸（DIP）。物理像素缓冲尺寸 = 逻辑尺寸 × 当前 DPI 缩放。</summary>
+    private const double WindowWidthDip = 260;
+    private const double WindowHeightDip = 320;
 
     private PetInstance _instance;
     private readonly Action<PetWindow, int, int> _onDragFinished;
@@ -39,12 +42,14 @@ public sealed class PetWindow : Window
     private I18nService _i18n = new();
     private CareState _careState = null!;
     private readonly Image _image = new();
-    private readonly WriteableBitmap _bitmap;
-    private readonly ReusablePixelBuffer _frameBuffer;
+    // 以下五项随 WM_DPICHANGED 重建：PerMonitorV2 下窗口跨屏移动到不同 DPI 显示器时必须更新，
+    // 否则 buffer 尺寸/hitTest/漫游换算全部基于过期缩放（图像模糊 + 点不中 + 漫游错位）。
+    private WriteableBitmap _bitmap;
+    private ReusablePixelBuffer _frameBuffer;
     private readonly SpriteFrameBitmapSourceCache _frameSourceCache = new();
-    private readonly double _dpiScale;
-    private readonly int _bufferWidth;
-    private readonly int _bufferHeight;
+    private double _dpiScale;
+    private int _bufferWidth;
+    private int _bufferHeight;
 
     private PetRenderer? _renderer;
     private bool _spriteLoading;
@@ -60,6 +65,7 @@ public sealed class PetWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly QuickBubbleController _quickBubble;
     private readonly SystemRoamClock _roamClock = new();
+    private readonly PetWindowEnvironmentSource _environmentSource = null!; // 构造中初始化;DPI 变化时同步更新其缩放
 
     /// <summary>精灵加载完成（PetWindowManager 用于刷新浮球球体）。</summary>
     public event Action? SpriteLoaded;
@@ -161,12 +167,12 @@ public sealed class PetWindow : Window
         ResizeMode = ResizeMode.NoResize;
         Focusable = false;
         ShowActivated = false;
-        Width = 260;
-        Height = 320;
+        Width = WindowWidthDip;
+        Height = WindowHeightDip;
 
         _dpiScale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
-        _bufferWidth = (int)(260 * _dpiScale);
-        _bufferHeight = (int)(320 * _dpiScale);
+        _bufferWidth = Math.Max(1, (int)(WindowWidthDip * _dpiScale));
+        _bufferHeight = Math.Max(1, (int)(WindowHeightDip * _dpiScale));
         _bitmap = new WriteableBitmap(
             _bufferWidth, _bufferHeight, 96 * _dpiScale, 96 * _dpiScale,
             PixelFormats.Bgra32, null);
@@ -213,9 +219,14 @@ public sealed class PetWindow : Window
             RenderBubble();
         });
 
+        // 官方托管 DPI 信号：窗口所在屏 DPI 变化后触发（.NET 4.6.2+/Windows Desktop 3.0+，net8 可用），
+        // 此时框架已完成内部 DPI 变换更新。另一条兜底信号是 WndProcHook 里的 WM_DPICHANGED——
+        // 两者都进 OnDpiChanged（幂等），双重触发无副作用。
+        DpiChanged += (_, e) => OnDpiChanged(e.NewDpi.DpiScaleX);
 
         var environmentSource = new PetWindowEnvironmentSource();
         environmentSource.SetDpiScale(_dpiScale);
+        _environmentSource = environmentSource;
         _roamEngine = new RoamEngine(
             new PetWindowRoamHost(this),
             environmentSource,
@@ -604,9 +615,15 @@ public sealed class PetWindow : Window
         const int wmLeftUp = 0x0202;
         const int wmCancelMode = 0x001F;
         const int wmCaptureChanged = 0x0215;
+        const int wmDpiChanged = 0x02E0;
         const nint mkLeftButton = 0x0001;
         switch (msg)
         {
+            case wmDpiChanged:
+                // WM_DPICHANGED 兜底：wParam 低 16 位 = 新 X DPI（官方文档：LOWORD=XDpi, HIWORD=YDpi）。
+                // 与 DpiChanged 事件互为冗余；OnDpiChanged 幂等（同缩放值直接返回）。
+                OnDpiChanged((wParam & 0xFFFF) / 96.0);
+                break;
             case wmLeftDown:
                 BenchTrace($"raw msg down client={ClientPointOfMessage(lParam)} cursor={NativeMethods.CursorPosition()}");
                 OnRawLeftDown(lParam);
@@ -628,6 +645,36 @@ public sealed class PetWindow : Window
                 break;
         }
         return 0;
+    }
+
+    /// <summary>
+    /// DPI 迁移（Window.DpiChanged 事件）：拖到不同 DPI 的显示器或系统 DPI 设置变更时触发。
+    /// 要重建的东西：像素缓冲对（WriteableBitmap + 帧缓冲）、帧位源缓存（已烘成旧 DPI 的绘制尺寸）、
+    /// 漫游环境源缩放；随后重绘一帧防止空白，并重贴气泡（其偏移依赖 _dpiScale）。
+    /// 窗口逻辑尺寸（260x320 DIP）不变，WPF 自己处理缩放后的重布局；渲染器在下一帧按新缓冲尺寸重排。
+    /// </summary>
+    private void OnDpiChanged(double newScale)
+    {
+        if (newScale <= 0) return;
+        if (Math.Abs(newScale - _dpiScale) < 0.001) return;
+
+        _dpiScale = newScale;
+        _bufferWidth = Math.Max(1, (int)(WindowWidthDip * _dpiScale));
+        _bufferHeight = Math.Max(1, (int)(WindowHeightDip * _dpiScale));
+        _bitmap = new WriteableBitmap(
+            _bufferWidth, _bufferHeight, 96 * _dpiScale, 96 * _dpiScale,
+            PixelFormats.Bgra32, null);
+        _frameBuffer = new ReusablePixelBuffer(_bufferWidth * _bufferHeight * 4);
+        _frameSourceCache.Clear(); // 按旧缓冲尺寸烘出的缓存帧全部作废，避免错位/模糊
+        _image.Source = _bitmap;   // 上次重绘可能走缓存路径把 Source 指向了冻结帧
+        _image.Width = double.NaN;
+        _image.Height = double.NaN;
+        _image.Margin = new Thickness();
+        _image.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _image.VerticalAlignment = VerticalAlignment.Stretch;
+        _environmentSource.SetDpiScale(_dpiScale);
+        DrawFrame(0);
+        SnugBubble();
     }
 
     /// <summary>

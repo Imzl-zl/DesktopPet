@@ -17,6 +17,9 @@ public sealed class ChatWindow : Window
 {
     private const double BubbleGap = 10;
     private const double MessageSideInset = 64;
+    /// <summary>消息列表上限：StackPanel + ScrollViewer 布局无虚拟化，无上限会让长会话布局 O(n) 劣化；
+    /// 超限时丢最旧消息只影响 UI 显示，不影响会话上下文（L1 会话窗口由 AiCoordinator 管理）。</summary>
+    private const int MaxMessages = 400;
 
     private readonly StackPanel _messages = new() { Margin = new Thickness(16, 18, 16, 14) };
     private readonly ScrollViewer _scroll = new();
@@ -377,6 +380,10 @@ public sealed class ChatWindow : Window
 
     private TextBlock AddBubble(string text, bool isUser)
     {
+        while (_messages.Children.Count >= MaxMessages)
+        {
+            _messages.Children.RemoveAt(0); // 超长丢最旧；仅限 UI 显示，不影响模型上下文
+        }
         var bubble = new Border
         {
             Background = Brush(isUser ? "UserBubbleBrush" : "AiBubbleBrush"),

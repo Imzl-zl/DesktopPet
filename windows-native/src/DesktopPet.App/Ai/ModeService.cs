@@ -80,8 +80,14 @@ public sealed class ModeService
             case OutputMode.Danmaku:
                 if (_danmakuWindow is null || !_danmakuWindow.IsVisible)
                 {
-                    _danmakuWindow = _danmakuFactory();
-                    _danmakuWindow.Show();
+                    var window = _danmakuFactory();
+                    // 空闲自关（CPU 归零）后引用置空；下次输出按需重建
+                    window.Closed += (_, _) =>
+                    {
+                        if (ReferenceEquals(_danmakuWindow, window)) _danmakuWindow = null;
+                    };
+                    _danmakuWindow = window;
+                    window.Show();
                 }
                 _danmakuWindow.ShowDanmaku(output.Text);
                 break;

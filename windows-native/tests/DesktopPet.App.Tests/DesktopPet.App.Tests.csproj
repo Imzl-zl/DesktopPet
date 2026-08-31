@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -50,6 +51,8 @@
              Link="Rendering\PixelBuffer.cs" />
     <Compile Include="..\..\src\DesktopPet.App\Rendering\SpriteFrameBitmapSourceCache.cs"
              Link="Rendering\SpriteFrameBitmapSourceCache.cs" />
+    <Compile Include="..\..\src\DesktopPet.App\Interop\NativeMethods.cs"
+             Link="Interop\NativeMethods.cs" />
     <Content Include="..\DesktopPet.Core.Tests\Fixtures\single-row.png"
              Link="Fixtures\single-row.png"
              CopyToOutputDirectory="PreserveNewest" />

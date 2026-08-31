@@ -128,9 +128,19 @@ public sealed class SpritePreviewWindow : Window
         confirm.Click += (_, _) => { DialogResult = true; };
         buttons.Children.Add(cancel);
         buttons.Children.Add(confirm);
-        root.Children.Add(buttons);
 
-        Content = root;
+        // 按钮 Dock 固定底部（内容再高也不挤出窗口）；其余内容可滚动。
+        var scroll = new ScrollViewer
+        {
+            Content = root,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+        var layout = new DockPanel();
+        DockPanel.SetDock(buttons, Dock.Bottom);
+        layout.Children.Add(buttons);
+        layout.Children.Add(scroll);
+
+        Content = layout;
         WpfLocalizer.ApplyNew(this, _i18n);
     }
 

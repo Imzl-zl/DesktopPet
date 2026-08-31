@@ -4225,10 +4225,16 @@ public sealed class SettingsWindow : Window
                 {
                     try
                     {
+                        // 同 ImageGenWindow.LoadBitmap 的要点：
+                        // - OnLoad：不立即解码会持有 PNG 文件句柄直到位图被 GC（再写入/删除该日记图会被拒）；
+                        // - DecodePixelWidth：总结图按全尺寸解码进内存（可能很大），再被 MaxWidth=320 缩小，白耗几十 MB。
                         var bitmap = new BitmapImage();
                         bitmap.BeginInit();
+                        bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                        bitmap.DecodePixelWidth = 640;
                         bitmap.UriSource = new Uri(png);
                         bitmap.EndInit();
+                        bitmap.Freeze();
                         inner.Children.Add(new Image
                         {
                             Source = bitmap,

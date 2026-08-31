@@ -452,4 +452,32 @@ public class OpenAiImageGenAdapterTests
             return new HttpResponseMessage(HttpStatusCode.OK);
         }
     }
+
+    [Fact]
+    public async Task Edit_ExtraBodyImageArrayStyle_UsesGenerationsEndpointWithExtraBodyImage()
+    {
+        // agnes 家族（官方文档核实）：图生图走 /images/generations，image 字符串数组放 extra_body.image。
+        var caps = new ImageGenCapabilities(
+            NativeTransparency: false,
+            [ImageAspectRatio.R1x1, ImageAspectRatio.R21x9], [ImageScale.S1K, ImageScale.S2K],
+            Editing: true, MaxReferenceImages: 8, Seed: false,
+            EditStyle: ImageEditStyle.ExtraBodyImageArray);
+        var handler = new RecordingHandler((_, __) => Task.FromResult(JsonResponse(
+            new { data = new[] { new { b64_json = Convert.ToBase64String(FakePng()) } } })));
+        var adapter = new OpenAiImageGenAdapter(
+            Connection("agnes-image-2.1-flash"), "agnes-image-2.1-flash",
+            new StubCredentialStore(null), Client(handler), capabilities: caps);
+
+        await adapter.EditAsync(new ImageGenSpec("make it orange", ImageAspectRatio.R1x1, ImageScale.S1K),
+            [new ReferenceImage(FakePng(), "image/png")], CancellationToken.None);
+
+        Assert.EndsWith("/images/generations", handler.Requests[0].RequestUri!.AbsolutePath); // 非 /images/edits
+        var body = JsonSerializer.Deserialize<JsonElement>(handler.RequestBodies[0]);
+        Assert.False(body.TryGetProperty("image", out _)); // 顶层不得有 image
+        var extra = body.GetProperty("extra_body");
+        var images = extra.GetProperty("image");
+        Assert.Equal(JsonValueKind.Array, images.ValueKind);
+        Assert.Equal(1, images.GetArrayLength());
+        Assert.StartsWith("data:image/png;base64,", images[0].GetString()); // 字符串数组（非对象）
+    }
 }

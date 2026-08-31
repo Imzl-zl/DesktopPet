@@ -6,8 +6,20 @@
       "name": "GPT Image 2",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
-        "scales": ["1K", "2K", "4K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16"
+        ],
+        "scales": [
+          "1K",
+          "2K",
+          "4K"
+        ],
         "editing": true,
         "maxReferenceImages": 16,
         "editStyle": "imagesArray"
@@ -21,8 +33,14 @@
       "name": "GPT Image 1.5",
       "capabilities": {
         "nativeTransparency": true,
-        "aspectRatios": ["1:1", "3:2", "2:3"],
-        "scales": ["1K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3"
+        ],
+        "scales": [
+          "1K"
+        ],
         "editing": true,
         "maxReferenceImages": 1,
         "editStyle": "imageArray"
@@ -36,8 +54,14 @@
       "name": "GPT Image 1 Mini",
       "capabilities": {
         "nativeTransparency": true,
-        "aspectRatios": ["1:1", "3:2", "2:3"],
-        "scales": ["1K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3"
+        ],
+        "scales": [
+          "1K"
+        ],
         "editing": true,
         "maxReferenceImages": 1,
         "editStyle": "imageArray"
@@ -51,8 +75,18 @@
       "name": "Grok Imagine",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
-        "scales": ["1K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16"
+        ],
+        "scales": [
+          "1K"
+        ],
         "editing": true,
         "maxReferenceImages": 3,
         "sizeStyle": "aspectRatioResolution",
@@ -67,8 +101,19 @@
       "name": "Grok Imagine Quality",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
-        "scales": ["1K", "2K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16"
+        ],
+        "scales": [
+          "1K",
+          "2K"
+        ],
         "editing": true,
         "maxReferenceImages": 3,
         "sizeStyle": "aspectRatioResolution",
@@ -83,8 +128,18 @@
       "name": "Qwen-Image",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
-        "scales": ["1K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16"
+        ],
+        "scales": [
+          "1K"
+        ],
         "editing": false,
         "seed": true
       },
@@ -97,8 +152,18 @@
       "name": "Qwen-Image Edit",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
-        "scales": ["1K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16"
+        ],
+        "scales": [
+          "1K"
+        ],
         "editing": true,
         "maxReferenceImages": 3,
         "seed": true,
@@ -113,8 +178,16 @@
       "name": "FLUX.1 Schnell",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "4:3", "3:4", "16:9", "9:16"],
-        "scales": ["1K"],
+        "aspectRatios": [
+          "1:1",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16"
+        ],
+        "scales": [
+          "1K"
+        ],
         "editing": false,
         "seed": true
       },
@@ -127,8 +200,16 @@
       "name": "FLUX.1 Dev",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "4:3", "3:4", "16:9", "9:16"],
-        "scales": ["1K"],
+        "aspectRatios": [
+          "1:1",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16"
+        ],
+        "scales": [
+          "1K"
+        ],
         "editing": false,
         "seed": true
       },
@@ -141,8 +222,14 @@
       "name": "Kolors（快手）",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "3:4", "9:16"],
-        "scales": ["1K"],
+        "aspectRatios": [
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "scales": [
+          "1K"
+        ],
         "editing": false,
         "seed": true
       },
@@ -155,8 +242,19 @@
       "name": "SenseNova U1 Fast（商汤）",
       "capabilities": {
         "nativeTransparency": false,
-        "fixedSizes": ["2752x1536","1536x2752","2048x2048","2496x1664","1664x2496",
-                       "2368x1760","1760x2368","2272x1824","1824x2272","3072x1376","1344x3136"],
+        "fixedSizes": [
+          "2752x1536",
+          "1536x2752",
+          "2048x2048",
+          "2496x1664",
+          "1664x2496",
+          "2368x1760",
+          "1760x2368",
+          "2272x1824",
+          "1824x2272",
+          "3072x1376",
+          "1344x3136"
+        ],
         "editing": false,
         "maxReferenceImages": 0,
         "seed": false,
@@ -171,8 +269,20 @@
       "name": "Nano Banana",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"],
-        "scales": ["1K", "2K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16",
+          "21:9"
+        ],
+        "scales": [
+          "1K",
+          "2K"
+        ],
         "editing": true,
         "maxReferenceImages": 4
       },
@@ -185,8 +295,21 @@
       "name": "Nano Banana 2",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"],
-        "scales": ["1K", "2K", "4K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16",
+          "21:9"
+        ],
+        "scales": [
+          "1K",
+          "2K",
+          "4K"
+        ],
         "editing": true,
         "maxReferenceImages": 14
       },
@@ -199,13 +322,54 @@
       "name": "Nano Banana Pro",
       "capabilities": {
         "nativeTransparency": false,
-        "aspectRatios": ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"],
-        "scales": ["1K", "2K", "4K"],
+        "aspectRatios": [
+          "1:1",
+          "3:2",
+          "2:3",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16",
+          "21:9"
+        ],
+        "scales": [
+          "1K",
+          "2K",
+          "4K"
+        ],
         "editing": true,
         "maxReferenceImages": 14
       },
       "priceHint": "$0.08~0.13",
       "note": "4K 档"
+    },
+    {
+      "id": "agnes-image-2.1-flash",
+      "family": "openai",
+      "name": "Agnes Image 2.1 Flash",
+      "capabilities": {
+        "nativeTransparency": false,
+        "aspectRatios": [
+          "1:1",
+          "3:4",
+          "4:3",
+          "16:9",
+          "9:16",
+          "2:3",
+          "3:2",
+          "21:9"
+        ],
+        "scales": [
+          "1K",
+          "2K",
+          "4K"
+        ],
+        "editing": true,
+        "maxReferenceImages": 8,
+        "editStyle": "extraBodyImageArray"
+      },
+      "priceHint": "$0.003",
+      "note": "agnes 家族：图生图走 /images/generations + extra_body.image 字符串数组（官方文档核实 2026-08）"
     }
   ]
 }

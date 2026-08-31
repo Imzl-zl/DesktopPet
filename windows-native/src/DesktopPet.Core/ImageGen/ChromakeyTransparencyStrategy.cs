@@ -1,4 +1,5 @@
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace DesktopPet.Core.ImageGen;
@@ -51,7 +52,10 @@ public sealed class ChromakeyTransparencyStrategy : ITransparencyStrategy
         ApplyChromaKey(image, ct);
 
         using var ms = new MemoryStream();
-        image.SaveAsPng(ms);
+        // 必须显式 RGBA 编码：ImageSharp 3.1.11 的 SaveAsPng 对“从 RGB PNG 解码的图”
+        // 会输出 RGB（colorType 2）并把写回的 alpha 丢弃（真实抠图全丢透明）。
+        var encoder = new PngEncoder { ColorType = PngColorType.RgbWithAlpha };
+        image.Save(ms, encoder);
         return Task.FromResult(new ImageGenOutput(ms.ToArray(), "image/png", output.SeedUsed));
     }
 

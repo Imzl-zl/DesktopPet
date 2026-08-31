@@ -125,7 +125,7 @@ public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
     /// <summary>multipart 编辑（newapi 类中转 gpt-image-2）：图片走文件字段，body 只含生成参数。</summary>
     protected override bool UsesMultipartEdit => EffectiveEditStyle() == ImageEditStyle.MultipartFormData;
 
-    /// <summary>编辑 body：形态由能力驱动（gpt-image-2 新 images 数组 / Grok 单对象 / 其余 image 数组）。</summary>
+    /// <summary>编辑 body：形态由能力驱动（gpt-image-2 新 images 数组 / Grok 单对象 / agnes extra_body.image / 其余 image 数组）。</summary>
     protected override JsonNode? BuildEditImages(IReadOnlyList<ReferenceImage> references)
     {
         if (references.Count == 0)
@@ -134,8 +134,20 @@ public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
         {
             ImageEditStyle.SingleObject => BuildEditImagesObject(references),
             ImageEditStyle.ImagesArray => BuildEditImagesImagesArray(references),
+            ImageEditStyle.ExtraBodyImageArray => BuildEditImagesDataUriArray(references),
             _ => BuildEditImagesArray(references),
         };
+    }
+
+    /// <summary>agnes 家族：image 参数 = data URI/URL 字符串数组（官方文档核实，非对象数组）。</summary>
+    private static JsonNode BuildEditImagesDataUriArray(IReadOnlyList<ReferenceImage> references)
+    {
+        var arr = new JsonArray();
+        foreach (var r in references)
+        {
+            arr.Add(ToDataUri(r));
+        }
+        return arr;
     }
 
     /// <summary>编辑 body 整体构建：ImagesArray 形态的键名是 images（其余 image）；multipart 形态不含图（走文件字段）。</summary>
@@ -144,9 +156,21 @@ public sealed class OpenAiImageGenAdapter : HttpImageAdapterBase
         var body = BuildGenerateBody(spec, reduced: false);
         if (EffectiveEditStyle() == ImageEditStyle.MultipartFormData)
             return body; // 图片由 BuildMultipartEditContent 以文件字段发送
+        if (EffectiveEditStyle() == ImageEditStyle.ExtraBodyImageArray)
+        {
+            // agnes：image 数组放在 extra_body.image（非顶层），且仍走 /images/generations。
+            body["extra_body"] = new JsonObject { ["image"] = BuildEditImages(references) };
+            return body;
+        }
         body[EffectiveEditStyle() == ImageEditStyle.ImagesArray ? "images" : "image"] = BuildEditImages(references);
         return body;
     }
+
+    /// <summary>agnes 图生图复用 /images/generations 端点（非 /images/edits）。</summary>
+    protected override string EndpointPath(bool references)
+        => EffectiveEditStyle() == ImageEditStyle.ExtraBodyImageArray
+            ? "images/generations"
+            : base.EndpointPath(references);
 
     /// <summary>gpt-image-2 官方新形态：images: [{image_url}]（无 type，2026 文档核实）。</summary>
     private static JsonNode BuildEditImagesImagesArray(IReadOnlyList<ReferenceImage> references)

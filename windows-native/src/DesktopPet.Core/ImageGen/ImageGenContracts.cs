@@ -31,6 +31,7 @@ public enum ImageEditStyle
     ImagesArray,        // images: [{image_url}]（gpt-image-2 官方新形态，无 type）
     SingleObject,       // image: {url, type:"image_url"}（Grok）
     MultipartFormData,  // multipart/form-data（image=文件字段；newapi 类中转按 OpenAI SDK 行为实现，gpt-image-2 编辑必须）
+    ExtraBodyImageArray, // agnes 家族：图生图仍走 /images/generations，image=[data URI/URL 字符串数组] 放 extra_body.image（agnes 官方文档核实）
 }
 
 /// <summary>质量档位（OpenAI 族有；Google 族忽略）。</summary>
@@ -314,6 +315,7 @@ public static class ImageEditStyleParser
          : string.Equals(value, "imagesArray", StringComparison.OrdinalIgnoreCase) ? ImageEditStyle.ImagesArray
          : string.Equals(value, "singleObject", StringComparison.OrdinalIgnoreCase) ? ImageEditStyle.SingleObject
          : string.Equals(value, "multipartFormData", StringComparison.OrdinalIgnoreCase) ? ImageEditStyle.MultipartFormData
+         : string.Equals(value, "extraBodyImageArray", StringComparison.OrdinalIgnoreCase) ? ImageEditStyle.ExtraBodyImageArray
          : null;
 }
 
